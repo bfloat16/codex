@@ -275,6 +275,10 @@ impl HistoryCell for UserHistoryCell {
         self.display_hyperlink_lines(width)
     }
 
+    fn rich_block_style(&self) -> Option<Style> {
+        Some(user_message_style())
+    }
+
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let message = sanitize_user_text((&self.message).into());
         let mut lines = raw_lines_from_source(message.as_ref().trim_end_matches(['\r', '\n']));
