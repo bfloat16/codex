@@ -47,11 +47,17 @@ impl Tui {
             TuiEvent::Draw | TuiEvent::FocusGained => {
                 self.screen_size.deferred_size.take().unwrap_or(cached)
             }
-            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::FocusLost => cached,
+            TuiEvent::Key(_)
+            | TuiEvent::Paste(_)
+            | TuiEvent::MouseScroll(_)
+            | TuiEvent::FocusLost => cached,
         };
         self.screen_size.pending_draw_size = (!matches!(
             event,
-            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::FocusLost
+            TuiEvent::Key(_)
+                | TuiEvent::Paste(_)
+                | TuiEvent::MouseScroll(_)
+                | TuiEvent::FocusLost
         ))
         .then_some(size);
         Ok(size)
