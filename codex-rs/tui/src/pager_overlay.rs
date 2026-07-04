@@ -1350,7 +1350,7 @@ mod tests {
         })]);
         overlay.sync_live_tail(
             /*width*/ 40,
-            Some(ActiveCellTranscriptKey {
+            Some(ActiveCellRenderKey {
                 revision: 1,
                 is_stream_continuation: false,
                 animation_tick: None,
@@ -1633,7 +1633,7 @@ mod tests {
                         })
                         .to_vec(),
                 );
-                let key = tail.as_ref().map(|_| ActiveCellTranscriptKey {
+                let key = tail.as_ref().map(|_| ActiveCellRenderKey {
                     revision: 1,
                     is_stream_continuation: false,
                     animation_tick: None,

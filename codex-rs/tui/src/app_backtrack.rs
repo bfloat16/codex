@@ -169,6 +169,7 @@ impl App {
             return;
         };
         self.transcript_cells.truncate(cut_idx);
+        self.sync_owned_screen_cells();
         self.chat_widget.clear_pending_token_activity_refreshes();
         self.chat_widget.clear_pending_rate_limit_reset_hint();
         if let Some(Overlay::Transcript(overlay)) = &mut self.overlay {

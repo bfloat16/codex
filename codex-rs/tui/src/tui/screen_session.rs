@@ -6,6 +6,8 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
@@ -17,6 +19,40 @@ use super::EnableAlternateScroll;
 use super::Terminal;
 
 const INITIAL_OWNER_COUNT: usize = 1;
+static PHYSICAL_ALT_SCREEN: PhysicalAltScreenTracker = PhysicalAltScreenTracker::new();
+
+struct PhysicalAltScreenTracker {
+    active: AtomicBool,
+}
+
+impl PhysicalAltScreenTracker {
+    const fn new() -> Self {
+        Self {
+            active: AtomicBool::new(false),
+        }
+    }
+
+    fn mark_entered(&self) {
+        self.active.store(true, Ordering::Release);
+    }
+
+    fn mark_left(&self) {
+        self.active.store(false, Ordering::Release);
+    }
+
+    fn restore(&self, writer: &mut impl Write) -> io::Result<()> {
+        if !self.active.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        let disable_result = execute!(writer, DisableAlternateScroll);
+        let leave_result = execute!(writer, LeaveAlternateScreen);
+        if leave_result.is_ok() {
+            self.mark_left();
+        }
+        merge_results(disable_result, leave_result)
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct ScreenSession {
@@ -88,6 +124,7 @@ impl ScreenSession {
         }
     }
 
+    #[cfg(unix)]
     pub(super) fn update_saved_viewport_y(&self, y: u16) {
         if let ScreenOwnership::Alternate { saved_viewport, .. } = &mut self.lock().ownership {
             saved_viewport.y = y;
@@ -119,6 +156,17 @@ impl ScreenSession {
         result
     }
 
+    pub(super) fn finish(&self, terminal: &mut Terminal) -> io::Result<()> {
+        let saved_viewport = self.saved_viewport();
+        let result = self.finish_commands(terminal);
+        if !self.is_active()
+            && let Some(saved_viewport) = saved_viewport
+        {
+            terminal.set_viewport_area(saved_viewport);
+        }
+        result
+    }
+
     pub(super) fn suspend(&self, terminal: &mut Terminal) -> io::Result<()> {
         let was_suspended = self.is_suspended();
         let result = self.suspend_commands(terminal);
@@ -131,6 +179,7 @@ impl ScreenSession {
         result
     }
 
+    #[cfg(unix)]
     pub(super) fn suspend_to_writer(&self, writer: &mut impl Write) -> io::Result<()> {
         self.suspend_commands(&mut WriterCommands(writer))
     }
@@ -211,6 +260,24 @@ impl ScreenSession {
         merge_results(disable_result, leave_result)
     }
 
+    fn finish_commands(&self, commands: &mut impl ScreenCommands) -> io::Result<()> {
+        let mut inner = self.lock();
+        let ScreenOwnership::Alternate { physical, .. } = inner.ownership else {
+            return Ok(());
+        };
+        if physical == PhysicalAltScreen::Suspended {
+            inner.ownership = ScreenOwnership::Inline;
+            return Ok(());
+        }
+
+        let disable_result = commands.disable_alternate_scroll();
+        let leave_result = commands.leave_alternate_screen();
+        if leave_result.is_ok() {
+            inner.ownership = ScreenOwnership::Inline;
+        }
+        merge_results(disable_result, leave_result)
+    }
+
     fn suspend_commands(&self, commands: &mut impl ScreenCommands) -> io::Result<()> {
         let mut inner = self.lock();
         let ScreenOwnership::Alternate { physical, .. } = &mut inner.ownership else {
@@ -264,13 +331,25 @@ trait ScreenCommands {
     fn disable_alternate_scroll(&mut self) -> io::Result<()>;
 }
 
+pub(super) fn restore_physical_alt_screen(writer: &mut impl Write) -> io::Result<()> {
+    PHYSICAL_ALT_SCREEN.restore(writer)
+}
+
 impl ScreenCommands for Terminal {
     fn enter_alternate_screen(&mut self) -> io::Result<()> {
-        execute!(self.backend_mut(), EnterAlternateScreen)
+        let result = execute!(self.backend_mut(), EnterAlternateScreen);
+        if result.is_ok() {
+            PHYSICAL_ALT_SCREEN.mark_entered();
+        }
+        result
     }
 
     fn leave_alternate_screen(&mut self) -> io::Result<()> {
-        execute!(self.backend_mut(), LeaveAlternateScreen)
+        let result = execute!(self.backend_mut(), LeaveAlternateScreen);
+        if result.is_ok() {
+            PHYSICAL_ALT_SCREEN.mark_left();
+        }
+        result
     }
 
     fn enable_alternate_scroll(&mut self) -> io::Result<()> {
@@ -282,15 +361,25 @@ impl ScreenCommands for Terminal {
     }
 }
 
+#[cfg(unix)]
 struct WriterCommands<'a, W>(&'a mut W);
 
+#[cfg(unix)]
 impl<W: Write> ScreenCommands for WriterCommands<'_, W> {
     fn enter_alternate_screen(&mut self) -> io::Result<()> {
-        execute!(self.0, EnterAlternateScreen)
+        let result = execute!(self.0, EnterAlternateScreen);
+        if result.is_ok() {
+            PHYSICAL_ALT_SCREEN.mark_entered();
+        }
+        result
     }
 
     fn leave_alternate_screen(&mut self) -> io::Result<()> {
-        execute!(self.0, LeaveAlternateScreen)
+        let result = execute!(self.0, LeaveAlternateScreen);
+        if result.is_ok() {
+            PHYSICAL_ALT_SCREEN.mark_left();
+        }
+        result
     }
 
     fn enable_alternate_scroll(&mut self) -> io::Result<()> {

@@ -3,7 +3,7 @@ use super::super::TranscriptOverlay;
 use super::CellRenderable;
 use super::HyperlinkLinesRenderable;
 use super::render_offset_content;
-use crate::chatwidget::ActiveCellTranscriptKey;
+use crate::chatwidget::ActiveCellRenderKey;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::UserHistoryCell;
@@ -217,7 +217,7 @@ fn transcript_overlay_scrolled_cells_and_live_tail_match_full_height_fallback() 
         for overlay in [&mut actual, &mut expected] {
             overlay.sync_live_tail(
                 width,
-                Some(ActiveCellTranscriptKey {
+                Some(ActiveCellRenderKey {
                     revision: 1,
                     is_stream_continuation: false,
                     animation_tick: None,

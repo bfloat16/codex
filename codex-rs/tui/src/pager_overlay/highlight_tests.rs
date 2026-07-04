@@ -91,7 +91,7 @@ fn moving_highlight_matches_full_rebuild_with_live_tail() {
     for overlay in [&mut actual, &mut expected] {
         overlay.sync_live_tail(
             /*width*/ 40,
-            Some(ActiveCellTranscriptKey {
+            Some(ActiveCellRenderKey {
                 revision: 1,
                 is_stream_continuation: false,
                 animation_tick: None,

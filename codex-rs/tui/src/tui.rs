@@ -364,6 +364,9 @@ pub(super) fn reapply_raw_mode_after_resume() -> Result<()> {
 pub fn restore_after_exit() -> Result<()> {
     let mut first_error =
         restore_common(RawModeRestore::Disable, KeyboardRestore::ResetAfterExit).err();
+    if let Err(err) = screen_session::restore_physical_alt_screen(&mut stdout()) {
+        first_error.get_or_insert(err);
+    }
     if let Err(err) = terminal_stderr::finish() {
         first_error.get_or_insert(err);
     }
@@ -836,6 +839,11 @@ impl Tui {
         result
     }
 
+    /// Leave alternate screen regardless of any nested overlay owners.
+    pub fn finish_alt_screen(&mut self) -> Result<()> {
+        self.screen_session.finish(&mut self.terminal)
+    }
+
     pub fn insert_history_lines(&mut self, lines: Vec<Line<'static>>) {
         self.insert_history_lines_with_wrap_policy(lines, HistoryLineWrapPolicy::PreWrap);
     }
@@ -872,6 +880,11 @@ impl Tui {
 
     pub fn clear_pending_history_lines(&mut self) {
         self.pending_history_lines.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_pending_history_lines(&self) -> bool {
+        !self.pending_history_lines.is_empty()
     }
 
     /// Resize the inline viewport for the resize-reflow path.
