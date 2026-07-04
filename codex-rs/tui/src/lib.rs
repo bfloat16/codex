@@ -124,6 +124,9 @@ mod clipboard_paste;
 mod collaboration_modes;
 mod color;
 mod config_update;
+// Staged renderer primitive; the owned-screen app path is wired in a follow-up change.
+#[cfg_attr(not(test), allow(dead_code))]
+mod conversation_viewport;
 pub(crate) mod custom_terminal;
 mod daybreak;
 mod experimental_features;

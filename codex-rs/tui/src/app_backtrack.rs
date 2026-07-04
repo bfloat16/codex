@@ -400,7 +400,7 @@ impl App {
             TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained
         ) && let Some(Overlay::Transcript(t)) = &mut self.overlay
         {
-            let active_key = self.chat_widget.active_cell_transcript_key();
+            let active_key = self.chat_widget.active_cell_render_key();
             let chat_widget = &self.chat_widget;
             tui.draw(u16::MAX, |frame| {
                 let width = frame.area().width.max(1);
