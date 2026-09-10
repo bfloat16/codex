@@ -848,36 +848,6 @@ impl App {
                     tracing::error!(error = ?err, "failed to start turn through app server");
                 }
             }
-            AppEvent::ConfirmSafetyBufferedRetry {
-                thread_id,
-                turn_id,
-                model,
-                turn,
-                prompt,
-            } => {
-                self.chat_widget
-                    .confirm_safety_buffered_retry(thread_id, turn_id, model, turn, prompt);
-            }
-            AppEvent::RetrySafetyBufferedTurn {
-                thread_id,
-                turn_id,
-                model,
-                turn,
-                prompt,
-            } => {
-                self.retry_safety_buffered_turn(
-                    tui,
-                    app_server,
-                    super::safety_buffering::SafetyBufferedRetry {
-                        thread_id,
-                        turn_id,
-                        model,
-                        turn,
-                        prompt,
-                    },
-                )
-                .await;
-            }
             AppEvent::AppendMessageHistoryEntry { thread_id, text } => {
                 self.append_message_history_entry(thread_id, text);
             }
