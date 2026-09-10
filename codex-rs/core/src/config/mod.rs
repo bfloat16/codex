@@ -3727,13 +3727,27 @@ impl Config {
             .clone()
             .filter(|value| !value.is_empty());
 
+        let model_provider_id = model_provider
+            .or_else(|| config_layer_stack.effective_user_config()
+            .and_then(|config| {
+                config
+                    .get("model_provider")
+                    .and_then(TomlValue::as_str)
+                    .map(str::to_string)
+            }))
+            .or_else(|| {
+                config_layer_stack
+                    .all_layers_low_to_high()
+                    .next()
+                    .is_none()
+                    .then(|| cfg.model_provider.clone())
+                    .flatten()
+            })
+            .unwrap_or_else(|| "openai".to_string());
         let model_providers =
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
-        let model_provider_id = model_provider
-            .or(cfg.model_provider)
-            .unwrap_or_else(|| "openai".to_string());
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {

@@ -263,7 +263,7 @@ impl ToolOrchestrator {
                     .is_enabled()
                 })
         } else {
-            turn_ctx.network.is_some()
+            turn_ctx.managed_network_active()
         };
         let sandbox_preference = tool.sandbox_preference();
         let sandbox_requested = match sandbox_override {
@@ -363,9 +363,8 @@ impl ToolOrchestrator {
                     );
                     return Err(ToolError::Codex(err));
                 }
-                // Under `Never` or `OnRequest`, do not retry without sandbox;
-                // surface a concise sandbox denial that preserves the
-                // original output.
+                // When the policy disallows sandbox approval, surface a concise
+                // sandbox denial that preserves the original output.
                 if !tool.wants_no_sandbox_approval(approval_policy) {
                     let allow_on_request_network_prompt =
                         matches!(approval_policy, AskForApproval::OnRequest)
@@ -373,7 +372,7 @@ impl ToolOrchestrator {
                             && matches!(
                                 default_exec_approval_requirement(
                                     approval_policy,
-                                    &file_system_sandbox_policy
+                                    &file_system_sandbox_policy,
                                 ),
                                 ExecApprovalRequirement::NeedsApproval { .. }
                             );

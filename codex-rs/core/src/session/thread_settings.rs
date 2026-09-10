@@ -22,7 +22,22 @@ pub(super) async fn update(
     submission_id: String,
     overrides: ThreadSettingsOverrides,
 ) {
-    let updates = prepare_update(overrides);
+    let updates = match prepare_update_for_session(session, overrides).await {
+        Ok(updates) => updates,
+        Err(error) => {
+            session
+                .send_event_raw(Event {
+                    id: submission_id,
+                    msg: EventMsg::Error(ErrorEvent {
+                        misalignment: None,
+                        message: format!("invalid thread settings override: {error}"),
+                        codex_error_info: Some(CodexErrorInfo::BadRequest),
+                    }),
+                })
+                .await;
+            return;
+        }
+    };
     if let Err(error) = apply_update(session, submission_id.clone(), updates).await {
         session
             .send_event_raw(Event {
@@ -37,6 +52,23 @@ pub(super) async fn update(
     }
 }
 
+pub(super) async fn prepare_update_for_session(
+    session: &Session,
+    overrides: ThreadSettingsOverrides,
+) -> ConstraintResult<SessionSettingsUpdate> {
+    let model_provider_id = overrides.model_provider.clone();
+    let mut updates = prepare_update(overrides);
+    updates.model_provider = match model_provider_id {
+        Some(model_provider_id) => Some(
+            session
+                .resolve_model_provider_update(model_provider_id)
+                .await?,
+        ),
+        None => None,
+    };
+    Ok(updates)
+}
+
 /// Converts protocol overrides into the internal settings update shape.
 pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSettingsUpdate {
     let ThreadSettingsOverrides {
@@ -49,6 +81,7 @@ pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSetti
         active_permission_profile,
         windows_sandbox_level,
         model,
+        model_provider: _,
         effort,
         summary,
         service_tier,

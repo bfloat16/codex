@@ -125,8 +125,8 @@ pub(super) async fn spawn_review_thread(
         #[allow(deprecated)]
         parent_turn_context.cwd.clone(),
         &parent_turn_context.permission_profile(),
-        parent_turn_context.windows_sandbox_level,
-        parent_turn_context.network.is_some(),
+        parent_turn_context.windows_sandbox_level(),
+        parent_turn_context.managed_network_active(),
         auto_review_enabled,
         &model_info,
     ));
@@ -162,8 +162,7 @@ pub(super) async fn spawn_review_thread(
         app_server_client_name: parent_turn_context.app_server_client_name.clone(),
         developer_instructions: None,
         multi_agent_version: MultiAgentVersion::Disabled,
-        network: parent_turn_context.network.clone(),
-        windows_sandbox_level: parent_turn_context.windows_sandbox_level,
+        runtime_permissions: Arc::clone(&parent_turn_context.runtime_permissions),
         #[allow(deprecated)]
         cwd: parent_turn_context.cwd.clone(),
         final_output_json_schema: None,

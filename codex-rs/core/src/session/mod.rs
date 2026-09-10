@@ -236,6 +236,7 @@ mod retained_context;
 mod review;
 mod rollout_budget;
 mod rollout_reconstruction;
+mod runtime_permissions;
 #[allow(clippy::module_inception)]
 pub(crate) mod session;
 mod step_activation;
@@ -1738,6 +1739,11 @@ impl Session {
             let root_service_tier_changed = updated.parent_thread_id.is_none()
                 && state.session_configuration.step_settings.service_tier
                     != updated.step_settings.service_tier;
+            if let Some(model_provider) = updates.model_provider.as_ref() {
+                self.services
+                    .model_client
+                    .update_provider(model_provider.provider.clone());
+            }
             if mcp_inputs_changed {
                 self.mark_mcp_runtime_dirty();
             }
@@ -1787,6 +1793,7 @@ impl Session {
         if mcp_inputs_changed {
             self.schedule_mcp_prewarm();
         }
+        self.refresh_active_turn_runtime_permissions().await;
         Ok(Some(commit))
     }
 
@@ -1879,6 +1886,49 @@ impl Session {
     pub(crate) async fn provider(&self) -> ModelProviderInfo {
         let state = self.state.lock().await;
         state.session_configuration.provider.info().clone()
+    }
+
+    pub(crate) async fn resolve_model_provider_update(
+        &self,
+        model_provider_id: String,
+    ) -> ConstraintResult<session::SessionModelProviderUpdate> {
+        let (provider_info, allowed_provider_ids) = {
+            let state = self.state.lock().await;
+            let config = &state.session_configuration.original_config_do_not_use;
+            let mut allowed_provider_ids = config
+                .config_layer_stack
+                .effective_user_config()
+                .and_then(|config| {
+                    config
+                        .get("model_providers")
+                        .and_then(toml::Value::as_table)
+                        .map(|providers| providers.keys().cloned().collect::<Vec<_>>())
+                })
+                .unwrap_or_default();
+            allowed_provider_ids.sort();
+            (
+                allowed_provider_ids
+                    .contains(&model_provider_id)
+                    .then(|| config.model_providers.get(&model_provider_id).cloned())
+                    .flatten(),
+                allowed_provider_ids,
+            )
+        };
+        let Some(provider_info) = provider_info else {
+            return Err(codex_config::ConstraintError::InvalidValue {
+                field_name: "model_provider",
+                candidate: model_provider_id,
+                allowed: allowed_provider_ids.join(", "),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        };
+        Ok(session::SessionModelProviderUpdate {
+            id: model_provider_id,
+            provider: create_model_provider(
+                provider_info,
+                Some(Arc::clone(&self.services.auth_manager)),
+            ),
+        })
     }
 
     pub(crate) async fn refresh_runtime_config(&self, next_config: Config) {
@@ -3555,7 +3605,7 @@ impl Session {
         );
         let session_telemetry = settings.telemetry(&turn_context.session_telemetry);
         // Keep selections fixed for the turn while allowing their startup work to finish.
-        let environments = turn_context.environments.refresh_readiness();
+        let environments = turn_context.refresh_environment_snapshot(&turn_context.environments);
         self.services
             .agents_md_manager
             .refresh(&turn_context.config, &environments)

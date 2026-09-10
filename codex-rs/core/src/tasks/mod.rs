@@ -290,6 +290,8 @@ impl Session {
         turn_context
             .turn_metadata_state
             .set_root_turn_id(turn_context.sub_id.clone());
+        self.refresh_turn_runtime_permissions(turn_context.as_ref())
+            .await;
         let task: Arc<dyn AnySessionTask> = Arc::new(task);
         let task_kind = task.kind();
         let span_name = task.span_name();

@@ -236,7 +236,7 @@ async fn compact_uses_bearer_after_agent_identity_session_fallback() -> anyhow::
 }
 
 fn test_model_provider() -> SharedModelProvider {
-    test_model_client(SessionSource::Cli).state.provider.clone()
+    test_model_client(SessionSource::Cli).provider()
 }
 
 fn test_responses_metadata_for_client(
@@ -1252,7 +1252,8 @@ fn guardian_reviewer_uses_dedicated_endpoint_only_with_codex_backend_auth() {
         Some(AuthManager::from_auth_for_testing(
             CodexAuth::create_dummy_chatgpt_auth_for_testing(),
         )),
-    );
+    )
+    .into();
     assert_eq!(
         model_client.responses_endpoint(
             Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),

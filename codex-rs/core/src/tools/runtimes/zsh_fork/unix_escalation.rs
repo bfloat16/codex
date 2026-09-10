@@ -426,7 +426,7 @@ impl CoreShellActionProvider {
                 InterceptedExecPolicyContext {
                     approval_policy: self.approval_policy,
                     permission_profile: self.permission_profile.clone(),
-                    windows_sandbox_level: self.review_context.turn().windows_sandbox_level,
+                    windows_sandbox_level: self.review_context.turn().windows_sandbox_level(),
                     sandbox_permissions: self.approval_sandbox_permissions,
                     enable_shell_wrapper_parsing:
                         ENABLE_INTERCEPTED_EXEC_POLICY_SHELL_WRAPPER_PARSING,

@@ -1,3 +1,4 @@
+use super::runtime_permissions::RuntimePermissions;
 use super::step_settings::ResolvedStepSettings;
 use super::token_budget::has_explicit_settings;
 use super::token_budget::resolve_token_budget;
@@ -227,10 +228,7 @@ pub struct TurnContext {
     pub(crate) app_server_client_name: Option<String>,
     pub(crate) developer_instructions: Option<String>,
     pub(crate) multi_agent_version: MultiAgentVersion,
-    pub(crate) network: Option<NetworkProxy>,
-    // TODO(anp): Reconcile this parallel turn snapshot with TurnEnvironment::sandbox_context
-    // so owner-provided environment settings govern the remaining sandbox decisions.
-    pub(crate) windows_sandbox_level: WindowsSandboxLevel,
+    pub(crate) runtime_permissions: Arc<ArcSwap<RuntimePermissions>>,
     pub(crate) available_models: Vec<ModelPreset>,
     pub(crate) unified_exec_shell_mode: UnifiedExecShellMode,
     pub(crate) final_output_json_schema: Option<Value>,
@@ -336,7 +334,11 @@ impl TurnContext {
     /// Legacy: returns the frozen initial-turn approval policy.
     /// Step-scoped consumers should use their captured `StepContext::settings`.
     pub(crate) fn approval_policy(&self) -> AskForApproval {
-        self.config.permissions.approval_policy.value()
+        self.runtime_permissions.load().approval_policy
+    }
+
+    pub(crate) fn approvals_reviewer(&self) -> ApprovalsReviewer {
+        self.runtime_permissions.load().approvals_reviewer
     }
 
     /// Legacy: returns the frozen initial-turn prefix-rule policy.
@@ -381,8 +383,7 @@ impl TurnContext {
 
     /// Returns the selected environment's permissions, or the thread's permissions when none is ready.
     pub(crate) fn permission_profile(&self) -> PermissionProfile {
-        self.environments
-            .permission_profile_or_else(|| self.config.permissions.effective_permission_profile())
+        self.runtime_permissions.load().permission_profile.clone()
     }
 
     pub(crate) fn file_system_sandbox_policy(&self) -> FileSystemSandboxPolicy {
@@ -399,6 +400,41 @@ impl TurnContext {
             &self.permission_profile(),
             &self.cwd,
         )
+    }
+
+    pub(crate) fn network(&self) -> Option<NetworkProxy> {
+        self.runtime_permissions.load().network.clone()
+    }
+
+    pub(crate) fn managed_network_active(&self) -> bool {
+        self.runtime_permissions.load().network.is_some()
+    }
+
+    pub(crate) fn windows_sandbox_level(&self) -> WindowsSandboxLevel {
+        self.runtime_permissions.load().windows_sandbox_level
+    }
+
+    pub(crate) fn refresh_environment_snapshot(
+        &self,
+        environments: &TurnEnvironmentSnapshot,
+    ) -> TurnEnvironmentSnapshot {
+        let runtime_permissions = self.runtime_permissions.load();
+        environments
+            .with_environment_config(&runtime_permissions.environment_config)
+            .refresh_readiness()
+    }
+
+    fn update_runtime_permissions(
+        &self,
+        session_configuration: &SessionConfiguration,
+        network: Option<NetworkProxy>,
+    ) {
+        self.runtime_permissions
+            .store(Arc::new(runtime_permissions_from_configuration(
+                session_configuration,
+                &self.environments,
+                network,
+            )));
     }
 
     /// Combines the selected environment's workspace roots with its permission profile roots.
@@ -533,8 +569,7 @@ impl TurnContext {
             app_server_client_name: self.app_server_client_name.clone(),
             developer_instructions: self.developer_instructions.clone(),
             multi_agent_version: self.multi_agent_version,
-            network: self.network.clone(),
-            windows_sandbox_level: self.windows_sandbox_level,
+            runtime_permissions: Arc::clone(&self.runtime_permissions),
             available_models,
             unified_exec_shell_mode: self.unified_exec_shell_mode.clone(),
             final_output_json_schema: self.final_output_json_schema.clone(),
@@ -584,7 +619,7 @@ impl TurnContext {
             current_date: self.current_date.clone(),
             timezone: self.timezone.clone(),
             approval_policy: self.approval_policy(),
-            approvals_reviewer: Some(self.config.approvals_reviewer),
+            approvals_reviewer: Some(self.approvals_reviewer()),
             sandbox_policy: self.sandbox_policy(),
             permission_profile: Some(self.permission_profile()),
             active_permission_profile: self.environments.primary().map_or_else(
@@ -635,6 +670,25 @@ fn local_time_context() -> (String, String) {
             Utc::now().format("%Y-%m-%d").to_string(),
             "Etc/UTC".to_string(),
         ),
+    }
+}
+
+fn runtime_permissions_from_configuration(
+    session_configuration: &SessionConfiguration,
+    environments: &TurnEnvironmentSnapshot,
+    network: Option<NetworkProxy>,
+) -> RuntimePermissions {
+    let environment_config = session_configuration.inferred_environment_config();
+    let permission_profile = environments
+        .with_environment_config(&environment_config)
+        .permission_profile_or_else(|| session_configuration.permission_profile());
+    RuntimePermissions {
+        approval_policy: session_configuration.step_settings.approval_policy.value(),
+        approvals_reviewer: session_configuration.step_settings.approvals_reviewer,
+        permission_profile,
+        environment_config,
+        network,
+        windows_sandbox_level: session_configuration.windows_sandbox_level,
     }
 }
 
@@ -755,6 +809,11 @@ impl Session {
         let permission_profile = environments.permission_profile_or_else(|| {
             per_turn_config.permissions.effective_permission_profile()
         });
+        let runtime_permissions = runtime_permissions_from_configuration(
+            session_configuration,
+            &environments,
+            network.clone(),
+        );
         let auto_review_enabled = crate::guardian::routes_approval_policy_to_guardian(
             per_turn_config.permissions.approval_policy.value(),
             per_turn_config.approvals_reviewer,
@@ -805,8 +864,7 @@ impl Session {
             app_server_client_name: session_configuration.app_server_client_name.clone(),
             developer_instructions: session_configuration.developer_instructions.clone(),
             multi_agent_version,
-            network,
-            windows_sandbox_level: session_configuration.windows_sandbox_level,
+            runtime_permissions: Arc::new(ArcSwap::from_pointee(runtime_permissions)),
             available_models,
             unified_exec_shell_mode,
             final_output_json_schema: None,
@@ -1051,6 +1109,39 @@ impl Session {
                 .spawn_git_enrichment_task(Arc::clone(&self.services.git_root_discovery));
         }
         turn_context
+    }
+
+    pub(crate) async fn refresh_turn_runtime_permissions(&self, turn_context: &TurnContext) {
+        let session_configuration = {
+            let state = self.state.lock().await;
+            state.session_configuration.clone()
+        };
+        let network = self
+            .services
+            .network_proxy
+            .load_full()
+            .as_ref()
+            .and_then(|started_proxy| {
+                Self::managed_network_proxy_active_for_permission_profile(
+                    &session_configuration.permission_profile(),
+                )
+                .then(|| started_proxy.proxy())
+            });
+        turn_context.update_runtime_permissions(&session_configuration, network);
+    }
+
+    pub(crate) async fn refresh_active_turn_runtime_permissions(&self) {
+        let turn_context = {
+            let active_turn = self.active_turn.lock().await;
+            active_turn
+                .as_ref()
+                .and_then(|active_turn| active_turn.task.as_ref())
+                .map(|task| Arc::clone(&task.turn_context))
+        };
+        if let Some(turn_context) = turn_context {
+            self.refresh_turn_runtime_permissions(turn_context.as_ref())
+                .await;
+        }
     }
 
     pub(crate) async fn maybe_emit_model_warnings_for_turn(&self, tc: &TurnContext) {

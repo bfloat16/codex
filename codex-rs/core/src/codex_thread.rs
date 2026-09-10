@@ -146,6 +146,7 @@ pub struct CodexThreadSettingsOverrides {
     pub active_permission_profile: Option<ActivePermissionProfile>,
     pub windows_sandbox_level: Option<WindowsSandboxLevel>,
     pub model: Option<String>,
+    pub model_provider: Option<String>,
     pub effort: Option<Option<ReasoningEffort>>,
     pub summary: Option<ReasoningSummary>,
     pub service_tier: Option<Option<String>>,
@@ -512,7 +513,7 @@ impl CodexThread {
         &self,
         overrides: CodexThreadSettingsOverrides,
     ) -> ConstraintResult<ThreadConfigSnapshot> {
-        let updates = Self::thread_settings_update(overrides);
+        let updates = self.thread_settings_update(overrides).await?;
         self.session.preview_settings(&updates).await
     }
 
@@ -524,11 +525,14 @@ impl CodexThread {
         &self,
         settings: CodexThreadSettingsOverrides,
     ) -> ConstraintResult<()> {
-        let updates = Self::thread_settings_update(settings);
+        let updates = self.thread_settings_update(settings).await?;
         self.session.update_settings(updates).await.map(|_| ())
     }
 
-    fn thread_settings_update(overrides: CodexThreadSettingsOverrides) -> SessionSettingsUpdate {
+    async fn thread_settings_update(
+        &self,
+        overrides: CodexThreadSettingsOverrides,
+    ) -> ConstraintResult<SessionSettingsUpdate> {
         let CodexThreadSettingsOverrides {
             environments,
             profile_workspace_roots,
@@ -539,13 +543,22 @@ impl CodexThread {
             active_permission_profile,
             windows_sandbox_level,
             model,
+            model_provider,
             effort,
             summary,
             service_tier,
             collaboration_mode,
             personality,
         } = overrides;
-        SessionSettingsUpdate {
+        let model_provider = match model_provider {
+            Some(model_provider_id) => Some(
+                self.session
+                    .resolve_model_provider_update(model_provider_id)
+                    .await?,
+            ),
+            None => None,
+        };
+        Ok(SessionSettingsUpdate {
             step_settings: StepSettingsUpdate {
                 model,
                 effort,
@@ -562,8 +575,9 @@ impl CodexThread {
             permission_profile,
             active_permission_profile,
             windows_sandbox_level,
+            model_provider,
             ..Default::default()
-        }
+        })
     }
 
     pub async fn next_event(&self) -> CodexResult<Event> {

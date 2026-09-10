@@ -1320,7 +1320,7 @@ async fn refresh_clears_disabled_managed_network_proxy() -> anyhow::Result<()> {
         .await;
 
     assert!(session.services.network_proxy.load_full().is_none());
-    assert!(session.new_default_turn().await.network.is_none());
+    assert!(session.new_default_turn().await.network().is_none());
     Ok(())
 }
 
@@ -1345,7 +1345,7 @@ async fn danger_full_access_turns_do_not_expose_managed_network_proxy() -> anyho
     .await?;
 
     let turn_context = session.new_default_turn().await;
-    assert!(turn_context.network.is_none());
+    assert!(turn_context.network().is_none());
     Ok(())
 }
 
@@ -1440,7 +1440,7 @@ async fn danger_full_access_tool_attempts_do_not_enforce_managed_network() -> an
     .await?;
 
     let turn = session.new_default_turn().await;
-    assert!(turn.network.is_none());
+    assert!(turn.network().is_none());
 
     let mut orchestrator = crate::tools::orchestrator::ToolOrchestrator::new();
     let mut tool = ProbeToolRuntime::default();
@@ -1490,7 +1490,7 @@ async fn workspace_write_turns_continue_to_expose_managed_network_proxy() -> any
     .await?;
 
     let turn_context = session.new_default_turn().await;
-    assert!(turn_context.network.is_some());
+    assert!(turn_context.network().is_some());
     Ok(())
 }
 
@@ -1516,7 +1516,7 @@ async fn disabled_managed_network_does_not_start_or_expose_proxy() -> anyhow::Re
     .await?;
 
     assert!(session.services.network_proxy.load_full().is_none());
-    assert!(session.new_default_turn().await.network.is_none());
+    assert!(session.new_default_turn().await.network().is_none());
 
     loop {
         let event = rx.recv().await.expect("channel open");
@@ -1551,7 +1551,7 @@ async fn user_shell_commands_do_not_inherit_managed_network_proxy() -> anyhow::R
     .await?;
 
     let turn_context = session.new_default_turn().await;
-    assert!(turn_context.network.is_some());
+    assert!(turn_context.network().is_some());
 
     #[cfg(windows)]
     let command = r#"$val = $env:HTTP_PROXY; if ([string]::IsNullOrEmpty($val)) { $val = 'not-set' } ; [System.Console]::Write($val)"#.to_string();
@@ -9576,7 +9576,6 @@ async fn capability_discovery_uses_environment_permission_profile() {
         .features
         .disable(Feature::UseLegacyLandlock)
         .expect("disable legacy Landlock");
-    turn_context.windows_sandbox_level = WindowsSandboxLevel::RestrictedToken;
     let mut environment = turn_context
         .environments
         .primary()

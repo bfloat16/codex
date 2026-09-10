@@ -213,7 +213,7 @@ impl ExecCommandHandler {
                 turn_environment.permission_profile(),
                 SandboxablePreference::Auto,
                 turn_environment.config().windows_sandbox_level,
-                turn.network.is_some(),
+                turn.managed_network_active(),
             ) != SandboxType::None;
         // `to_abs_path()` alone cannot identify foreign drive paths: `file:///C:/repo` is
         // representable as `/C:/repo` on POSIX. Require the inferred convention to match too.
@@ -429,7 +429,7 @@ impl ExecCommandHandler {
             sandbox_cwd: native_environment_cwd,
             turn_environment: turn_environment.clone(),
             shell_mode,
-            network: context.step_context.turn.network.clone(),
+            network: context.step_context.turn.network(),
             tty,
             sandbox_permissions: effective_additional_permissions.sandbox_permissions,
             additional_permissions: normalized_additional_permissions,

@@ -50,7 +50,7 @@ impl Session {
                 step_context.settings.approval_policy(),
                 AskForApproval::UnlessTrusted
             )
-            || step_context.turn.network.is_some()
+            || step_context.turn.managed_network_active()
             || config
                 .permissions
                 .network

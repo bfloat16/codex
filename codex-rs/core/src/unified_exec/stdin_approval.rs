@@ -62,7 +62,7 @@ impl TerminalPolicy {
             sandbox,
             environment_network: environment.config().network_policy.clone(),
             controller_network: turn.config.permissions.network.clone(),
-            controller_proxy: turn.network.is_some(),
+            controller_proxy: turn.network().is_some(),
         }
     }
 

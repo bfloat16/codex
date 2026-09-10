@@ -787,6 +787,41 @@ pub(crate) struct TurnEnvironmentSnapshot {
 }
 
 impl TurnEnvironmentSnapshot {
+    pub(crate) fn with_environment_config(&self, config: &EnvironmentConfig) -> Self {
+        let environments = self
+            .environments
+            .iter()
+            .cloned()
+            .map(|mut environment| {
+                match &mut environment {
+                    TurnEnvironmentState::Ready(environment)
+                        if environment.config_origin == EnvironmentConfigOrigin::Thread =>
+                    {
+                        environment.selection.config =
+                            EnvironmentConfigState::Ready(thread_config_for_selection(
+                                &environment.selection.workspace_roots,
+                                config,
+                            ));
+                    }
+                    TurnEnvironmentState::Starting(environment)
+                        if environment.config_origin == EnvironmentConfigOrigin::Thread =>
+                    {
+                        environment.selection.config =
+                            EnvironmentConfigState::Ready(thread_config_for_selection(
+                                &environment.selection.workspace_roots,
+                                config,
+                            ));
+                    }
+                    TurnEnvironmentState::Ready(_)
+                    | TurnEnvironmentState::Starting(_)
+                    | TurnEnvironmentState::Failed => {}
+                }
+                environment
+            })
+            .collect();
+        Self { environments }
+    }
+
     pub(crate) fn has_full_access(
         &self,
         approval_policy: AskForApproval,

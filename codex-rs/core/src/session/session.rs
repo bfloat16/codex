@@ -138,6 +138,12 @@ pub(crate) struct SessionConfiguration {
     pub(super) user_shell_override: Option<shell::Shell>,
 }
 
+#[derive(Clone)]
+pub(crate) struct SessionModelProviderUpdate {
+    pub(crate) id: String,
+    pub(crate) provider: SharedModelProvider,
+}
+
 impl SessionConfiguration {
     pub(super) fn cwd(&self) -> &AbsolutePathBuf {
         &self.legacy_fallback_cwd
@@ -487,6 +493,13 @@ impl SessionConfiguration {
         if let Some(app_server_client_version) = updates.app_server_client_version.clone() {
             next_configuration.app_server_client_version = Some(app_server_client_version);
         }
+        if let Some(model_provider) = &updates.model_provider {
+            let mut config = (*next_configuration.original_config_do_not_use).clone();
+            config.model_provider_id = model_provider.id.clone();
+            config.model_provider = model_provider.provider.info().clone();
+            next_configuration.original_config_do_not_use = Arc::new(config);
+            next_configuration.provider = model_provider.provider.clone();
+        }
         let next_environments = updates
             .environments
             .as_ref()
@@ -555,6 +568,7 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) permission_profile: Option<PermissionProfile>,
     pub(crate) active_permission_profile: Option<ActivePermissionProfile>,
     pub(crate) windows_sandbox_level: Option<WindowsSandboxLevel>,
+    pub(crate) model_provider: Option<SessionModelProviderUpdate>,
     pub(crate) service_tier_for_turn: Option<String>,
     pub(crate) app_server_client_name: Option<String>,
     pub(crate) app_server_client_version: Option<String>,

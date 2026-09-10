@@ -362,6 +362,20 @@ impl ToolRouter {
             ..
         } = call;
 
+        let step_context = Arc::new(StepContext {
+            turn: Arc::clone(&step_context.turn),
+            settings: Arc::clone(&step_context.settings),
+            token_budget: step_context.token_budget.clone(),
+            session_telemetry: step_context.session_telemetry.clone(),
+            environments: step_context
+                .turn
+                .refresh_environment_snapshot(&step_context.environments),
+            selected_capability_roots: step_context.selected_capability_roots.clone(),
+            executor_capability_discovery: step_context.executor_capability_discovery.clone(),
+            mcp: Arc::clone(&step_context.mcp),
+            tool_router: Arc::clone(&step_context.tool_router),
+            loaded_agents_md: step_context.loaded_agents_md.clone(),
+        });
         // Keep the legacy ToolInvocation.turn field tied to the same request state until handlers migrate.
         let turn = Arc::clone(&step_context.turn);
         let invocation = ToolInvocation {

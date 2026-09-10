@@ -94,7 +94,9 @@ impl PreparedTurnInputSettings {
         let thread_settings_update = if thread_settings == ThreadSettingsOverrides::default() {
             None
         } else {
-            let updates = thread_settings::prepare_update(thread_settings);
+            let updates = thread_settings::prepare_update_for_session(session, thread_settings)
+                .await
+                .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
             session
                 .preview_settings(&updates)
                 .await
