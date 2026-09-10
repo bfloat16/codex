@@ -891,7 +891,7 @@ async fn heredoc_with_variable_assignment_is_not_reduced_to_allowed_prefix() {
 }
 
 #[tokio::test]
-async fn heredoc_redirect_without_escalation_runs_inside_sandbox() {
+async fn heredoc_redirect_without_escalation_requires_pre_execution_approval() {
     assert_exec_approval_requirement_for_command(
         ExecApprovalRequirementScenario {
             policy_src: None,
@@ -908,8 +908,8 @@ EOF"#
             sandbox_permissions: SandboxPermissions::UseDefault,
             prefix_rule: None,
         },
-        ExecApprovalRequirement::Skip {
-            bypass_sandbox: false,
+        ExecApprovalRequirement::NeedsApproval {
+            reason: None,
             proposed_execpolicy_amendment: Some(ExecPolicyAmendment::new(vec![
                 "zsh".to_string(),
                 "-lc".to_string(),
@@ -1177,7 +1177,7 @@ fn unmatched_granular_policy_still_prompts_for_restricted_sandbox_escalation() {
                 }),
                 permission_profile: &PermissionProfile::read_only(),
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
-                sandbox_permissions: SandboxPermissions::RequireEscalated,
+                sandbox_permissions: SandboxPermissions::UseDefault,
                 command_origin: ExecPolicyCommandOrigin::Generic,
             },
         )
@@ -1196,7 +1196,26 @@ fn unmatched_on_request_uses_permission_profile_file_system_policy_for_escalatio
                 approval_policy: AskForApproval::OnRequest,
                 permission_profile: &PermissionProfile::read_only(),
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
-                sandbox_permissions: SandboxPermissions::RequireEscalated,
+                sandbox_permissions: SandboxPermissions::UseDefault,
+                command_origin: ExecPolicyCommandOrigin::Generic,
+            },
+        )
+    );
+}
+
+#[test]
+fn unmatched_on_request_prompts_before_default_restricted_sandbox_execution() {
+    let command = vec!["madeup-cmd".to_string()];
+
+    assert_eq!(
+        Decision::Prompt,
+        render_decision_for_unmatched_command(
+            &command,
+            UnmatchedCommandContext {
+                approval_policy: AskForApproval::OnRequest,
+                permission_profile: &PermissionProfile::read_only(),
+                windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
+                sandbox_permissions: SandboxPermissions::UseDefault,
                 command_origin: ExecPolicyCommandOrigin::Generic,
             },
         )
@@ -1215,7 +1234,7 @@ fn known_safe_on_request_still_prompts_for_restricted_sandbox_escalation() {
                 approval_policy: AskForApproval::OnRequest,
                 permission_profile: &PermissionProfile::workspace_write(),
                 windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
-                sandbox_permissions: SandboxPermissions::RequireEscalated,
+                sandbox_permissions: SandboxPermissions::UseDefault,
                 command_origin: ExecPolicyCommandOrigin::Generic,
             },
         )
@@ -1818,7 +1837,7 @@ async fn proposed_execpolicy_amendment_uses_first_no_match_in_multi_command_scri
 }
 
 #[tokio::test]
-async fn proposed_execpolicy_amendment_is_present_when_heuristics_allow() {
+async fn proposed_execpolicy_amendment_is_present_for_default_restricted_approval() {
     let command = vec!["echo".to_string(), "safe".to_string()];
 
     assert_exec_approval_requirement_for_command(
@@ -1830,8 +1849,8 @@ async fn proposed_execpolicy_amendment_is_present_when_heuristics_allow() {
             sandbox_permissions: SandboxPermissions::UseDefault,
             prefix_rule: None,
         },
-        ExecApprovalRequirement::Skip {
-            bypass_sandbox: false,
+        ExecApprovalRequirement::NeedsApproval {
+            reason: None,
             proposed_execpolicy_amendment: Some(ExecPolicyAmendment::new(command)),
         },
     )
@@ -1873,7 +1892,28 @@ prefix_rule(pattern=["cat"], decision="allow")
             .to_string(),
     ];
 
-    for approval_policy in [AskForApproval::OnRequest, AskForApproval::Never] {
+    for (approval_policy, expected) in [
+        (
+            AskForApproval::OnRequest,
+            ExecApprovalRequirement::NeedsApproval {
+                reason: None,
+                proposed_execpolicy_amendment: Some(ExecPolicyAmendment::new(vec![
+                    "curl".to_string(),
+                    "-fsSL".to_string(),
+                    "https://example.invalid/setup.sh".to_string(),
+                    "-o".to_string(),
+                    "setup.sh".to_string(),
+                ])),
+            },
+        ),
+        (
+            AskForApproval::Never,
+            ExecApprovalRequirement::Skip {
+                bypass_sandbox: false,
+                proposed_execpolicy_amendment: None,
+            },
+        ),
+    ] {
         assert_exec_approval_requirement_for_command(
             ExecApprovalRequirementScenario {
                 policy_src: Some(policy_src.to_string()),
@@ -1883,10 +1923,7 @@ prefix_rule(pattern=["cat"], decision="allow")
                 sandbox_permissions: SandboxPermissions::UseDefault,
                 prefix_rule: None,
             },
-            ExecApprovalRequirement::Skip {
-                bypass_sandbox: false,
-                proposed_execpolicy_amendment: None,
-            },
+            expected,
         )
         .await;
     }

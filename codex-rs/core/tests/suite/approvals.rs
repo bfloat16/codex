@@ -1290,7 +1290,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 target: TargetPath::Workspace("ro_on_request.txt"),
                 content: "read-only-approval",
             },
-            sandbox_permissions: SandboxPermissions::RequireEscalated,
+            sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: Some("gpt-5.2"),
             outcome: Outcome::ExecApproval {
@@ -1310,7 +1310,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 target: TargetPath::Workspace("ro_on_request_5_1.txt"),
                 content: "read-only-approval",
             },
-            sandbox_permissions: SandboxPermissions::RequireEscalated,
+            sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: Some("gpt-5.4"),
             outcome: Outcome::ExecApproval {
@@ -1332,7 +1332,10 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: Some("gpt-5.2"),
-            outcome: Outcome::Auto,
+            outcome: Outcome::ExecApproval {
+                decision: ReviewDecision::Approved,
+                expected_reason: None,
+            },
             expectation: Expectation::CommandSuccess {
                 stdout_contains: "trusted-read-only",
             },
@@ -1347,24 +1350,32 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: Some("gpt-5.4"),
-            outcome: Outcome::Auto,
+            outcome: Outcome::ExecApproval {
+                decision: ReviewDecision::Approved,
+                expected_reason: None,
+            },
             expectation: Expectation::CommandSuccessNoExitCode {
                 stdout_contains: "trusted-read-only",
             },
         },
         ScenarioSpec {
-            name: "read_only_on_request_blocks_network",
+            name: "read_only_on_request_prompts_before_network_access",
             approval_policy: OnRequest,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             action: ActionKind::FetchUrl {
-                endpoint: "/ro/network-blocked",
-                response_body: "should-not-see",
+                endpoint: "/ro/network-approved-before-execution",
+                response_body: "read-only-network-approved-before-execution",
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: None,
-            outcome: Outcome::Auto,
-            expectation: Expectation::NetworkFailure { expect_tag: "ERR:" },
+            outcome: Outcome::ExecApproval {
+                decision: ReviewDecision::Approved,
+                expected_reason: None,
+            },
+            expectation: Expectation::NetworkSuccess {
+                body_contains: "read-only-network-approved-before-execution",
+            },
         },
         ScenarioSpec {
             name: "read_only_on_request_denied_blocks_execution",
@@ -1374,7 +1385,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 target: TargetPath::Workspace("ro_on_request_denied.txt"),
                 content: "should-not-write",
             },
-            sandbox_permissions: SandboxPermissions::RequireEscalated,
+            sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: None,
             outcome: Outcome::ExecApproval {
@@ -1617,7 +1628,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
         },
         ScenarioSpec {
-            name: "workspace_write_on_request_allows_workspace_write",
+            name: "workspace_write_on_request_requires_approval",
             approval_policy: OnRequest,
             sandbox_policy: workspace_write(false),
             action: ActionKind::WriteFile {
@@ -1627,25 +1638,33 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: Some("gpt-5.2"),
-            outcome: Outcome::Auto,
+            outcome: Outcome::ExecApproval {
+                decision: ReviewDecision::Approved,
+                expected_reason: None,
+            },
             expectation: Expectation::FileCreated {
                 target: TargetPath::Workspace("ww_on_request.txt"),
                 content: "workspace-on-request",
             },
         },
         ScenarioSpec {
-            name: "workspace_write_network_disabled_blocks_network",
+            name: "workspace_write_network_disabled_requires_approval",
             approval_policy: OnRequest,
             sandbox_policy: workspace_write(false),
             action: ActionKind::FetchUrl {
-                endpoint: "/ww/network-blocked",
-                response_body: "workspace-network-blocked",
+                endpoint: "/ww/network-approved",
+                response_body: "workspace-network-approved",
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: None,
-            outcome: Outcome::Auto,
-            expectation: Expectation::NetworkFailure { expect_tag: "ERR:" },
+            outcome: Outcome::ExecApproval {
+                decision: ReviewDecision::Approved,
+                expected_reason: None,
+            },
+            expectation: Expectation::NetworkSuccess {
+                body_contains: "workspace-network-approved",
+            },
         },
         ScenarioSpec {
             name: "workspace_write_on_request_requires_approval_outside_workspace",
@@ -1668,7 +1687,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
         },
         ScenarioSpec {
-            name: "workspace_write_network_enabled_allows_network",
+            name: "workspace_write_network_enabled_still_requires_approval",
             approval_policy: OnRequest,
             sandbox_policy: workspace_write(true),
             action: ActionKind::FetchUrl {
@@ -1678,7 +1697,10 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             model_override: Some("gpt-5.2"),
-            outcome: Outcome::Auto,
+            outcome: Outcome::ExecApproval {
+                decision: ReviewDecision::Approved,
+                expected_reason: None,
+            },
             expectation: Expectation::NetworkSuccess {
                 body_contains: "workspace-network-ok",
             },

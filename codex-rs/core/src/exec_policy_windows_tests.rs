@@ -110,6 +110,30 @@ fn read_only_windows_sandbox_runs_unmatched_commands_under_sandbox() {
 }
 
 #[test]
+fn read_only_windows_sandbox_prompts_before_unmatched_on_request_command() {
+    let command = vec!["cmd.exe".to_string(), "/c".to_string(), "dir".to_string()];
+
+    for windows_sandbox_level in [
+        WindowsSandboxLevel::RestrictedToken,
+        WindowsSandboxLevel::Elevated,
+    ] {
+        assert_eq!(
+            Decision::Prompt,
+            render_decision_for_unmatched_command(
+                &command,
+                UnmatchedCommandContext {
+                    approval_policy: AskForApproval::OnRequest,
+                    permission_profile: &PermissionProfile::read_only(),
+                    windows_sandbox_level,
+                    sandbox_permissions: SandboxPermissions::UseDefault,
+                    command_origin: ExecPolicyCommandOrigin::Generic,
+                },
+            )
+        );
+    }
+}
+
+#[test]
 fn read_only_windows_policy_without_sandbox_backend_still_requires_approval() {
     let command = vec!["cmd.exe".to_string(), "/c".to_string(), "dir".to_string()];
 

@@ -778,7 +778,7 @@ fn render_decision_for_unmatched_command_for_platform(
         approval_policy,
         permission_profile,
         windows_sandbox_level,
-        sandbox_permissions,
+        sandbox_permissions: _sandbox_permissions,
         command_origin: _,
     } = context;
     let file_system_sandbox_policy = permission_profile.file_system_sandbox_policy();
@@ -826,14 +826,10 @@ fn render_decision_for_unmatched_command_for_platform(
                     Decision::Allow
                 }
                 FileSystemSandboxKind::Restricted => {
-                    // In restricted sandboxes, do not prompt for non-escalated,
-                    // non-dangerous commands; let the sandbox enforce
-                    // restrictions without a user prompt.
-                    if sandbox_permissions.requests_sandbox_override() {
-                        Decision::Prompt
-                    } else {
-                        Decision::Allow
-                    }
+                    // Route unmatched commands through approval before execution.
+                    // This keeps permission escalation in the execution layer
+                    // instead of requiring the model to request it explicitly.
+                    Decision::Prompt
                 }
             }
         }
@@ -843,13 +839,7 @@ fn render_decision_for_unmatched_command_for_platform(
                 // by `prompt_is_rejected_by_policy`.
                 Decision::Allow
             }
-            FileSystemSandboxKind::Restricted => {
-                if sandbox_permissions.requests_sandbox_override() {
-                    Decision::Prompt
-                } else {
-                    Decision::Allow
-                }
-            }
+            FileSystemSandboxKind::Restricted => Decision::Prompt,
         },
     }
 }

@@ -259,6 +259,19 @@ pub(crate) fn sandbox_override_for_first_attempt(
         return SandboxOverride::BypassSandboxFirstAttempt;
     }
 
+    // A default-permission command that required approval was routed here by
+    // the execution policy. Run the approved command with the requested access
+    // on its first attempt instead of waiting for a sandbox denial and retrying.
+    if matches!(
+        (sandbox_permissions, exec_approval_requirement),
+        (
+            SandboxPermissions::UseDefault,
+            ExecApprovalRequirement::NeedsApproval { .. }
+        )
+    ) {
+        return SandboxOverride::BypassSandboxFirstAttempt;
+    }
+
     if sandbox_permissions.requires_escalated_permissions() {
         SandboxOverride::BypassSandboxFirstAttempt
     } else {
@@ -331,7 +344,7 @@ pub(crate) trait Approvable<Req> {
         match policy {
             AskForApproval::UnlessTrusted => true,
             AskForApproval::Never => false,
-            AskForApproval::OnRequest => false,
+            AskForApproval::OnRequest => true,
             AskForApproval::Granular(granular_config) => granular_config.sandbox_approval,
         }
     }

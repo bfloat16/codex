@@ -17,6 +17,41 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::HashMap;
 
+struct DefaultApprovable;
+
+impl Approvable<()> for DefaultApprovable {
+    fn approval_action(&self, _req: &(), _call_id: &str) -> std::io::Result<ApprovalAction> {
+        unreachable!("approval action is not needed for this policy test")
+    }
+}
+
+#[test]
+fn default_sandbox_retry_approval_follows_approval_policy() {
+    let runtime = DefaultApprovable;
+
+    assert!(runtime.wants_no_sandbox_approval(AskForApproval::OnRequest));
+    assert!(runtime.wants_no_sandbox_approval(AskForApproval::UnlessTrusted));
+    assert!(!runtime.wants_no_sandbox_approval(AskForApproval::Never));
+    assert!(
+        runtime.wants_no_sandbox_approval(AskForApproval::Granular(GranularApprovalConfig {
+            sandbox_approval: true,
+            rules: false,
+            skill_approval: false,
+            request_permissions: false,
+            mcp_elicitations: false,
+        }))
+    );
+    assert!(
+        !runtime.wants_no_sandbox_approval(AskForApproval::Granular(GranularApprovalConfig {
+            sandbox_approval: false,
+            rules: true,
+            skill_approval: true,
+            request_permissions: true,
+            mcp_elicitations: true,
+        }))
+    );
+}
+
 #[test]
 fn bash_permission_request_payload_omits_missing_description() {
     assert_eq!(
@@ -138,6 +173,21 @@ fn guardian_bypasses_sandbox_for_explicit_escalation_on_first_attempt() {
             SandboxPermissions::RequireEscalated,
             &ExecApprovalRequirement::Skip {
                 bypass_sandbox: false,
+                proposed_execpolicy_amendment: None,
+            },
+            &FileSystemSandboxPolicy::default(),
+        ),
+        SandboxOverride::BypassSandboxFirstAttempt
+    );
+}
+
+#[test]
+fn approved_default_permission_request_bypasses_first_sandbox_attempt() {
+    assert_eq!(
+        sandbox_override_for_first_attempt(
+            SandboxPermissions::UseDefault,
+            &ExecApprovalRequirement::NeedsApproval {
+                reason: None,
                 proposed_execpolicy_amendment: None,
             },
             &FileSystemSandboxPolicy::default(),
