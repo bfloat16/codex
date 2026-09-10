@@ -1377,14 +1377,14 @@ enum FullHistoryV2ModelSelection {
     MultiAgentModeTransitions,
 }
 
-#[test_case(FullHistoryV2ModelSelection::ConfiguredDefault; "configured default with omitted fork_turns")]
+#[test_case(FullHistoryV2ModelSelection::ConfiguredDefault; "configured defaults with explicit full-history fork")]
 #[test_case(FullHistoryV2ModelSelection::ExplicitOverride; "explicit override with fork_turns all")]
 #[test_case(FullHistoryV2ModelSelection::WorldStateIdentity; "world state appends context window when agent identity changes")]
 #[test_case(FullHistoryV2ModelSelection::CurrentTimeReminders; "full fork drops inherited current-time reminders")]
 #[test_case(FullHistoryV2ModelSelection::MultiAgentModeInstructions; "full fork drops inherited multi-agent mode instructions")]
 #[test_case(FullHistoryV2ModelSelection::MultiAgentModeTransitions; "full fork restores explicit policy after proactive transition")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_context(
+async fn spawned_v2_child_respects_context_selection_and_model_precedence(
     selection: FullHistoryV2ModelSelection,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -1409,6 +1409,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             json!({
                 "message": CHILD_PROMPT,
                 "task_name": "worker",
+                "fork_turns": "all",
             }),
             V2_DEFAULT_MODEL,
             V2_DEFAULT_REASONING_EFFORT,
@@ -2012,7 +2013,7 @@ async fn spawned_agent_uses_summary_support_for_final_model(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawned_multi_agent_v2_child_inherits_parent_developer_context() -> Result<()> {
+async fn spawned_multi_agent_v2_child_defaults_to_new_history() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -2080,6 +2081,7 @@ async fn spawned_multi_agent_v2_child_inherits_parent_developer_context() -> Res
         .expect("child request log should capture at least one request");
     assert!(child_request.body_contains_text("Parent developer instructions."));
     assert!(child_request.body_contains_text(CHILD_PROMPT));
+    assert!(!child_request.body_contains_text(TURN_1_PROMPT));
 
     Ok(())
 }
