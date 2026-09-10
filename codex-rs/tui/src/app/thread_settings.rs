@@ -11,6 +11,7 @@ use codex_app_server_protocol::ApprovalsReviewer as AppServerApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval as AppServerAskForApproval;
 use codex_app_server_protocol::ThreadSettings;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
+use codex_config::ConfigLayerSource;
 use codex_config::types::ApprovalsReviewer;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ModeKind;
@@ -63,6 +64,29 @@ impl App {
         }
     }
 
+    pub(super) async fn sync_active_thread_provider_setting(
+        &mut self,
+        app_server: &mut AppServerSession,
+        model_provider: String,
+    ) {
+        let Some(params) = self.active_thread_provider_setting_update_params(model_provider) else {
+            return;
+        };
+        self.send_thread_settings_update(app_server, params).await;
+    }
+
+    pub(super) fn active_thread_provider_setting_update_params(
+        &self,
+        model_provider: String,
+    ) -> Option<ThreadSettingsUpdateParams> {
+        let thread_id = self.active_thread_id?;
+        Some(ThreadSettingsUpdateParams {
+            thread_id: thread_id.to_string(),
+            model_provider: Some(model_provider),
+            ..ThreadSettingsUpdateParams::default()
+        })
+    }
+
     pub(super) fn active_thread_model_setting_update_params(
         &self,
         model: String,
@@ -82,7 +106,34 @@ impl App {
             ..ThreadSettingsUpdateParams::default()
         };
 
-        if is_cyber_model {
+        let has_explicit_permission_selection = self.runtime_approval_policy_override.is_some()
+            || self.runtime_permission_profile_override.is_some()
+            || self.config.explicit_permission_profile_mode
+            || self.harness_overrides.approval_policy.is_some()
+            || self.harness_overrides.approvals_reviewer.is_some()
+            || self.harness_overrides.sandbox_mode.is_some()
+            || self.harness_overrides.permission_profile.is_some()
+            || self.harness_overrides.default_permissions.is_some()
+            || self
+                .config
+                .config_layer_stack
+                .layers_high_to_low()
+                .any(|layer| {
+                    matches!(
+                        layer.name,
+                        ConfigLayerSource::SessionFlags | ConfigLayerSource::User { .. }
+                    ) && [
+                        "approval_policy",
+                        "approvals_reviewer",
+                        "sandbox_mode",
+                        "permission_profile",
+                        "default_permissions",
+                    ]
+                    .iter()
+                    .any(|key| layer.config.get(*key).is_some())
+                });
+
+        if is_cyber_model && !has_explicit_permission_selection {
             let workspace_profile = PermissionProfile::workspace_write();
             let workspace_allowed = self
                 .config
@@ -287,6 +338,7 @@ fn thread_settings_update_has_changes(params: &ThreadSettingsUpdateParams) -> bo
         || params.sandbox_policy.is_some()
         || params.permissions.is_some()
         || params.model.is_some()
+        || params.model_provider.is_some()
         || params.service_tier.is_some()
         || params.effort.is_some()
         || params.summary.is_some()

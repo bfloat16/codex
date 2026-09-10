@@ -1652,6 +1652,10 @@ impl App {
                         .await;
                 }
             }
+            AppEvent::UpdateModelProvider(model_provider) => {
+                self.sync_active_thread_provider_setting(app_server, model_provider)
+                    .await;
+            }
             AppEvent::UpdatePersonality(personality) => {
                 self.on_update_personality(personality);
                 self.sync_active_thread_personality_setting(app_server, personality)
