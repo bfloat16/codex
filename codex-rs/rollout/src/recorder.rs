@@ -98,9 +98,8 @@ pub enum RolloutRecorderParams {
         /// Overrides the rollout ID encoded in the filename.
         ///
         /// Normally this is `None`, so the filename is
-        /// `rollout-<timestamp>-<conversation_id>.jsonl`. `thread/revert` sets it, producing
-        /// `rollout-<timestamp>-<conversation_id>_<rollout_id>.jsonl`, because revert keeps the
-        /// thread ID stable while creating a new immutable rollout file.
+        /// `rollout-<timestamp>-<conversation_id>.jsonl`. This is reserved for operations such as
+        /// explicit fork creation and compatibility with historical reverted rollouts.
         rollout_id_override: Option<RolloutId>,
         forked_from_id: Option<ThreadId>,
         forked_from_ordinal_exclusive: Option<u64>,
@@ -225,7 +224,8 @@ impl RolloutRecorderParams {
 
     /// Override the rollout ID while preserving the thread ID.
     ///
-    /// This is for creating a new immutable rollout file for an existing thread.
+    /// This is for creating a distinct rollout file for an existing thread, such as an explicit
+    /// fork.
     pub fn with_rollout_id(mut self, rollout_id: RolloutId) -> Self {
         if let Self::Create {
             rollout_id_override,

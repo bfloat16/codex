@@ -255,6 +255,13 @@ impl LocalThreadStore {
         self.state_db.clone()
     }
 
+    /// Close the lazily opened paginated thread-history database, if any.
+    pub async fn close(&self) {
+        if let Some(pool) = self.thread_history_db.get() {
+            codex_state::close_sqlite_pool(pool).await;
+        }
+    }
+
     async fn thread_history_db(&self) -> ThreadStoreResult<&sqlx::SqlitePool> {
         if self.state_db.is_none() {
             return Err(ThreadStoreError::Unsupported {

@@ -1601,10 +1601,9 @@ async fn find_rollout_path_by_rollout_id_from_filenames(
 
 /// Locate the newest rollout file owned by a thread ID.
 ///
-/// A thread normally has one rollout file. `thread/revert` keeps the thread ID stable while
-/// creating a new rollout file and switching the thread to it, so filesystem fallback matches the
-/// stable thread ID encoded before any `_rollout-id` suffix and chooses the newest matching
-/// filename.
+/// A thread normally has one rollout file. Files created by older `thread/revert` implementations
+/// can have a stable thread ID encoded before an `_rollout-id` suffix, so filesystem fallback
+/// chooses the newest matching filename.
 ///
 /// SQLite can return its selected path directly. Returns `Ok(Some(path))` if found, `Ok(None)`
 /// if not present or the ID is invalid.

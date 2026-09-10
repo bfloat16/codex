@@ -245,6 +245,15 @@ pub(super) async fn delete_thread(
     store: &LocalThreadStore,
     thread_id: ThreadId,
 ) -> ThreadStoreResult<()> {
+    reset_projection(store, thread_id).await
+}
+
+/// Remove the SQLite projection for one physical rollout so it can be rebuilt from a truncated
+/// JSONL prefix. Inherited ancestor rollouts use different IDs and remain untouched.
+pub(super) async fn reset_projection(
+    store: &LocalThreadStore,
+    rollout_id: ThreadId,
+) -> ThreadStoreResult<()> {
     let db_path = store.config.sqlite.thread_history_db_path();
     if !tokio::fs::try_exists(db_path.as_path())
         .await
@@ -258,24 +267,24 @@ pub(super) async fn delete_thread(
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(thread_history_delete_error)?;
-    let thread_id = thread_id.to_string();
+    let rollout_id = rollout_id.to_string();
     sqlx::query("DELETE FROM thread_items WHERE thread_id = ?")
-        .bind(thread_id.as_str())
+        .bind(rollout_id.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(thread_history_delete_error)?;
     sqlx::query("DELETE FROM thread_realtime_items WHERE thread_id = ?")
-        .bind(thread_id.as_str())
+        .bind(rollout_id.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(thread_history_delete_error)?;
     sqlx::query("DELETE FROM thread_turns WHERE thread_id = ?")
-        .bind(thread_id.as_str())
+        .bind(rollout_id.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(thread_history_delete_error)?;
     sqlx::query("DELETE FROM thread_history_projection_state WHERE thread_id = ?")
-        .bind(thread_id.as_str())
+        .bind(rollout_id.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(thread_history_delete_error)?;

@@ -25,7 +25,7 @@ use crate::ThreadPersistenceMetadata;
 use crate::ThreadStore;
 
 #[tokio::test]
-async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
+async fn revert_keeps_thread_id_and_rollout_path_across_repeated_reverts() {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
     let state_db = codex_state::StateRuntime::init(
@@ -77,23 +77,23 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         })
         .await
         .expect("revert before second turn");
-    let first_replacement_path = state_db
+    let first_reverted_path = state_db
         .get_thread(thread_id)
         .await
         .expect("read metadata")
         .expect("thread metadata")
         .rollout_path;
-    assert_ne!(first_replacement_path, original_path);
-    assert_ne!(
-        codex_rollout::rollout_id_from_path(first_replacement_path.as_path()),
+    assert_eq!(first_reverted_path, original_path);
+    assert_eq!(
+        codex_rollout::rollout_id_from_path(first_reverted_path.as_path()),
         Some(thread_id)
     );
-    let replacement_meta = codex_rollout::read_session_meta_line(first_replacement_path.as_path())
+    let reverted_meta = codex_rollout::read_session_meta_line(first_reverted_path.as_path())
         .await
-        .expect("read replacement metadata")
+        .expect("read reverted metadata")
         .meta;
-    assert_eq!(replacement_meta.id, thread_id);
-    assert_eq!(replacement_meta.memory_mode, None);
+    assert_eq!(reverted_meta.id, thread_id);
+    assert_eq!(reverted_meta.memory_mode, None);
     assert_eq!(turn_ids(&store, thread_id).await, vec!["turn-1"]);
 
     store
@@ -121,7 +121,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         .await
         .expect("unarchive reverted thread");
     let owned_rollout_paths = rollout_paths_for_thread(home.path(), thread_id).await;
-    assert_eq!(owned_rollout_paths.len(), 3);
+    assert_eq!(owned_rollout_paths, vec![original_path]);
     assert!(
         owned_rollout_paths
             .iter()

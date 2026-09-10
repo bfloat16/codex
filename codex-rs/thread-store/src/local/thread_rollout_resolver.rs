@@ -1,8 +1,9 @@
 //! Resolves a thread ID to the rollout file the thread currently uses.
 //!
-//! Most threads have one rollout file. `thread/revert` keeps the thread ID stable while switching
-//! the thread to a new rollout file, so callers cannot infer the selected path from the thread ID
-//! alone. This module centralizes live-writer, SQLite, and filesystem fallback resolution.
+//! Most threads have one rollout file. Historical `thread/revert` operations may have kept the
+//! thread ID stable while switching to a distinct rollout file, so callers cannot infer the
+//! selected path from the thread ID alone. This module centralizes live-writer, SQLite, and
+//! filesystem fallback resolution.
 
 use std::path::PathBuf;
 
@@ -19,8 +20,8 @@ use crate::ThreadStoreResult;
 
 /// One thread resolved to the concrete rollout file it currently uses.
 ///
-/// For ordinary threads, `thread_id` and `rollout_id` are the same. After `thread/revert`,
-/// `thread_id` stays stable while `rollout_id` identifies the new immutable rollout file.
+/// For ordinary threads, `thread_id` and `rollout_id` are the same. Historical reverted threads
+/// can have a stable `thread_id` with a distinct `rollout_id`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ResolvedThreadRollout {
     pub(super) thread_id: ThreadId,
@@ -88,10 +89,10 @@ async fn resolve(
     if let Some(state_db_ctx) = state_db_ctx.as_deref() {
         match state_db_ctx.get_thread(thread_id).await {
             Ok(Some(metadata)) => {
-                // Once SQLite identifies a thread as paginated, its rollout path is
-                // authoritative: after `thread/revert`, a scan could find an older immutable
-                // rollout for the same thread. Filesystem fallback remains available when SQLite
-                // has no row or identifies the thread as legacy.
+                // Once SQLite identifies a thread as paginated, its rollout path is authoritative
+                // because historical reverted threads can have multiple rollouts. Filesystem
+                // fallback remains available when SQLite has no row or identifies the thread as
+                // legacy.
                 if let Some(path) =
                     codex_rollout::existing_rollout_path(metadata.rollout_path.as_path()).await
                 {

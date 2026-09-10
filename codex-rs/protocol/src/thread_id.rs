@@ -20,8 +20,8 @@ pub struct ThreadId {
 /// Identifier encoded in a rollout filename.
 ///
 /// Rollout IDs use the same UUID representation as thread IDs. Ordinary rollout files use the
-/// thread ID as their rollout ID; \`thread/revert\` creates a new rollout file with a distinct
-/// rollout ID while preserving the thread ID.
+/// thread ID as their rollout ID. Historical rollout files created by older `thread/revert`
+/// implementations may have a distinct rollout ID while preserving the thread ID.
 pub type RolloutId = ThreadId;
 
 impl ThreadId {

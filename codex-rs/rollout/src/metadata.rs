@@ -104,11 +104,8 @@ pub fn builder_from_items(
 /// Returns the rollout ID encoded in a canonical rollout filename.
 ///
 /// Normal rollouts use `rollout-<timestamp>-<thread-id>.jsonl`, where the thread ID and rollout ID
-/// are the same. Threads that have been `reverted` use
+/// are the same. Historical rollouts created by older `thread/revert` implementations may use
 /// `rollout-<timestamp>-<thread-id>_<rollout-id>.jsonl`, where this returns the ID after `_`.
-///
-/// This can differ from [`SessionMeta::id`] when `thread/revert` keeps the thread ID stable while
-/// switching to a new immutable rollout file.
 pub fn rollout_id_from_path(rollout_path: &Path) -> Option<RolloutId> {
     let file_name = rollout_path.file_name()?.to_str()?;
     Some(RolloutFileName::parse(file_name)?.rollout_id())
