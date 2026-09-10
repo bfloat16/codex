@@ -146,6 +146,9 @@ impl ChatWidget {
         if self.active_mode_kind() != ModeKind::Plan {
             return;
         }
+        if !delta.is_empty() {
+            self.transcript.saw_effective_model_output_this_turn = true;
+        }
         if !self.transcript.plan_item_active {
             self.transcript.plan_item_active = true;
             self.transcript.plan_delta_buffer.clear();
@@ -477,6 +480,7 @@ impl ChatWidget {
     #[inline]
     pub(super) fn handle_streaming_delta(&mut self, delta: String) {
         if !delta.is_empty() {
+            self.transcript.saw_effective_model_output_this_turn = true;
             self.mark_safety_buffering_agent_message_started();
         }
         if self.stream_controller.is_none() {

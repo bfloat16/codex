@@ -237,6 +237,14 @@ impl ChatWidget {
     /// When there are queued user messages, restore them into the composer
     /// separated by newlines rather than auto-submitting the next one.
     pub(super) fn on_interrupted_turn(&mut self, reason: TurnAbortReason) {
+        let output_free_turn_id = (reason == TurnAbortReason::Interrupted
+            && !self.current_turn_has_model_output())
+        .then(|| self.output_free_interrupt_turn_id.take())
+        .flatten();
+        self.output_free_interrupt_turn_id = None;
+        let prompt_to_restore = output_free_turn_id
+            .as_ref()
+            .and_then(|_| self.safety_buffering_prompt.clone());
         // Finalize, log a gentle prompt, and clear running state.
         self.finalize_turn();
         let send_pending_steers_immediately =
@@ -274,6 +282,13 @@ impl ChatWidget {
             }
         } else if let Some(combined) = self.drain_pending_messages_for_restore() {
             self.restore_composer_state(combined);
+        }
+        if let (Some(thread_id), Some(turn_id), Some(prompt)) =
+            (self.thread_id, output_free_turn_id, prompt_to_restore)
+        {
+            self.restore_user_message_to_composer(prompt);
+            self.app_event_tx
+                .send(AppEvent::RollbackOutputFreeTurnForPromptRestore { thread_id, turn_id });
         }
         self.refresh_pending_input_preview();
         self.request_redraw();

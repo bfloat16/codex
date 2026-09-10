@@ -183,6 +183,14 @@ impl ChatWidget {
                 let had_modal_or_popup = !self.bottom_pane.no_modal_or_popup_active();
                 let should_pause_active_goal =
                     self.bottom_pane.should_interrupt_running_task(key_event);
+                if should_pause_active_goal
+                    && key_event.code == KeyCode::Esc
+                    && self.turn_lifecycle.agent_turn_running
+                    && !self.active_side_conversation
+                    && !self.current_turn_has_model_output()
+                {
+                    self.output_free_interrupt_turn_id = self.turn_lifecycle.last_turn_id.clone();
+                }
                 let input_result = self.bottom_pane.handle_key_event(key_event);
                 self.sync_backend_banner_view();
                 if should_pause_active_goal {

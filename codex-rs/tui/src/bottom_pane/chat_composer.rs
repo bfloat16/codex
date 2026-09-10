@@ -3550,6 +3550,7 @@ impl ChatComposer {
                     return (InputResult::None, true);
                 }
             }
+            return (InputResult::None, false);
         } else {
             self.footer.mode = reset_mode_after_activity(self.footer.mode);
         }
