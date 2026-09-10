@@ -1847,7 +1847,7 @@ async fn run_ratatui_app(
         should_show_trust_screen, // Proxy to: is it a first run in this directory?
         should_prompt_windows_sandbox_nux_at_startup,
         app_server_target,
-        state_db,
+        state_db.clone(),
         environment_manager,
         startup_elapsed_before_app,
         startup_bootstrap,
@@ -1856,6 +1856,9 @@ async fn run_ratatui_app(
         managed_worktree,
     )
     .await;
+    if let Some(state_db) = state_db {
+        state_db.close().await;
+    }
 
     terminal_restore_guard.restore_silently();
     // Mark the end of the recorded session.
