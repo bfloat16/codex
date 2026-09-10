@@ -8623,6 +8623,32 @@ async fn selecting_cyber_model_defaults_active_thread_to_auto_review() {
 }
 
 #[tokio::test]
+async fn selecting_cyber_model_preserves_explicit_permission_selection() {
+    let mut app = make_test_app().await;
+    app.active_thread_id = Some(ThreadId::new());
+    app.config.explicit_permission_profile_mode = true;
+
+    let model_name = app.chat_widget.current_model().to_string();
+    let mut model = app
+        .model_catalog
+        .try_list_models()
+        .expect("model catalog")
+        .into_iter()
+        .find(|model| model.model == model_name)
+        .expect("current model");
+    model.model_specialty = Some("cyber".to_string());
+    app.model_catalog = Arc::new(ModelCatalog::new(vec![model]));
+
+    let params = app
+        .active_thread_model_setting_update_params(model_name)
+        .expect("active thread should produce update params");
+
+    assert_eq!(params.permissions, None);
+    assert_eq!(params.approval_policy, None);
+    assert_eq!(params.approvals_reviewer, None);
+}
+
+#[tokio::test]
 async fn changing_cyber_model_reasoning_preserves_selected_permissions() {
     Box::pin(async {
         let mut app = make_test_app().await;
