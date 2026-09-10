@@ -41,7 +41,7 @@ def just_formatter_group(*, check: bool) -> FormatterGroup:
 
 
 def rust_formatter_group(*, check: bool) -> FormatterGroup:
-    args = ["cargo", "fmt", "--", "--config", "imports_granularity=Item"]
+    args = ["cargo", "fmt"]
     if check:
         args.append("--check")
     command = Command(tuple(args), REPO_ROOT / "codex-rs")
