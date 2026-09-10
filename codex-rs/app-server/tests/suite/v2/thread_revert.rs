@@ -255,14 +255,17 @@ async fn thread_revert_preserves_fork_cutoff_after_cold_resume() -> Result<()> {
         let meta = read_session_meta_line(reverted.path.as_ref().expect("reverted rollout"))
             .await?
             .meta;
+        assert_eq!(reverted.path, child.path);
         assert_eq!(meta.forked_from_ordinal_exclusive, Some(expected_cutoff));
         if expected_cutoff == fork_cutoff {
-            assert!(
+            assert_eq!(
                 meta.history_base
                     .expect("child revert base")
-                    .end_ordinal_exclusive
-                    > fork_cutoff
+                    .end_ordinal_exclusive,
+                fork_cutoff
             );
+        } else {
+            assert!(meta.history_base.is_none());
         }
 
         mcp.shutdown_gracefully().await?;
@@ -320,7 +323,7 @@ async fn thread_revert_preserves_fork_cutoff_after_cold_resume() -> Result<()> {
 }
 
 #[tokio::test]
-async fn thread_revert_replaces_paginated_history_before_turn() -> Result<()> {
+async fn thread_revert_truncates_paginated_history_before_turn() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
@@ -373,6 +376,7 @@ async fn thread_revert_replaces_paginated_history_before_turn() -> Result<()> {
     assert_eq!(reverted.thread_id, thread.id);
 
     assert_eq!(reverted_thread.id, thread.id);
+    assert_eq!(reverted_thread.path.as_ref(), Some(&stale_rollout_path));
     assert!(reverted_thread.turns.is_empty());
     assert!(items_backwards_cursor.is_some());
     assert_eq!(
@@ -413,35 +417,15 @@ async fn thread_revert_replaces_paginated_history_before_turn() -> Result<()> {
         .build()
         .await?;
     initialize_experimental(&mut mcp).await?;
-    let stale_resume_id = mcp
+    let same_path_resume_id = mcp
         .send_thread_resume_request(ThreadResumeParams {
             thread_id: thread.id.clone(),
-            path: Some(stale_rollout_path),
-            ..Default::default()
-        })
-        .await?;
-    let stale_resume_error: JSONRPCError = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(stale_resume_id)),
-    )
-    .await??;
-    assert!(
-        stale_resume_error.error.message.contains("stale path")
-            && stale_resume_error
-                .error
-                .message
-                .contains("omit path and resume by thread id"),
-        "unexpected resume error: {}",
-        stale_resume_error.error.message,
-    );
-    let resume_id = mcp
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread.id.clone(),
+            path: Some(stale_rollout_path.clone()),
             ..Default::default()
         })
         .await?;
     let _: ThreadResumeResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(same_path_resume_id)).await??;
     let invalid_revert_id = mcp
         .send_raw_request(
             "thread/revert",
