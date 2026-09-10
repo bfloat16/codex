@@ -319,6 +319,7 @@ impl App {
                     app_server,
                     &self.config,
                     &id_or_name,
+                    crate::cwd_prompt::CwdPromptAction::Resume,
                 )
                 .await
                 {

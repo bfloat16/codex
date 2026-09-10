@@ -197,6 +197,7 @@ enum PickerLoadRequest {
 #[derive(Clone)]
 enum ProviderFilter {
     Any,
+    All,
     MatchDefault(String),
 }
 
@@ -362,7 +363,7 @@ struct SessionPickerRunOptions {
 /// sessions appear during pagination.
 ///
 /// Filtering happens in two layers:
-/// 1. Provider, source, and eligible working-directory filtering at the backend.
+/// 1. Source and eligible working-directory filtering at the backend.
 /// 2. Typed search filtering over loaded rows in the picker.
 pub async fn run_resume_picker_with_app_server(
     uses_remote_filesystem: bool,
@@ -441,7 +442,7 @@ async fn run_resume_picker_with_launch_context(
         app_server.remote_cwd_override(),
     );
     let local_filter_cwd = local_picker_cwd_filter(&cwd_filter, uses_remote_filesystem);
-    let provider_filter = picker_provider_filter(config, uses_remote_workspace);
+    let provider_filter = ProviderFilter::All;
     let runtime_keymap = picker_runtime_keymap(local_settings)?;
     let options = SessionPickerRunOptions {
         show_all,
@@ -2056,6 +2057,7 @@ fn thread_list_params(
         sort_direction: None,
         model_providers: match provider_filter {
             ProviderFilter::Any => None,
+            ProviderFilter::All => Some(Vec::new()),
             ProviderFilter::MatchDefault(default_provider) => Some(vec![default_provider]),
         },
         source_kinds: Some(crate::resume_source_kinds(include_non_interactive)),
@@ -3834,6 +3836,7 @@ mod tests {
             Some(&primary),
             /*include_non_interactive*/ false,
             crate::LatestSessionLookupMode::StateDbOnly,
+            crate::cwd_prompt::CwdPromptAction::Fork,
         );
         assert!(matches!(local.cwd, Some(ThreadListCwdFilter::Many(_))));
         local.cwd = Some(single.clone());
@@ -3845,6 +3848,7 @@ mod tests {
                 Some(&primary),
                 /*include_non_interactive*/ false,
                 crate::LatestSessionLookupMode::StateDbOnly,
+                crate::cwd_prompt::CwdPromptAction::Fork,
             ),
             local
         );
@@ -4298,6 +4302,25 @@ mod tests {
         assert_eq!(params.model_providers, None);
         let source_kinds = crate::resume_source_kinds(/*include_non_interactive*/ true);
         assert_eq!(params.source_kinds, Some(source_kinds));
+    }
+
+    #[test]
+    fn resume_thread_list_params_include_all_providers() {
+        let params = thread_list_params(
+            /*cursor*/ None,
+            Some(ThreadListCwdFilter::One("/tmp/project".to_string())),
+            SessionStatus::Active,
+            ProviderFilter::All,
+            ThreadSortKey::UpdatedAt,
+            /*include_non_interactive*/ false,
+            /*use_state_db_only*/ true,
+        );
+
+        assert_eq!(params.model_providers, Some(Vec::new()));
+        assert_eq!(
+            params.cwd,
+            Some(ThreadListCwdFilter::One(String::from("/tmp/project")))
+        );
     }
 
     #[test]

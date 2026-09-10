@@ -690,6 +690,7 @@ async fn lookup_session_target_with_app_server(
     app_server: &mut AppServerSession,
     config: &Config,
     id_or_name: &str,
+    action: CwdPromptAction,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
     if Uuid::parse_str(id_or_name).is_ok() {
         let thread_id = match ThreadId::from_string(id_or_name) {
@@ -719,8 +720,11 @@ async fn lookup_session_target_with_app_server(
         };
     }
 
-    let model_provider =
-        (!app_server.uses_remote_workspace()).then_some(config.model_provider_id.as_str());
+    let model_provider = match action {
+        CwdPromptAction::Resume => None,
+        CwdPromptAction::Fork if app_server.uses_remote_workspace() => None,
+        CwdPromptAction::Fork => Some(config.model_provider_id.as_str()),
+    };
     Ok(named_session_lookup::lookup(
         app_server,
         config.codex_home.as_path(),
@@ -739,6 +743,7 @@ async fn lookup_latest_session_target_with_app_server(
     config: &Config,
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
+    action: CwdPromptAction,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
     let uses_remote_workspace = app_server.uses_remote_workspace();
     for lookup_mode in [
@@ -753,6 +758,7 @@ async fn lookup_latest_session_target_with_app_server(
                 cwd_filter,
                 include_non_interactive,
                 lookup_mode,
+                action,
             ))
             .await?;
         let target = response
@@ -781,6 +787,7 @@ fn latest_session_lookup_params(
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
     lookup_mode: LatestSessionLookupMode,
+    action: CwdPromptAction,
 ) -> ThreadListParams {
     ThreadListParams {
         originators: None,
@@ -788,10 +795,10 @@ fn latest_session_lookup_params(
         limit: Some(1),
         sort_key: Some(AppServerThreadSortKey::UpdatedAt),
         sort_direction: None,
-        model_providers: if uses_remote_workspace {
-            None
-        } else {
-            Some(vec![config.model_provider_id.clone()])
+        model_providers: match action {
+            CwdPromptAction::Resume => Some(Vec::new()),
+            CwdPromptAction::Fork if uses_remote_workspace => None,
+            CwdPromptAction::Fork => Some(vec![config.model_provider_id.clone()]),
         },
         source_kinds: Some(resume_source_kinds(include_non_interactive)),
         archived: Some(false),
@@ -1363,7 +1370,12 @@ async fn run_ratatui_app(
             let lookup = startup_draft
                 .run_until(
                     &mut tui,
-                    lookup_session_target_with_app_server(startup_app_server, &config, id_str),
+                    lookup_session_target_with_app_server(
+                        startup_app_server,
+                        &config,
+                        id_str,
+                        CwdPromptAction::Fork,
+                    ),
                 )
                 .await;
             let target_session = match lookup {
@@ -1407,6 +1419,7 @@ async fn run_ratatui_app(
                         &config,
                         filter_cwd,
                         /*include_non_interactive*/ false,
+                        CwdPromptAction::Fork,
                     ),
                 )
                 .await;
@@ -1463,7 +1476,12 @@ async fn run_ratatui_app(
         let lookup = startup_draft
             .run_until(
                 &mut tui,
-                lookup_session_target_with_app_server(startup_app_server, &config, id_str),
+                lookup_session_target_with_app_server(
+                    startup_app_server,
+                    &config,
+                    id_str,
+                    CwdPromptAction::Resume,
+                ),
             )
             .await;
         let target_session = match lookup {
@@ -1504,6 +1522,7 @@ async fn run_ratatui_app(
                     &config,
                     filter_cwd,
                     cli.resume_include_non_interactive,
+                    CwdPromptAction::Resume,
                 ),
             )
             .await;
@@ -2997,12 +3016,10 @@ requires_openai_auth = {requires_openai_auth}
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
+            CwdPromptAction::Resume,
         );
 
-        assert_eq!(
-            params.model_providers,
-            Some(vec![config.model_provider_id.clone()])
-        );
+        assert_eq!(params.model_providers, Some(Vec::new()));
         assert_eq!(
             params.cwd,
             Some(ThreadListCwdFilter::One(cwd.to_string_lossy().to_string()))
@@ -3016,6 +3033,7 @@ requires_openai_auth = {requires_openai_auth}
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::ScanAndRepair,
+            CwdPromptAction::Resume,
         );
         assert!(!scan_params.use_state_db_only);
         Ok(())
@@ -3040,6 +3058,7 @@ requires_openai_auth = {requires_openai_auth}
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
+            CwdPromptAction::Fork,
         );
 
         assert_eq!(params.model_providers, Some(vec![config.model_provider_id]));
@@ -3063,9 +3082,10 @@ requires_openai_auth = {requires_openai_auth}
             /*cwd_filter*/ None,
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
+            CwdPromptAction::Resume,
         );
 
-        assert_eq!(params.model_providers, None);
+        assert_eq!(params.model_providers, Some(Vec::new()));
         assert_eq!(params.cwd, None);
         Ok(())
     }
@@ -3083,6 +3103,7 @@ requires_openai_auth = {requires_openai_auth}
             /*cwd_filter*/ None,
             /*include_non_interactive*/ true,
             LatestSessionLookupMode::StateDbOnly,
+            CwdPromptAction::Resume,
         );
 
         assert_eq!(
@@ -3111,9 +3132,10 @@ requires_openai_auth = {requires_openai_auth}
             Some(cwd),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
+            CwdPromptAction::Resume,
         );
 
-        assert_eq!(params.model_providers, None);
+        assert_eq!(params.model_providers, Some(Vec::new()));
         assert_eq!(
             params.cwd,
             Some(ThreadListCwdFilter::One(String::from("repo/on/server")))
@@ -3219,6 +3241,7 @@ requires_openai_auth = {requires_openai_auth}
             &config,
             filter_cwd,
             /*include_non_interactive*/ false,
+            CwdPromptAction::Fork,
         )
         .await?
         .expect("expected current-checkout target with worktrees disabled");
@@ -3235,6 +3258,7 @@ requires_openai_auth = {requires_openai_auth}
             &config,
             filter_cwd,
             /*include_non_interactive*/ false,
+            CwdPromptAction::Fork,
         )
         .await?
         .expect("expected project-scoped fork --last target");
@@ -3248,6 +3272,7 @@ requires_openai_auth = {requires_openai_auth}
             &config,
             show_all_filter_cwd,
             /*include_non_interactive*/ false,
+            CwdPromptAction::Fork,
         )
         .await?
         .expect("expected global fork --last target");
@@ -3256,6 +3281,59 @@ requires_openai_auth = {requires_openai_auth}
         assert_eq!(disabled_target.thread_id, project_thread_id);
         assert_eq!(scoped_target.thread_id, linked_thread_id);
         assert_eq!(show_all_target.thread_id, other_thread_id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resume_lookup_ignores_provider_for_uuid_and_last() -> color_eyre::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let project_cwd = temp_dir.path().join("project");
+        std::fs::create_dir_all(&project_cwd)?;
+        let config = ConfigBuilder::default()
+            .codex_home(temp_dir.path().to_path_buf())
+            .harness_overrides(ConfigOverrides {
+                cwd: Some(project_cwd.clone()),
+                ..Default::default()
+            })
+            .build()
+            .await?;
+        let thread_id = write_session_rollout(
+            temp_dir.path(),
+            "2025-01-02T10-00-00",
+            "2025-01-02T10:00:00Z",
+            "different provider session",
+            "other-provider",
+            &project_cwd,
+        )?;
+        let mut app_server = AppServerSession::new(
+            codex_app_server_client::AppServerClient::InProcess(
+                start_test_embedded_app_server(config.clone()).await?,
+            ),
+            ThreadParamsMode::Embedded,
+        );
+
+        let uuid_target = lookup_session_target_with_app_server(
+            &mut app_server,
+            &config,
+            &thread_id.to_string(),
+            CwdPromptAction::Resume,
+        )
+        .await?
+        .expect("resume by UUID should ignore provider");
+        let last_target = lookup_latest_session_target_with_app_server(
+            /*uses_remote_filesystem*/ false,
+            &mut app_server,
+            &config,
+            Some(project_cwd.as_path()),
+            /*include_non_interactive*/ false,
+            CwdPromptAction::Resume,
+        )
+        .await?
+        .expect("resume --last should ignore provider");
+        app_server.shutdown().await?;
+
+        assert_eq!(uuid_target.thread_id, thread_id);
+        assert_eq!(last_target.thread_id, thread_id);
         Ok(())
     }
 
@@ -3296,6 +3374,7 @@ requires_openai_auth = {requires_openai_auth}
             &config,
             Some(project_cwd.as_path()),
             /*include_non_interactive*/ false,
+            CwdPromptAction::Resume,
         )
         .await?
         .expect("expected scan-and-repair fallback to find the rollout");
