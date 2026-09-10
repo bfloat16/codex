@@ -7057,7 +7057,7 @@ async fn fresh_session_config_uses_current_service_tier() {
 }
 
 #[tokio::test]
-async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
+async fn backtrack_selection_preserves_selected_prompt_and_requests_rollback() {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
 
     let user_cell = |text: &str,
@@ -7200,17 +7200,16 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
 
     app.apply_backtrack_selection(selection);
     let event = std::iter::from_fn(|| app_event_rx.try_recv().ok())
-        .find(|event| matches!(event, AppEvent::ForkSessionForPromptEdit { .. }))
-        .expect("prompt edit fork should be requested");
+        .find(|event| matches!(event, AppEvent::RollbackSessionForPromptEdit { .. }))
+        .expect("prompt edit rollback should be requested");
     assert_matches!(
         event,
-        AppEvent::ForkSessionForPromptEdit {
+        AppEvent::RollbackSessionForPromptEdit {
             thread_id,
             nth_user_message,
-            prompt,
+            ..
         } if thread_id == expected.thread_id
             && nth_user_message == expected.nth_user_message
-            && prompt == expected.prompt
     );
 
     let transcript_after: Vec<String> = app
@@ -7222,12 +7221,12 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
 }
 
 #[tokio::test]
-async fn backtrack_branch_failure_restores_selected_prompt_snapshot() {
+async fn backtrack_rollback_failure_restores_selected_prompt_snapshot() {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
 
-    app.restore_backtrack_prompt_after_branch_error(
+    app.restore_backtrack_prompt_after_rollback_error(
         crate::chatwidget::UserMessage::from("edit this prompt"),
-        "branch unavailable",
+        "rollback unavailable",
     );
 
     assert_eq!(
@@ -7240,7 +7239,7 @@ async fn backtrack_branch_failure_restores_selected_prompt_snapshot() {
     };
     let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
     assert_app_snapshot!(
-        "backtrack_branch_failure_restores_selected_prompt",
+        "backtrack_rollback_failure_restores_selected_prompt",
         rendered
     );
 }
@@ -7723,7 +7722,7 @@ async fn remembered_current_cwd_stays_at_launch_across_in_app_resumes() -> Resul
 }
 
 #[tokio::test]
-async fn prompt_edit_forks_before_selected_prompt_and_preserves_source() -> Result<()> {
+async fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let config = app.chat_widget.config_ref().clone();
     let filename_ts = "2025-01-05T12-00-00";
@@ -7803,6 +7802,9 @@ async fn prompt_edit_forks_before_selected_prompt_and_preserves_source() -> Resu
             .lock()
             .await;
         store.turns.pop();
+        // Model streaming can evict the selected prompt's item notification from the bounded
+        // replay buffer before an interrupted turn is rolled back.
+        store.capacity = 1;
         store.push_notification(turn_started_notification(
             source_thread_id,
             &selected_turn.id,
@@ -7823,7 +7825,12 @@ async fn prompt_edit_forks_before_selected_prompt_and_preserves_source() -> Resu
             TurnStatus::Interrupted,
         ));
     }
-    while app_event_rx.try_recv().is_ok() {}
+    while let Ok(event) = app_event_rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            app.transcript_cells.push(cell.into());
+        }
+    }
+    assert_eq!(user_count(&app.transcript_cells), 2);
     let source_before = std::fs::read_to_string(&source_path)?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let prompt = crate::chatwidget::UserMessage {
@@ -7836,11 +7843,10 @@ async fn prompt_edit_forks_before_selected_prompt_and_preserves_source() -> Resu
         text_elements: Vec::new(),
         mention_bindings: Vec::new(),
     };
-
     let control = Box::pin(app.handle_event(
         &mut tui,
         &mut app_server,
-        AppEvent::ForkSessionForPromptEdit {
+        AppEvent::RollbackSessionForPromptEdit {
             thread_id: source_thread_id,
             nth_user_message: 1,
             prompt: prompt.clone(),
@@ -7849,17 +7855,38 @@ async fn prompt_edit_forks_before_selected_prompt_and_preserves_source() -> Resu
     .await?;
 
     assert!(matches!(control, AppRunControl::Continue));
-    let forked_thread_id = app
+    let rolled_back_thread_id = app
         .chat_widget
         .thread_id()
-        .expect("prompt edit should switch to a forked thread");
-    assert_ne!(forked_thread_id, source_thread_id);
+        .expect("prompt edit should keep the current thread");
+    assert_eq!(rolled_back_thread_id, source_thread_id);
     assert_eq!(app.chat_widget.composer_text_with_pending(), prompt.text);
     assert_eq!(
         app.chat_widget.remote_image_urls(),
         prompt.remote_image_urls
     );
-    assert_eq!(std::fs::read_to_string(&source_path)?, source_before);
+    let source_after = std::fs::read_to_string(&source_path)?;
+    assert_ne!(source_after, source_before);
+    let persisted_items = source_after
+        .lines()
+        .map(codex_rollout::parse_rollout_line)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let persisted_turn_ids = persisted_items
+        .iter()
+        .filter_map(|line| match &line.item {
+            RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => Some(event.turn_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(persisted_turn_ids, vec!["turn-1", "turn-2"]);
+    let persisted_rollbacks = persisted_items
+        .iter()
+        .filter_map(|line| match &line.item {
+            RolloutItem::EventMsg(EventMsg::ThreadRolledBack(event)) => Some(event.num_turns),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(persisted_rollbacks, vec![1]);
     assert_eq!(
         app_server
             .thread_read(source_thread_id, /*include_turns*/ true)
@@ -7868,48 +7895,19 @@ async fn prompt_edit_forks_before_selected_prompt_and_preserves_source() -> Resu
             .iter()
             .map(|turn| turn.id.as_str())
             .collect::<Vec<_>>(),
-        vec!["turn-1", "turn-2"]
-    );
-    assert_eq!(
-        app_server
-            .thread_read(forked_thread_id, /*include_turns*/ true)
-            .await?
-            .turns
-            .iter()
-            .map(|turn| turn.id.as_str())
-            .collect::<Vec<_>>(),
         vec!["turn-1"]
     );
-
-    let history = std::iter::from_fn(|| app_event_rx.try_recv().ok())
-        .filter_map(|event| match event {
-            AppEvent::InsertHistoryCell(cell) => {
-                Some(lines_to_single_string(&cell.display_lines(/*width*/ 120)))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let retained_index = history
-        .iter()
-        .position(|line| line.contains("retained prompt"))
-        .expect("forked history should replay the retained prompt");
-    let notice_index = history
-        .iter()
-        .position(|line| line == "• You’re continuing from this point in a new conversation")
-        .expect("prompt edit should emit the branch notice");
-    assert!(retained_index < notice_index);
-    assert!(
-        !history
-            .iter()
-            .any(|line| line.contains("Thread forked from"))
-    );
+    assert_eq!(user_count(&app.transcript_cells), 1);
+    assert!(app.transcript_cells.iter().any(|cell| {
+        lines_to_single_string(&cell.display_lines(/*width*/ 120)).contains("retained prompt")
+    }));
     app_server.shutdown().await?;
 
     Ok(())
 }
 
 #[tokio::test]
-async fn prompt_edit_before_first_prompt_starts_fresh_thread() -> Result<()> {
+async fn prompt_edit_before_first_prompt_clears_thread_history() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let config = app.chat_widget.config_ref().clone();
     let source_thread_id = app_test_support::create_fake_rollout(
@@ -7942,83 +7940,42 @@ async fn prompt_edit_before_first_prompt_starts_fresh_thread() -> Result<()> {
         .await?;
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
-    app.select_permission_profile(
-        &mut app_server,
-        PermissionProfileSelection {
-            profile_id: "server-only".into(),
-            approval_policy: None,
-            approvals_reviewer: None,
-            display_label: "server-only".into(),
-        },
-    )
-    .await;
-    while app_event_rx.try_recv().is_ok() {}
+    while let Ok(event) = app_event_rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            app.transcript_cells.push(cell.into());
+        }
+    }
+    assert_eq!(user_count(&app.transcript_cells), 1);
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    Box::pin(app.handle_event(
-        &mut tui,
-        &mut app_server,
-        AppEvent::ForkSessionForPromptEdit {
-            thread_id: source_thread_id,
-            nth_user_message: 0,
-            prompt: crate::chatwidget::UserMessage::from("first prompt"),
-        },
-    ))
-    .await?;
-    assert_eq!(app.chat_widget.thread_id(), Some(source_thread_id));
-    assert_eq!(app.chat_widget.composer_text_with_pending(), "first prompt");
-    insta::assert_snapshot!(
-        next_history_message(&mut app_event_rx),
-        @"■ Wait for permissions to update before editing this prompt."
-    );
-    let settings = next_thread_settings_updated(&mut app_server, source_thread_id).await;
-    app.enqueue_thread_notification(
-        source_thread_id,
-        ServerNotification::ThreadSettingsUpdated(settings),
-    )
-    .await?;
-    while app_event_rx.try_recv().is_ok() {}
-    let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:8765")?;
-    app.app_server_target = crate::AppServerTarget::Remote { endpoint };
-    let local_only_root = tempdir()?;
-    let local_only_root_path = local_only_root.path().abs();
-    app.harness_overrides
-        .additional_writable_roots
-        .push(local_only_root.path().to_path_buf());
-    app.refresh_in_memory_config_from_disk().await?;
-    assert!(app.config.workspace_roots.contains(&local_only_root_path));
+    let prompt = crate::chatwidget::UserMessage::from("first prompt");
 
     let control = Box::pin(app.handle_event(
         &mut tui,
         &mut app_server,
-        AppEvent::ForkSessionForPromptEdit {
+        AppEvent::RollbackSessionForPromptEdit {
             thread_id: source_thread_id,
             nth_user_message: 0,
-            prompt: crate::chatwidget::UserMessage::from("first prompt"),
+            prompt,
         },
     ))
     .await?;
 
     assert!(matches!(control, AppRunControl::Continue));
-    let fresh_thread_id = app
+    let rolled_back_thread_id = app
         .chat_widget
         .thread_id()
-        .expect("first prompt edit should start a fresh thread");
-    assert_ne!(fresh_thread_id, source_thread_id);
-    let active = app
-        .chat_widget
-        .config_ref()
-        .permissions
-        .active_permission_profile()
-        .unwrap();
-    assert_eq!(active.id, "server-only");
-    let session = app
-        .primary_session_configured
-        .as_ref()
-        .expect("new session");
-    let roots = &session.runtime_workspace_roots;
-    assert!(!roots.contains(&local_only_root_path));
+        .expect("first prompt edit should keep the current thread");
+    assert_eq!(rolled_back_thread_id, source_thread_id);
     assert_eq!(app.chat_widget.composer_text_with_pending(), "first prompt");
-    let history = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+    assert!(
+        app_server
+            .thread_read(source_thread_id, /*include_turns*/ true)
+            .await?
+            .turns
+            .is_empty()
+    );
+    assert_eq!(user_count(&app.transcript_cells), 0);
+    let _history = std::iter::from_fn(|| app_event_rx.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::InsertHistoryCell(cell) => {
                 Some(lines_to_single_string(&cell.display_lines(/*width*/ 120)))
@@ -8026,16 +7983,6 @@ async fn prompt_edit_before_first_prompt_starts_fresh_thread() -> Result<()> {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(
-        history.iter().any(|line| {
-            line == "• You’re continuing from this point in a new conversation"
-        })
-    );
-    assert!(
-        !history
-            .iter()
-            .any(|line| line.contains("Thread forked from"))
-    );
     app_server.shutdown().await?;
 
     Ok(())

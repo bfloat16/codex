@@ -1,0 +1,5 @@
+---
+source: tui/src/app/tests.rs
+expression: rendered
+---
+■ Failed to roll back before the selected prompt: rollback unavailable
