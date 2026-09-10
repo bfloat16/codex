@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use bytes::Bytes;
-use codex_api::ApiError;
 use codex_api::AuthError;
 use codex_api::AuthProvider;
 use codex_api::Compression;
@@ -503,7 +502,7 @@ async fn streaming_client_retries_on_transient_auth_error() -> Result<()> {
 }
 
 #[tokio::test]
-async fn streaming_client_does_not_retry_auth_build_error() -> Result<()> {
+async fn streaming_client_retries_auth_build_error() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
     let auth = FailsOnceAuth::build();
@@ -521,16 +520,8 @@ async fn streaming_client_does_not_retry_auth_build_error() -> Result<()> {
             /*turn_state*/ None,
         )
         .await;
-    let err = result
-        .err()
-        .expect("auth build errors should fail without retry");
-
-    assert!(matches!(
-        err,
-        ApiError::Transport(TransportError::Build(message))
-            if message == "invalid auth configuration"
-    ));
-    assert_eq!(auth.attempts(), 1);
+    result?;
+    assert_eq!(auth.attempts(), 2);
     assert_eq!(state.take_stream_requests().len(), 0);
     Ok(())
 }

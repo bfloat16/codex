@@ -21,7 +21,6 @@ use crate::endpoint::realtime_websocket::protocol::RealtimeVoice;
 use crate::endpoint::realtime_websocket::protocol::parse_realtime_event;
 use crate::error::ApiError;
 use crate::provider::Provider;
-use codex_client::backoff;
 use codex_http_client::maybe_build_rustls_client_config_with_custom_ca;
 use codex_protocol::protocol::ConversationTextParams;
 use codex_protocol::protocol::ConversationTextRole;
@@ -37,6 +36,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
@@ -881,7 +881,7 @@ impl RealtimeWebsocketClient {
                 Ok(connection) => return Ok(connection),
                 Err(err) if webrtc_sideband_session_ended(&err) => return Err(err),
                 Err(err) if attempt < self.provider.retry.max_attempts => {
-                    let delay = backoff(self.provider.retry.base_delay, attempt + 1);
+                    let delay = Duration::from_secs(3);
                     warn!(
                         attempt = attempt + 1,
                         call_id,

@@ -10,7 +10,6 @@ use codex_protocol::auth::PlanType;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::ConnectionFailedError;
-use codex_protocol::error::RetryLimitReachedError;
 use codex_protocol::error::UnexpectedResponseError;
 use codex_protocol::error::UsageLimitReachedError;
 use codex_protocol::protocol::MisalignmentErrorDetails;
@@ -126,7 +125,7 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
                     {
                         CodexErr::InvalidImageRequest()
                     } else {
-                        CodexErr::InvalidRequest(body_text)
+                        CodexErr::Stream(body_text)
                     }
                 } else if status == http::StatusCode::INTERNAL_SERVER_ERROR {
                     CodexErr::InternalServerError
@@ -162,10 +161,13 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
                         }
                     }
 
-                    CodexErr::RetryLimit(RetryLimitReachedError {
-                        status,
-                        request_id: extract_request_tracking_id(headers.as_ref()),
-                    })
+                    let message = match extract_request_tracking_id(headers.as_ref()) {
+                        Some(request_id) => {
+                            format!("request failed with status {status}, request id: {request_id}")
+                        }
+                        None => format!("request failed with status {status}"),
+                    };
+                    CodexErr::Stream(message)
                 } else {
                     CodexErr::UnexpectedStatus(UnexpectedResponseError {
                         status,
@@ -182,10 +184,9 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
                     })
                 }
             }
-            TransportError::RetryLimit => CodexErr::RetryLimit(RetryLimitReachedError {
-                status: http::StatusCode::INTERNAL_SERVER_ERROR,
-                request_id: None,
-            }),
+            TransportError::RetryLimit => {
+                CodexErr::Stream("request retry limit reached".to_string())
+            }
             TransportError::Timeout => CodexErr::RequestTimeout,
             TransportError::Connection(source) => {
                 CodexErr::ConnectionFailed(ConnectionFailedError { source })

@@ -4,6 +4,8 @@ use rand::Rng;
 use std::future::Future;
 use std::time::Duration;
 
+const RETRY_DELAY: Duration = Duration::from_secs(3);
+
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
     pub max_attempts: u64,
@@ -20,19 +22,8 @@ pub struct RetryOn {
 
 impl RetryOn {
     pub fn should_retry(&self, err: &TransportError, attempt: u64, max_attempts: u64) -> bool {
-        if attempt >= max_attempts {
-            return false;
-        }
-        match err {
-            TransportError::Http { status, .. } => {
-                (self.retry_429 && status.as_u16() == 429)
-                    || (self.retry_5xx && status.is_server_error())
-            }
-            TransportError::Timeout
-            | TransportError::Connection(_)
-            | TransportError::Network(_) => self.retry_transport,
-            _ => false,
-        }
+        let _ = (self, err);
+        attempt < max_attempts
     }
 }
 
@@ -96,7 +87,7 @@ where
                     .should_retry(&err, attempt, policy.max_attempts) =>
             {
                 let retry_attempt = attempt + 1;
-                let delay = backoff(policy.base_delay, retry_attempt);
+                let delay = RETRY_DELAY;
                 crate::record_retry!(retry_attempt, delay, RetryOperation::HttpRequest);
                 tokio::time::sleep(delay).await;
             }

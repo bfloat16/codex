@@ -7,7 +7,10 @@ use pretty_assertions::assert_eq;
 #[test]
 fn map_api_error_maps_server_overloaded() {
     let err = map_api_error(ApiError::ServerOverloaded);
-    assert!(matches!(err.details(), CodexErrorDetails::ServerOverloaded));
+    assert!(matches!(
+        err.details(),
+        CodexErrorDetails::Stream(message) if message == "server overloaded"
+    ));
 }
 
 #[test]
@@ -66,7 +69,10 @@ fn map_api_error_maps_server_overloaded_from_503_body() {
         body: Some(body),
     }));
 
-    assert!(matches!(err.details(), CodexErrorDetails::ServerOverloaded));
+    assert!(matches!(
+        err.details(),
+        CodexErrorDetails::Stream(message) if message == "server overloaded"
+    ));
 }
 
 #[test]
@@ -316,8 +322,8 @@ fn map_api_error_keeps_unknown_400_errors_generic() {
         body: Some(body.clone()),
     }));
 
-    let CodexErrorDetails::InvalidRequest(message) = err.details() else {
-        panic!("expected CodexErrorDetails::InvalidRequest, got {err:?}");
+    let CodexErrorDetails::Stream(message) = err.details() else {
+        panic!("expected CodexErrorDetails::Stream, got {err:?}");
     };
     assert_eq!(message, &body);
 }

@@ -5,7 +5,6 @@ use std::time::Duration;
 use crate::client::ModelClientSession;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
-use crate::util::backoff;
 use codex_client::RetryOperation;
 use codex_features::Feature;
 use codex_protocol::error::CodexErr;
@@ -14,29 +13,19 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::WarningEvent;
 use tracing::warn;
 
-const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
-const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
+pub(crate) const RECONNECT_RETRY_DELAY: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
     Sampling,
+    Compaction,
     RemoteCompactionV2,
 }
 
+#[derive(Default)]
 pub(crate) struct ResponsesStreamRetryState {
     retries: u64,
     connection_retries: u64,
-    connection_retry_delay: Duration,
-}
-
-impl Default for ResponsesStreamRetryState {
-    fn default() -> Self {
-        Self {
-            retries: 0,
-            connection_retries: 0,
-            connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
-        }
-    }
 }
 
 /// Handles a retryable stream error and returns `Ok(())` when the caller should
@@ -52,6 +41,7 @@ pub(crate) async fn handle_retryable_response_stream_error(
 ) -> Result<(), CodexErr> {
     let operation = match request {
         ResponsesStreamRequest::Sampling => RetryOperation::Sampling,
+        ResponsesStreamRequest::Compaction => RetryOperation::Sampling,
         ResponsesStreamRequest::RemoteCompactionV2 => RetryOperation::RemoteCompactionV2,
     };
 
@@ -64,7 +54,7 @@ pub(crate) async fn handle_retryable_response_stream_error(
         && !turn_context.session_source.is_internal()
         && !turn_context.provider.info().is_amazon_bedrock()
     {
-        let retry_delay = retry_state.connection_retry_delay;
+        let retry_delay = RECONNECT_RETRY_DELAY;
         warn!(
             turn_id = %turn_context.sub_id,
             error = %err,
@@ -76,9 +66,6 @@ pub(crate) async fn handle_retryable_response_stream_error(
         retry_state.connection_retries = retry_state.connection_retries.saturating_add(1);
         codex_client::record_retry!(retry_state.connection_retries, retry_delay, operation);
         tokio::time::sleep(retry_delay).await;
-        retry_state.connection_retry_delay = retry_delay
-            .saturating_mul(2)
-            .min(MAX_CONNECTION_RETRY_DELAY);
         return Ok(());
     }
 
@@ -102,7 +89,7 @@ pub(crate) async fn handle_retryable_response_stream_error(
     if retry_state.retries < max_retries {
         retry_state.retries += 1;
         let retry_count = retry_state.retries;
-        let delay = err.retry_delay().unwrap_or_else(|| backoff(retry_count));
+        let delay = RECONNECT_RETRY_DELAY;
         log_retry(request, turn_context, &err, retry_count, max_retries, delay);
 
         // In release builds, hide the first websocket retry notification to reduce noisy
@@ -144,6 +131,15 @@ fn log_retry(
                 max_retries,
                 sampling_error = %err,
                 "stream disconnected - retrying sampling request ({retries}/{max_retries} in {delay:?})...",
+            );
+        }
+        ResponsesStreamRequest::Compaction => {
+            warn!(
+                turn_id = %turn_context.sub_id,
+                retries,
+                max_retries,
+                compact_error = %err,
+                "compaction stream failed; retrying request after delay"
             );
         }
         ResponsesStreamRequest::RemoteCompactionV2 => {
