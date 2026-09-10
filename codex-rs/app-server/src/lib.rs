@@ -103,6 +103,7 @@ mod command_exec;
 mod config_layer;
 mod config_manager;
 mod config_manager_service;
+mod config_watcher;
 mod connection_cleanup;
 mod connection_rpc_gate;
 mod current_time;
@@ -685,6 +686,7 @@ pub async fn run_main_with_transport_options(
     let feedback_layer = feedback.logger_layer();
     let feedback_metadata_layer = feedback.metadata_layer();
     let log_db = state_db.clone().map(log_db::start);
+    let shutdown_state_db = state_db.clone();
     let log_db_layer = log_db
         .clone()
         .map(|layer| layer.with_filter(log_db::default_filter()));
@@ -1234,6 +1236,9 @@ pub async fn run_main_with_transport_options(
     for handle in transport_accept_handles {
         let _ = handle.await;
     }
+    if let Some(state_db) = shutdown_state_db {
+        state_db.close().await;
+    }
 
     Ok(())
 }
@@ -1375,9 +1380,12 @@ fn test_user_config_file_from_env() -> Option<std::path::PathBuf> {
 }
 
 fn loader_overrides_with_test_user_config_file(
-    mut loader_overrides: LoaderOverrides,
+    loader_overrides: LoaderOverrides,
     test_user_config_file: Option<std::path::PathBuf>,
 ) -> IoResult<LoaderOverrides> {
+    #[cfg(debug_assertions)]
+    let mut loader_overrides = loader_overrides;
+
     #[cfg(debug_assertions)]
     if let Some(path) = test_user_config_file {
         let path = AbsolutePathBuf::from_absolute_path(path).map_err(|err| {

@@ -22,6 +22,7 @@ use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::ThreadHistoryMode;
+use codex_thread_store::LocalThreadStore;
 use codex_thread_store::PersistContext;
 use std::ops::ControlFlow;
 
@@ -230,7 +231,6 @@ fn merge_persisted_resume_metadata(
     }
 
     typesafe_overrides.model = persisted_metadata.model.clone();
-    typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone());
 
     if let Some(reasoning_effort) = persisted_metadata.reasoning_effort.as_ref() {
         request_overrides.get_or_insert_with(HashMap::new).insert(
@@ -1283,6 +1283,13 @@ impl ThreadRequestProcessor {
         for thread_id in report.timed_out {
             warn!("timed out waiting for thread {thread_id} to shut down");
         }
+        if let Some(local_store) = self
+            .thread_store
+            .as_any()
+            .downcast_ref::<LocalThreadStore>()
+        {
+            local_store.close().await;
+        }
     }
 
     async fn request_trace_context(
@@ -2273,7 +2280,7 @@ impl ThreadRequestProcessor {
             ))
         })?;
         // Revert keeps the existing thread state and subscriptions across the internal reload.
-        // Start the replacement listener from that state instead of depending on the requesting
+        // Start the reloaded listener from that state instead of depending on the requesting
         // connection still being open.
         let thread_state = self.thread_state_manager.thread_state(thread_id).await;
         self.ensure_listener_task_running(thread_id, Arc::clone(&codex_thread), thread_state)
@@ -2374,11 +2381,12 @@ impl ThreadRequestProcessor {
         request_id: &ConnectionRequestId,
         params: ThreadCompactStartParams,
     ) -> Result<ThreadCompactStartResponse, JSONRPCErrorError> {
-        let ThreadCompactStartParams { thread_id } = params;
+        let ThreadCompactStartParams { thread_id, mode } = params;
 
         let (_, thread) = self.load_thread(&thread_id).await?;
         ensure_direct_input_allowed(thread.as_ref()).await?;
-        self.submit_core_op(request_id, thread.as_ref(), Op::Compact)
+        let op = mode.map_or(Op::Compact, |mode| Op::CompactWithMode { mode });
+        self.submit_core_op(request_id, thread.as_ref(), op)
             .await
             .map_err(|err| internal_error(format!("failed to start compaction: {err}")))?;
         Ok(ThreadCompactStartResponse {})

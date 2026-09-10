@@ -167,6 +167,100 @@ async fn thread_settings_update_emits_notification_and_updates_future_turns() ->
 }
 
 #[tokio::test]
+async fn thread_settings_update_switches_provider_for_future_turns() -> Result<()> {
+    let primary_server = responses::start_mock_server().await;
+    let secondary_server =
+        create_mock_responses_server_sequence_unchecked(vec![responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "done"),
+            responses::ev_completed("resp-1"),
+        ])])
+        .await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&primary_server.uri())
+        .with_extra_config(&format!(
+            r#"
+[model_providers.secondary]
+name = "Secondary"
+base_url = "{}/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+supports_websockets = false
+"#,
+            secondary_server.uri()
+        ))
+        .write(codex_home.path())?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let thread = start_thread(&mut mcp).await?.thread;
+
+    send_thread_settings_update(
+        &mut mcp,
+        ThreadSettingsUpdateParams {
+            thread_id: thread.id.clone(),
+            model_provider: Some("secondary".to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let updated = read_thread_settings_updated(&mut mcp).await?;
+    assert_eq!(updated.thread_id, thread.id);
+    assert_eq!(updated.thread_settings.model_provider, "secondary");
+
+    start_text_turn(&mut mcp, thread.id).await?;
+    timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    assert_eq!(received_response_bodies(&secondary_server).await?.len(), 1);
+    assert!(
+        received_response_bodies(&primary_server).await?.is_empty(),
+        "future turn should not use the original provider"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_settings_update_rejects_provider_not_declared_in_user_config() -> Result<()> {
+    let server = create_mock_responses_server_sequence_unchecked(Vec::new()).await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let thread = start_thread(&mut mcp).await?.thread;
+
+    let request_id = mcp
+        .send_thread_settings_update_request(ThreadSettingsUpdateParams {
+            thread_id: thread.id,
+            model_provider: Some("openai".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let error: JSONRPCError = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert!(
+        error.error.message.contains(
+            "invalid thread settings override: invalid value for `model_provider`: `openai`"
+        ),
+        "unexpected error: {error:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_settings_update_cwd_retargets_default_environment() -> Result<()> {
     let server = responses::start_mock_server().await;
     let body = responses::sse(vec![

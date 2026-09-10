@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::attestation::app_server_attestation_provider;
 use crate::config_manager::ConfigManager;
+use crate::config_watcher::ConfigWatcher;
 use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::current_time::app_server_time_provider;
 use crate::error_code::internal_error;
@@ -136,9 +137,11 @@ fn reject_removed_permission_profile(request: &JSONRPCRequest) -> Result<(), JSO
 
 pub(crate) struct MessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
+    log_db: Option<LogDbLayer>,
     models_refresh_worker: ModelsRefreshWorker,
     turn_cost_worker: Option<TurnCostWorker>,
     skills_watcher: Arc<SkillsWatcher>,
+    config_watcher: Arc<ConfigWatcher>,
     account_processor: AccountRequestProcessor,
     apps_processor: AppsRequestProcessor,
     catalog_processor: CatalogRequestProcessor,
@@ -393,6 +396,7 @@ impl MessageProcessor {
             thread_manager.clone(),
             analytics_events_client.clone(),
         );
+        let config_watcher = ConfigWatcher::new(config.as_ref(), config_processor.clone());
         let on_effective_plugins_changed =
             crate::effective_plugin_change::effective_plugins_changed_callback(
                 auth_manager.clone(),
@@ -504,7 +508,7 @@ impl MessageProcessor {
             Arc::clone(&thread_list_state_permit),
             thread_goal_processor.clone(),
             state_db.clone(),
-            log_db,
+            log_db.clone(),
             Arc::clone(&skills_watcher),
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
             config_warnings,
@@ -570,9 +574,11 @@ impl MessageProcessor {
 
         Self {
             outgoing,
+            log_db,
             models_refresh_worker,
             turn_cost_worker,
             skills_watcher,
+            config_watcher,
             account_processor,
             apps_processor,
             catalog_processor,
@@ -605,6 +611,7 @@ impl MessageProcessor {
         self.apps_processor.shutdown();
         self.models_refresh_worker.shutdown();
         self.skills_watcher.shutdown();
+        self.config_watcher.shutdown();
     }
 
     pub(crate) async fn process_request(
@@ -797,6 +804,9 @@ impl MessageProcessor {
 
     pub(crate) async fn shutdown_threads(&self) {
         self.thread_processor.shutdown_threads().await;
+        if let Some(log_db) = &self.log_db {
+            log_db.flush().await;
+        }
     }
 
     pub(crate) async fn connection_closed(

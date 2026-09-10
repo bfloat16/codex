@@ -321,6 +321,10 @@ impl ConfigRequestProcessor {
         Ok(ExperimentalFeatureEnablementSetResponse { enablement })
     }
 
+    pub(crate) async fn reload_user_config(&self) {
+        reload_user_config(&self.config_manager, &self.thread_manager).await;
+    }
+
     async fn emit_plugin_toggle_events(
         &self,
         pending_changes: std::collections::BTreeMap<String, bool>,
