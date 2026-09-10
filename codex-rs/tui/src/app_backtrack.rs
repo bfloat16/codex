@@ -92,6 +92,11 @@ pub(crate) struct BacktrackSelection {
     pub(crate) thread_id: ThreadId,
     /// The selected user message, counted from the most recent session start.
     pub(crate) nth_user_message: usize,
+    /// Number of visible user messages after the selection.
+    ///
+    /// Unlike `nth_user_message`, this remains stable when the transcript only contains a suffix
+    /// of the persisted thread history.
+    pub(crate) newer_user_messages: usize,
     pub(crate) prompt: UserMessage,
 }
 
@@ -148,6 +153,7 @@ impl App {
             .send(AppEvent::RollbackSessionForPromptEdit {
                 thread_id: selection.thread_id,
                 nth_user_message: selection.nth_user_message,
+                newer_user_messages: selection.newer_user_messages,
                 prompt: selection.prompt,
             });
     }
@@ -455,10 +461,13 @@ impl App {
                 path: path.clone(),
             })
             .collect();
+        let newer_user_messages = user_count(&self.transcript_cells)
+            .checked_sub(nth_user_message.checked_add(/*rhs*/ 1)?)?;
 
         Some(BacktrackSelection {
             thread_id: base_id,
             nth_user_message,
+            newer_user_messages,
             prompt: UserMessage {
                 text: selected.message.clone(),
                 local_images,
@@ -472,17 +481,19 @@ impl App {
 
 /// Find the persisted turn that contains a selected transcript prompt and calculate the rollback.
 ///
-/// Replay hides review prompts and other display-empty inputs, so the selected ordinal must be
-/// resolved against the same visible projection before restoring its canonical mention bindings.
+/// Replay hides review prompts and other display-empty inputs, so the selected distance from the
+/// end must be resolved against the same visible projection before restoring its canonical mention
+/// bindings. Counting from the end keeps the selection stable when the TUI has loaded only a suffix
+/// of the persisted history or has inserted a newer session header.
 ///
 /// A turn can contain multiple user messages when it was steered. Only its initial prompt can be
 /// reopened independently because app-server cannot roll back in the middle of a turn.
 pub(crate) fn backtrack_rollback_target(
     turns: &[Turn],
-    nth_user_message: usize,
+    newer_user_messages: usize,
     prompt: &mut UserMessage,
 ) -> Result<BacktrackRollbackTarget> {
-    let mut visible_user_messages_seen = 0_usize;
+    let mut visible_user_messages = Vec::new();
     let mut review_mode = false;
     for (turn_index, turn) in turns.iter().enumerate() {
         let hidden_nested_review_turn = turn_index
@@ -520,44 +531,45 @@ pub(crate) fn backtrack_rollback_target(
             {
                 continue;
             }
-            if visible_user_messages_seen != nth_user_message {
-                visible_user_messages_seen =
-                    visible_user_messages_seen.saturating_add(/*rhs*/ 1);
-                continue;
-            }
-
-            if is_steer {
-                bail!("the selected prompt is a steer and cannot be rolled back independently");
-            }
-            if matches!(turn.status, TurnStatus::InProgress) {
-                bail!("the selected prompt belongs to a turn that is still in progress");
-            }
-
-            let selected_local_images = prompt.local_images.iter().map(|image| &image.path);
-            if prompt.text != display.message
-                || prompt.text_elements != display.text_elements
-                || prompt.remote_image_urls != display.remote_image_urls
-                || !selected_local_images.eq(display.local_images.iter())
-            {
-                bail!("the selected transcript prompt no longer matches the persisted thread");
-            }
-            prompt.mention_bindings = mention_bindings_from_user_inputs(content, &display.message);
-            let legacy_num_turns = turns[turn_index..]
-                .iter()
-                .flat_map(|turn| &turn.items)
-                .filter(|item| matches!(item, ThreadItem::UserMessage { .. }))
-                .count();
-            let Ok(legacy_num_turns) = u32::try_from(legacy_num_turns) else {
-                bail!("the selected prompt requires rolling back too many turns");
-            };
-            return Ok(BacktrackRollbackTarget {
-                before_turn_id: turn.id.clone(),
-                legacy_num_turns,
-            });
+            visible_user_messages.push((turn_index, is_steer, content));
         }
     }
 
-    bail!("the selected prompt was not found in the persisted thread")
+    let Some(&(turn_index, is_steer, content)) =
+        visible_user_messages.iter().rev().nth(newer_user_messages)
+    else {
+        bail!("the selected prompt was not found in the persisted thread");
+    };
+    let turn = &turns[turn_index];
+    let display = ChatWidget::user_message_display_from_inputs(content);
+    let selected_local_images = prompt.local_images.iter().map(|image| &image.path);
+    if prompt.text != display.message
+        || prompt.text_elements != display.text_elements
+        || prompt.remote_image_urls != display.remote_image_urls
+        || !selected_local_images.eq(display.local_images.iter())
+    {
+        bail!("the selected transcript prompt no longer matches the persisted thread");
+    }
+    if is_steer {
+        bail!("the selected prompt is a steer and cannot be rolled back independently");
+    }
+    if matches!(turn.status, TurnStatus::InProgress) {
+        bail!("the selected prompt belongs to a turn that is still in progress");
+    }
+
+    prompt.mention_bindings = mention_bindings_from_user_inputs(content, &display.message);
+    let legacy_num_turns = turns[turn_index..]
+        .iter()
+        .flat_map(|turn| &turn.items)
+        .filter(|item| matches!(item, ThreadItem::UserMessage { .. }))
+        .count();
+    let Ok(legacy_num_turns) = u32::try_from(legacy_num_turns) else {
+        bail!("the selected prompt requires rolling back too many turns");
+    };
+    Ok(BacktrackRollbackTarget {
+        before_turn_id: turn.id.clone(),
+        legacy_num_turns,
+    })
 }
 
 /// Returns whether a turn is the reconstructed inline-review child with duplicated prompt inputs.
@@ -726,7 +738,7 @@ mod tests {
         assert_eq!(
             backtrack_rollback_target(
                 &turns,
-                /*nth_user_message*/ 0,
+                /*newer_user_messages*/ 1,
                 &mut prompt("turn-1-prompt-0"),
             )
             .expect("first prompt should resolve"),
@@ -738,12 +750,67 @@ mod tests {
         assert_eq!(
             backtrack_rollback_target(
                 &turns,
-                /*nth_user_message*/ 1,
+                /*newer_user_messages*/ 0,
                 &mut prompt("turn-2-prompt-0"),
             )
             .expect("later prompt should resolve"),
             BacktrackRollbackTarget {
                 before_turn_id: "turn-2".to_string(),
+                legacy_num_turns: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn backtrack_rollback_target_resolves_failed_compact_after_earlier_steers() {
+        let mut earlier_compact = turn(
+            "turn-earlier-compact",
+            TurnStatus::Completed,
+            /*user_messages*/ 1,
+        );
+        let ThreadItem::UserMessage { content, .. } = &mut earlier_compact.items[0] else {
+            panic!("expected user message")
+        };
+        *content = vec![UserInput::Text {
+            text: "/compact".to_string(),
+            text_elements: Vec::new(),
+        }];
+        let mut failed_compact = turn(
+            "turn-failed-compact",
+            TurnStatus::Failed,
+            /*user_messages*/ 1,
+        );
+        let ThreadItem::UserMessage { content, .. } = &mut failed_compact.items[0] else {
+            panic!("expected user message")
+        };
+        *content = vec![UserInput::Text {
+            text: "/compact".to_string(),
+            text_elements: Vec::new(),
+        }];
+        let turns = vec![
+            turn(
+                "turn-with-steers",
+                TurnStatus::Interrupted,
+                /*user_messages*/ 3,
+            ),
+            earlier_compact,
+            turn(
+                "turn-after-compact",
+                TurnStatus::Completed,
+                /*user_messages*/ 1,
+            ),
+            failed_compact,
+        ];
+
+        assert_eq!(
+            backtrack_rollback_target(
+                &turns,
+                /*newer_user_messages*/ 0,
+                &mut prompt("/compact"),
+            )
+            .expect("latest failed compact should resolve independently of the history prefix"),
+            BacktrackRollbackTarget {
+                before_turn_id: "turn-failed-compact".to_string(),
                 legacy_num_turns: 1,
             }
         );
@@ -759,7 +826,7 @@ mod tests {
 
         let error = backtrack_rollback_target(
             &turns,
-            /*nth_user_message*/ 1,
+            /*newer_user_messages*/ 0,
             &mut prompt("turn-1-prompt-1"),
         )
         .expect_err("a steer cannot be rolled back independently");
@@ -781,7 +848,7 @@ mod tests {
         assert_eq!(
             backtrack_rollback_target(
                 &turns,
-                /*nth_user_message*/ 0,
+                /*newer_user_messages*/ 0,
                 &mut prompt("turn-1-prompt-0"),
             )
             .expect_err("in-progress prompt cannot be rolled back")
@@ -791,7 +858,7 @@ mod tests {
         assert_eq!(
             backtrack_rollback_target(
                 &turns,
-                /*nth_user_message*/ 1,
+                /*newer_user_messages*/ 1,
                 &mut prompt("missing prompt"),
             )
             .expect_err("missing prompt cannot be rolled back")
@@ -807,7 +874,7 @@ mod tests {
         assert_eq!(
             backtrack_rollback_target(
                 &completed_turns,
-                /*nth_user_message*/ 0,
+                /*newer_user_messages*/ 0,
                 &mut prompt("different prompt"),
             )
             .expect_err("a stale transcript prompt cannot be rolled back")
@@ -843,7 +910,7 @@ mod tests {
         assert_eq!(
             backtrack_rollback_target(
                 &turns,
-                /*nth_user_message*/ 1,
+                /*newer_user_messages*/ 0,
                 &mut prompt("turn-2-prompt-0"),
             )
             .expect("the visible prompt after review should resolve"),
@@ -915,7 +982,7 @@ mod tests {
         assert_eq!(
             backtrack_rollback_target(
                 &turns,
-                /*nth_user_message*/ 0,
+                /*newer_user_messages*/ 0,
                 &mut prompt("turn-2-prompt-0"),
             )
             .expect("the visible prompt after a nested review should resolve"),
@@ -958,7 +1025,7 @@ mod tests {
         let mut selected_prompt = prompt("use $skill @sample $google-calendar");
 
         assert_eq!(
-            backtrack_rollback_target(&turns, /*nth_user_message*/ 1, &mut selected_prompt,)
+            backtrack_rollback_target(&turns, /*newer_user_messages*/ 0, &mut selected_prompt,)
                 .expect("the selected prompt should resolve"),
             BacktrackRollbackTarget {
                 before_turn_id: "turn-2".to_string(),

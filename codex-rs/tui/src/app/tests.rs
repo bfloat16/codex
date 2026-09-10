@@ -7184,6 +7184,7 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_rollback() {
     let expected = BacktrackSelection {
         thread_id: base_id,
         nth_user_message: 1,
+        newer_user_messages: 0,
         prompt: crate::chatwidget::UserMessage {
             text: edited_text,
             local_images: vec![crate::bottom_pane::LocalImageAttachment {
@@ -7206,9 +7207,11 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_rollback() {
         AppEvent::RollbackSessionForPromptEdit {
             thread_id,
             nth_user_message,
+            newer_user_messages,
             ..
         } if thread_id == expected.thread_id
             && nth_user_message == expected.nth_user_message
+            && newer_user_messages == expected.newer_user_messages
     );
 
     let transcript_after: Vec<String> = app
@@ -7848,6 +7851,7 @@ async fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<
         AppEvent::RollbackSessionForPromptEdit {
             thread_id: source_thread_id,
             nth_user_message: 1,
+            newer_user_messages: 0,
             prompt: prompt.clone(),
         },
     ))
@@ -7863,6 +7867,10 @@ async fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<
     assert_eq!(
         app.chat_widget.remote_image_urls(),
         prompt.remote_image_urls
+    );
+    assert_app_snapshot!(
+        "backtrack_rollback_success_restores_selected_prompt",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
     );
     let source_after = std::fs::read_to_string(&source_path)?;
     assert_ne!(source_after, source_before);
@@ -7954,6 +7962,7 @@ async fn prompt_edit_before_first_prompt_clears_thread_history() -> Result<()> {
         AppEvent::RollbackSessionForPromptEdit {
             thread_id: source_thread_id,
             nth_user_message: 0,
+            newer_user_messages: 0,
             prompt,
         },
     ))

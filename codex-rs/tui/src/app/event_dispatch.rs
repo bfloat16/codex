@@ -490,6 +490,7 @@ impl App {
             AppEvent::RollbackSessionForPromptEdit {
                 thread_id,
                 nth_user_message,
+                newer_user_messages,
                 mut prompt,
             } => {
                 if self.chat_widget.thread_id() != Some(thread_id) {
@@ -545,7 +546,7 @@ impl App {
                         }
                         crate::app_backtrack::backtrack_rollback_target(
                             &turns,
-                            nth_user_message,
+                            newer_user_messages,
                             &mut prompt,
                         )
                     }
@@ -579,7 +580,7 @@ impl App {
                         match refreshed_thread {
                             Ok(thread) => crate::app_backtrack::backtrack_rollback_target(
                                 &thread.turns,
-                                nth_user_message,
+                                newer_user_messages,
                                 &mut prompt,
                             ),
                             Err(err) => Err(err),

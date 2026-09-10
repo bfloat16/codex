@@ -499,6 +499,7 @@ pub(crate) enum AppEvent {
     RollbackSessionForPromptEdit {
         thread_id: ThreadId,
         nth_user_message: usize,
+        newer_user_messages: usize,
         prompt: UserMessage,
     },
 
