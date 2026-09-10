@@ -58,7 +58,7 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::Permissions => "Workspace",
             StatusSurfacePreviewItem::ApprovalMode => "on-request",
             StatusSurfacePreviewItem::ContextRemaining => "Context 0% left",
-            StatusSurfacePreviewItem::ContextUsed => "Context 0% used",
+            StatusSurfacePreviewItem::ContextUsed => "Context 0 (0%) used",
             StatusSurfacePreviewItem::FiveHourLimit => "primary 0%",
             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",

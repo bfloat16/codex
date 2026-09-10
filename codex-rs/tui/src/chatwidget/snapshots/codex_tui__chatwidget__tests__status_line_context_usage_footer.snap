@@ -1,0 +1,21 @@
+---
+source: tui/src/chatwidget/tests/status_and_layout.rs
+expression: "frames.join(\"\\n\\n\")"
+---
+"                                                                                "
+"                                                                                "
+"› Ask Codex to do anything                                                      "
+"                                                                                "
+"  Context 12.7K (70%) used · 13K window                                         "
+
+"                                                                                "
+"                                                                                "
+"› Ask Codex to do anything                                                      "
+"                                                                                "
+"  Context 1250K (62%) used · 2000K window                                       "
+
+"                                                                                "
+"                                                                                "
+"› Ask Codex to do anything                                                      "
+"                                                                                "
+"  Context 999 (0%) used · 2000K window                                          "

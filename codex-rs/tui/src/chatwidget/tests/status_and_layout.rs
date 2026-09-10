@@ -85,7 +85,7 @@ async fn resumed_session_hides_unknown_token_usage_until_an_update_arrives() {
     chat.refresh_status_line();
     assert_eq!(
         status_line_text(&chat),
-        Some("Context 30% left · Context 70% used · 0 in · 0 out".to_string())
+        Some("Context 30% left · Context 12.7K (70%) used · 0 in · 0 out".to_string())
     );
 }
 
@@ -2911,18 +2911,50 @@ async fn status_line_hostname_renders_current_machine_hostname() {
 }
 
 #[tokio::test]
-async fn status_line_context_used_renders_labeled_percent() {
+async fn status_line_context_used_renders_tokens_and_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.local_settings.tui.status_line = Some(vec!["context-used".to_string()]);
 
     chat.refresh_status_line();
 
-    assert_eq!(status_line_text(&chat), Some("Context 0% used".to_string()));
+    assert_eq!(
+        status_line_text(&chat),
+        Some("Context 0 (0%) used".to_string())
+    );
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "context-used should remain a valid status line item"
     );
+}
+
+#[tokio::test]
+async fn status_line_context_usage_footer_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.show_welcome_banner = false;
+    chat.config.tui_status_line = Some(vec![
+        "context-used".to_string(),
+        "context-window-size".to_string(),
+    ]);
+
+    let mut frames = Vec::new();
+    for (tokens, context_window) in [(12_700, 13_000), (1_250_000, 2_000_000), (999, 2_000_000)] {
+        let mut info = make_token_info(tokens, context_window);
+        info.total_token_usage.total_tokens = 9_000_000;
+        handle_token_count(&mut chat, Some(info));
+        chat.refresh_status_line();
+
+        let width = 80;
+        let height = chat.desired_height(width);
+        let mut terminal =
+            ratatui::Terminal::new(TestBackend::new(width, height)).expect("create terminal");
+        terminal
+            .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
+            .expect("draw context usage footer");
+        frames.push(normalized_backend_snapshot(terminal.backend()));
+    }
+
+    assert_chatwidget_snapshot!("status_line_context_usage_footer", frames.join("\n\n"));
 }
 
 #[tokio::test]
@@ -2944,14 +2976,17 @@ async fn status_line_context_remaining_renders_labeled_percent() {
 }
 
 #[tokio::test]
-async fn status_line_legacy_context_usage_renders_context_used_percent() {
+async fn status_line_legacy_context_usage_renders_tokens_and_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.local_settings.tui.status_line = Some(vec!["context-usage".to_string()]);
 
     chat.refresh_status_line();
 
-    assert_eq!(status_line_text(&chat), Some("Context 0% used".to_string()));
+    assert_eq!(
+        status_line_text(&chat),
+        Some("Context 0 (0%) used".to_string())
+    );
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "legacy context-usage should remain a valid status line item"
@@ -3979,7 +4014,9 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.4 xhigh fast · Context 0% used · {test_cwd}"))
+        Some(format!(
+            "gpt-5.4 xhigh fast · Context 0 (0%) used · {test_cwd}"
+        ))
     );
 
     chat.set_model("gpt-5.2");
@@ -3987,7 +4024,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.2 xhigh · Context 0% used · {test_cwd}"))
+        Some(format!("gpt-5.2 xhigh · Context 0 (0%) used · {test_cwd}"))
     );
 }
 

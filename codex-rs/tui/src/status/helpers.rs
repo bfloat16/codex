@@ -136,6 +136,19 @@ pub(crate) fn format_tokens_compact(value: i64) -> String {
         (value_f64 / 1_000.0, "K")
     };
 
+    format_scaled_tokens(scaled, suffix)
+}
+
+pub(crate) fn format_tokens_in_thousands(value: i64) -> String {
+    let value = value.max(0);
+    if value < 1_000 {
+        return value.to_string();
+    }
+
+    format_scaled_tokens(value as f64 / 1_000.0, "K")
+}
+
+fn format_scaled_tokens(scaled: f64, suffix: &str) -> String {
     let decimals = if scaled < 10.0 {
         2
     } else if scaled < 100.0 {

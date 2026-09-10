@@ -59,7 +59,7 @@ pub(crate) enum TerminalTitleItem {
     GitBranch,
     /// Percentage of context window remaining.
     ContextRemaining,
-    /// Percentage of context window used.
+    /// Tokens and percentage of the context window used.
     #[strum(to_string = "context-used", serialize = "context-usage")]
     ContextUsed,
     /// Remaining usage on the primary rate limit.
@@ -113,7 +113,7 @@ impl TerminalTitleItem {
                 "Percentage of context window remaining (omitted when unknown)"
             }
             TerminalTitleItem::ContextUsed => {
-                "Percentage of context window used (omitted when unknown)"
+                "Tokens and percentage of context window used (omitted when unknown)"
             }
             TerminalTitleItem::FiveHourLimit => {
                 "Remaining usage on the primary usage limit (omitted when unavailable)"

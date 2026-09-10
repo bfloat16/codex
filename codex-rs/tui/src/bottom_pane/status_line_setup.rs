@@ -101,7 +101,7 @@ pub(crate) enum StatusLineItem {
     /// Percentage of context window remaining.
     ContextRemaining,
 
-    /// Percentage of context window used.
+    /// Tokens and percentage of the context window used.
     ///
     /// Also accepts the legacy `context-usage` config value.
     #[strum(to_string = "context-used", serialize = "context-usage")]
@@ -181,7 +181,7 @@ impl StatusLineItem {
                 "Percentage of context window remaining (omitted when unknown)"
             }
             StatusLineItem::ContextUsed => {
-                "Percentage of context window used (omitted when unknown)"
+                "Tokens and percentage of context window used (omitted when unknown)"
             }
             StatusLineItem::FiveHourLimit => {
                 "Remaining usage on the primary usage limit (omitted when unavailable)"
