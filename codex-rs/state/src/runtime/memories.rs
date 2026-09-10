@@ -36,7 +36,7 @@ impl MemoryStore {
     }
 
     pub(crate) async fn close(&self) {
-        self.pool.close().await;
+        close_sqlite_pool(self.pool.as_ref()).await;
     }
 
     /// Deletes all persisted memory state in one transaction.

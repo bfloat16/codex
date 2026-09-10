@@ -27,7 +27,7 @@ impl SqliteQueueStore {
         {
             tracing::warn!(%error, "failed to close queue change-version connection");
         }
-        self.pool.close().await;
+        close_sqlite_pool(self.pool.as_ref()).await;
     }
 
     /// Observe queue-database commits through one stable SQLite connection.

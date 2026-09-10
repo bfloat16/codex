@@ -13,7 +13,7 @@ impl GoalStore {
     }
 
     pub(crate) async fn close(&self) {
-        self.pool.close().await;
+        close_sqlite_pool(self.pool.as_ref()).await;
     }
 }
 

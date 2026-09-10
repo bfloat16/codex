@@ -34,6 +34,7 @@ pub use model::RolloutMigrationSkippedRollout;
 pub use model::RolloutMigrationState;
 /// Preferred entrypoint: owns configuration and metrics.
 pub use runtime::StateRuntime;
+pub use runtime::close_sqlite_pool;
 pub use sqlite::SqliteConfig;
 
 pub use audit::ThreadStateAuditRow;

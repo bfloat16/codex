@@ -291,8 +291,8 @@ impl StateRuntime {
         self.thread_queue.close().await;
         self.memories.close().await;
         self.thread_goals.close().await;
-        self.logs_pool.close().await;
-        self.pool.close().await;
+        close_sqlite_pool(self.logs_pool.as_ref()).await;
+        close_sqlite_pool(self.pool.as_ref()).await;
     }
 
     pub async fn clear_memory_data_in_sqlite_home(sqlite: &SqliteConfig) -> anyhow::Result<bool> {
@@ -315,6 +315,17 @@ async fn close_sqlite_pools(pools: &[&SqlitePool]) {
     for pool in pools {
         pool.close().await;
     }
+}
+
+/// Checkpoint a writable SQLite pool's WAL and wait for its connections to close.
+pub async fn close_sqlite_pool(pool: &SqlitePool) {
+    if let Err(error) = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(pool)
+        .await
+    {
+        tracing::debug!(%error, "failed to checkpoint SQLite WAL before close");
+    }
+    pool.close().await;
 }
 
 /// Open and migrate the rebuildable paginated thread-history database.
