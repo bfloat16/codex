@@ -4,7 +4,6 @@
 use super::*;
 
 pub(super) const COMPACTION_HEADER: &str = "Compacting context";
-pub(super) const COMPACTION_DETAILS: &str = "Making room to continue.";
 
 #[derive(Debug)]
 pub(super) struct ActiveCompaction {

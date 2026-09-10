@@ -5,6 +5,9 @@
 //! history-facing `/status` surface.
 
 use super::*;
+use codex_model_provider::RemoteCompactionSupport;
+use codex_model_provider::create_model_provider;
+use codex_protocol::protocol::CompactionMode;
 
 impl ChatWidget {
     /// Update the status indicator header and details.
@@ -18,19 +21,13 @@ impl ChatWidget {
         details_capitalization: StatusDetailsCapitalization,
         details_max_lines: usize,
     ) -> bool {
-        // Follow-up input and background activity must not obscure compaction.
-        // Retry errors still get their own status until the next notification.
-        let (header, details, details_max_lines) = if self.status_state.compaction.is_some()
-            && self.status_state.retry_status_header.is_none()
+        if self
+            .status_state
+            .active_compaction
+            .is_some_and(|kind| header != kind.header())
         {
-            (
-                compaction::COMPACTION_HEADER.to_string(),
-                Some(compaction::COMPACTION_DETAILS.to_string()),
-                STATUS_DETAILS_DEFAULT_MAX_LINES,
-            )
-        } else {
-            (header, details, details_max_lines)
-        };
+            return false;
+        }
         let details = details
             .filter(|details| !details.is_empty())
             .map(|details| {
@@ -79,6 +76,72 @@ impl ChatWidget {
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         )
+    }
+
+    pub(super) fn start_compaction_status(&mut self) {
+        // A manual `/compact <mode>` command records its explicit mode before the
+        // server emits the generic `ContextCompaction` item. Keep that mode as
+        // the source of truth instead of replacing it with a provider inference.
+        if self.status_state.active_compaction.is_some() {
+            return;
+        }
+        let kind = self.compaction_status_kind();
+        self.start_compaction_status_with_kind(kind);
+    }
+
+    pub(super) fn start_compaction_status_for_mode(&mut self, mode: CompactionMode) {
+        let kind = match mode {
+            CompactionMode::Local => CompactionStatusKind::Local,
+            CompactionMode::RemoteV1 => CompactionStatusKind::RemoteV1,
+            CompactionMode::RemoteV2 => CompactionStatusKind::RemoteV2,
+        };
+        self.start_compaction_status_with_kind(kind);
+    }
+
+    fn start_compaction_status_with_kind(&mut self, kind: CompactionStatusKind) {
+        self.status_state.begin_compaction(kind);
+        self.set_status_header(kind.header().to_string());
+    }
+
+    pub(super) fn finish_compaction_status(&mut self) {
+        let Some(status) = self.status_state.finish_compaction() else {
+            return;
+        };
+        self.set_status(
+            status.header,
+            status.details,
+            StatusDetailsCapitalization::Preserve,
+            status.details_max_lines,
+        );
+    }
+
+    fn compaction_status_kind(&self) -> CompactionStatusKind {
+        let provider = create_model_provider(self.config.model_provider.clone(), None);
+        if let Some(mode) = provider.info().compact {
+            return match mode {
+                CompactionMode::Local => CompactionStatusKind::Local,
+                CompactionMode::RemoteV1 => CompactionStatusKind::RemoteV1,
+                CompactionMode::RemoteV2 => CompactionStatusKind::RemoteV2,
+            };
+        }
+        if self.config.features.enabled(Feature::TokenBudget)
+            && matches!(
+                provider.capabilities().remote_compaction,
+                RemoteCompactionSupport::Unsupported
+            )
+        {
+            return CompactionStatusKind::Local;
+        }
+        match provider.capabilities().remote_compaction {
+            RemoteCompactionSupport::V2
+                if self.config.features.enabled(Feature::RemoteCompactionV2) =>
+            {
+                CompactionStatusKind::RemoteV2
+            }
+            RemoteCompactionSupport::V1 => CompactionStatusKind::RemoteV1,
+            RemoteCompactionSupport::V2 => CompactionStatusKind::RemoteV1,
+            RemoteCompactionSupport::Unsupported => CompactionStatusKind::Local,
+        }
     }
 
     /// Sets the currently rendered footer status-line value.

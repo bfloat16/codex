@@ -256,6 +256,9 @@ async fn parent_owned_thread_blocks_all_direct_input_entry_points() {
     }
 
     assert!(!chat.submit_op(AppCommand::compact()));
+    assert!(!chat.submit_op(AppCommand::compact_with_mode(
+        codex_protocol::protocol::CompactionMode::Local,
+    )));
     assert_no_submit_op(&mut op_rx);
 }
 

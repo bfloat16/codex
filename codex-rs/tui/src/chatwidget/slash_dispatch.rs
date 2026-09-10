@@ -37,6 +37,7 @@ const SIDE_SLASH_COMMAND_UNAVAILABLE_HINT: &str =
     "Press Ctrl+C to return to the main thread first.";
 const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
 const RAW_USAGE: &str = "Usage: /raw [on|off]";
+const COMPACT_USAGE: &str = "Usage: /compact [local|remotev1|remotev2]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
 
 impl ChatWidget {
@@ -276,13 +277,7 @@ impl ChatWidget {
                 if !self.bottom_pane.is_task_running() {
                     self.bottom_pane.set_task_running(/*running*/ true);
                 }
-                self.bottom_pane.ensure_status_indicator();
-                self.set_status(
-                    compaction::COMPACTION_HEADER.to_string(),
-                    Some(compaction::COMPACTION_DETAILS.to_string()),
-                    StatusDetailsCapitalization::Preserve,
-                    STATUS_DETAILS_DEFAULT_MAX_LINES,
-                );
+                self.start_compaction_status();
                 self.input_queue.user_turn_pending_start = true;
                 self.app_event_tx.compact();
             }
@@ -760,6 +755,28 @@ impl ChatWidget {
                         ),
                     }
                 }
+            }
+            SlashCommand::Compact => {
+                let mode = match trimmed.to_ascii_lowercase().as_str() {
+                    "local" => codex_protocol::protocol::CompactionMode::Local,
+                    "remotev1" => codex_protocol::protocol::CompactionMode::RemoteV1,
+                    "remotev2" => codex_protocol::protocol::CompactionMode::RemoteV2,
+                    _ => {
+                        self.add_error_message(COMPACT_USAGE.to_string());
+                        return;
+                    }
+                };
+                if self.blocks_direct_input {
+                    self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());
+                    return;
+                }
+                self.clear_token_usage();
+                if !self.bottom_pane.is_task_running() {
+                    self.bottom_pane.set_task_running(/*running*/ true);
+                }
+                self.start_compaction_status_for_mode(mode);
+                self.input_queue.user_turn_pending_start = true;
+                self.app_event_tx.compact_with_mode(mode);
             }
             SlashCommand::Ide => {
                 self.handle_ide_command_args(trimmed);

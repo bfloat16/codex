@@ -1243,6 +1243,42 @@ async fn submit_user_message_queues_while_compaction_turn_is_running() {
     }
 }
 
+#[tokio::test]
+async fn compaction_completion_restores_previous_status_header() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_status_header("Thinking".to_string());
+    let thread_id = ThreadId::new();
+    let item = AppServerThreadItem::ContextCompaction {
+        id: "compaction-1".to_string(),
+    };
+
+    chat.handle_server_notification(
+        ServerNotification::ItemStarted(ItemStartedNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: "turn-1".to_string(),
+            started_at_ms: 0,
+            item: item.clone(),
+        }),
+        /*replay_kind*/ None,
+    );
+    assert!(chat.status_state.active_compaction.is_some());
+    assert_ne!(chat.status_state.current_status.header, "Thinking");
+
+    chat.handle_server_notification(
+        ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: "turn-1".to_string(),
+            completed_at_ms: 1,
+            item,
+        }),
+        /*replay_kind*/ None,
+    );
+
+    assert_eq!(chat.status_state.current_status.header, "Thinking");
+    assert!(chat.status_state.active_compaction.is_none());
+    assert!(chat.status_state.pre_compaction_status.is_none());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn submit_user_message_emits_structured_plugin_mentions_from_bindings() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;

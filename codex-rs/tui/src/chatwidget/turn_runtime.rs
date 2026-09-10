@@ -75,8 +75,11 @@ impl ChatWidget {
 
     pub(super) fn on_task_started(&mut self) {
         self.clear_context_compaction();
+        self.output_free_interrupt_turn_id = None;
         self.input_queue.user_turn_pending_start = false;
         self.reset_safety_buffering_for_turn_start();
+        self.status_state.reset_model_transfer();
+        self.bottom_pane.update_model_transfer(None);
         self.turn_lifecycle.start(Instant::now());
         self.transcript.reset_turn_flags();
         self.adaptive_chunking.reset();
@@ -98,7 +101,12 @@ impl ChatWidget {
             .set_interrupt_hint_visible(/*visible*/ true);
         self.status_state.terminal_title_status_kind = TerminalTitleStatusKind::Working;
         if self.mcp_startup_status.is_none() || !self.status_header_is_mcp_startup_owned() {
-            self.set_status_header(String::from("Working"));
+            let header = self
+                .status_state
+                .active_compaction
+                .map(CompactionStatusKind::header)
+                .unwrap_or("Working");
+            self.set_status_header(header.to_string());
         }
         self.reasoning_summary_parts.clear();
         self.reasoning_buffer.clear();
@@ -186,6 +194,7 @@ impl ChatWidget {
         // Mark task stopped and request redraw now that all content is in history.
         self.clear_context_compaction();
         self.status_state.pending_status_indicator_restore = false;
+        self.finish_compaction_status();
         self.input_queue.user_turn_pending_start = false;
         self.clear_active_hook_cell();
         self.clear_guardian_review_status();
@@ -338,6 +347,7 @@ impl ChatWidget {
         self.clear_guardian_review_status();
         self.turn_lifecycle.finish();
         self.update_task_running_state();
+        self.finish_compaction_status();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -393,8 +403,6 @@ impl ChatWidget {
     }
 
     pub(super) fn on_cyber_policy_error(&mut self) {
-        self.input_queue.submit_pending_steers_after_interrupt = false;
-        self.finalize_turn();
         let notice = if self.config.model_provider_id == "openai" {
             self.cyber_policy_notice
                 .get()
@@ -406,9 +414,6 @@ impl ChatWidget {
         };
         self.add_to_history(history_cell::new_cyber_policy_error_event(notice));
         self.request_redraw();
-
-        // After an error ends the turn, try sending the next queued input.
-        self.maybe_send_next_queued_input();
     }
 
     pub(super) fn on_rate_limit_error(&mut self, error_kind: RateLimitErrorKind, message: String) {
@@ -519,6 +524,10 @@ impl ChatWidget {
         self.request_redraw();
     }
 
+    pub(super) fn current_turn_has_model_output(&self) -> bool {
+        self.transcript.saw_effective_model_output_this_turn
+    }
+
     pub(super) fn on_app_server_model_verification(
         &mut self,
         verifications: &[AppServerModelVerification],
@@ -529,6 +538,7 @@ impl ChatWidget {
     }
 
     pub(super) fn on_plan_update(&mut self, update: UpdatePlanArgs) {
+        self.transcript.saw_effective_model_output_this_turn = true;
         self.transcript.saw_plan_update_this_turn = true;
         let total = update.plan.len();
         let completed = update

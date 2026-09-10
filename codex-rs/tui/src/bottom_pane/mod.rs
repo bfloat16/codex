@@ -219,6 +219,7 @@ pub(crate) use chat_composer::InputResult;
 pub(crate) use chat_composer::QueuedInputAction;
 pub(crate) use chat_composer_history::HistoryEntry;
 
+use crate::status_indicator_widget::ModelTransferStatus;
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::status_indicator_widget::StatusIndicatorWidget;
 #[cfg(test)]
@@ -266,6 +267,7 @@ pub(crate) struct BottomPane {
     /// Running-hook summary supplied by the lifecycle owner after its reveal delay.
     hook_status_message: Option<String>,
     inline_banner: Option<actionable_banner::InlineBanner>,
+    model_transfer: Option<ModelTransferStatus>,
     /// Streaming may drop the row without losing its elapsed time or modal pause.
     status_timer: crate::status_indicator_widget::StatusTimer,
     /// Unified exec session summary source.
@@ -341,6 +343,7 @@ impl BottomPane {
             status: None,
             hook_status_message: None,
             inline_banner: None,
+            model_transfer: None,
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
             unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
@@ -1113,6 +1116,14 @@ impl BottomPane {
         false
     }
 
+    pub(crate) fn update_model_transfer(&mut self, status: Option<ModelTransferStatus>) {
+        self.model_transfer = status;
+        if let Some(widget) = self.status.as_mut() {
+            widget.update_model_transfer(status);
+            self.request_redraw();
+        }
+    }
+
     /// Show the transient "press again to quit" hint for `key`.
     ///
     /// `ChatWidget` owns the quit shortcut state machine (it decides when quit is
@@ -1201,6 +1212,7 @@ impl BottomPane {
                         self.keymap
                             .primary_hint(KeymapContext::Chat, "interrupt_turn"),
                     );
+                    status.update_model_transfer(self.model_transfer);
                 }
                 self.sync_status_inline_message();
                 self.request_redraw();

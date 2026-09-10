@@ -124,6 +124,7 @@ pub(super) use codex_config::types::WindowsSandboxModeToml;
 pub(super) use codex_core_plugins::OPENAI_CURATED_MARKETPLACE_NAME;
 pub(super) use codex_features::Feature;
 pub(super) use codex_git_utils::CommitLogEntry;
+pub(super) use codex_model_provider_info::ModelProviderInfo;
 pub(super) use codex_models_manager::test_support::construct_model_info_offline_for_tests;
 pub(super) use codex_models_manager::test_support::get_model_offline_for_tests;
 pub(super) use codex_otel::RuntimeMetricsSummary;
@@ -261,10 +262,13 @@ mod plan_mode;
 #[path = "tests/plugin_catalog_tests.rs"]
 mod plugin_catalog;
 mod popups_and_settings;
+mod provider_popup;
 #[path = "tests/rate_limit_recovery_tests.rs"]
 mod rate_limit_recovery_tests;
 #[path = "tests/replay_render_tests.rs"]
 mod replay_render_tests;
+#[path = "tests/request_progress_tests.rs"]
+mod request_progress;
 mod review_mode;
 mod side;
 mod slash_commands;

@@ -153,13 +153,31 @@ async fn service_tier_commands_lowercase_catalog_names() {
 async fn slash_compact_eagerly_queues_follow_up_before_turn_start() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    chat.dispatch_command(SlashCommand::Compact);
+    chat.dispatch_command_with_args(SlashCommand::Compact, "remotev2".to_string(), Vec::new());
 
     assert!(chat.bottom_pane.is_task_running());
+    assert_eq!(
+        chat.status_state.current_status.header,
+        "Compacting remotely (v2)"
+    );
     match rx.try_recv() {
-        Ok(AppEvent::CodexOp(Op::Compact)) => {}
+        Ok(AppEvent::CodexOp(Op::CompactWithMode {
+            mode: codex_protocol::protocol::CompactionMode::RemoteV2,
+        })) => {}
         other => panic!("expected compact op to be submitted, got {other:?}"),
     }
+
+    let width = 80;
+    let height = chat.desired_height(width);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
+        .expect("draw compact status");
+    assert_chatwidget_snapshot!(
+        "slash_compact_remote_v2_status",
+        normalized_backend_snapshot(terminal.backend())
+    );
 
     chat.bottom_pane.set_composer_text(
         "queued before compact turn start".to_string(),
@@ -199,7 +217,7 @@ async fn queued_slash_compact_dispatches_after_active_turn() {
     chat.thread_id = Some(ThreadId::new());
     handle_turn_started(&mut chat, "turn-1");
 
-    queue_composer_text_with_tab(&mut chat, "/compact");
+    queue_composer_text_with_tab(&mut chat, "/compact local");
 
     assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
     assert_eq!(
@@ -216,11 +234,51 @@ async fn queued_slash_compact_dispatches_after_active_turn() {
 
     let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
     assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, AppEvent::CodexOp(Op::Compact))),
-        "expected queued /compact to submit compact op; events: {events:?}"
+        events.iter().any(|event| matches!(
+            event,
+            AppEvent::CodexOp(Op::CompactWithMode {
+                mode: codex_protocol::protocol::CompactionMode::Local,
+            })
+        )),
+        "expected queued /compact local to submit compact op; events: {events:?}"
     );
+}
+
+#[tokio::test]
+async fn slash_compact_uses_provider_config_for_status() {
+    for (mode, expected_header) in [
+        (
+            codex_protocol::protocol::CompactionMode::Local,
+            "Compacting locally",
+        ),
+        (
+            codex_protocol::protocol::CompactionMode::RemoteV1,
+            "Compacting remotely (v1)",
+        ),
+        (
+            codex_protocol::protocol::CompactionMode::RemoteV2,
+            "Compacting remotely (v2)",
+        ),
+    ] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.config.model_provider.compact = Some(mode);
+
+        chat.dispatch_command(SlashCommand::Compact);
+
+        assert_eq!(chat.status_state.current_status.header, expected_header);
+        assert_matches!(rx.try_recv(), Ok(AppEvent::CodexOp(Op::Compact)));
+    }
+}
+
+#[tokio::test]
+async fn slash_compact_rejects_an_invalid_mode() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    chat.dispatch_command_with_args(SlashCommand::Compact, "invalid".to_string(), Vec::new());
+
+    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
+    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+    assert!(!chat.bottom_pane.is_task_running());
 }
 
 #[tokio::test]

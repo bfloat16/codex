@@ -27,7 +27,10 @@ impl ChatWidget {
                 ..
             })
         );
-        if !is_resume_initial_replay && !is_retry_error {
+        // Transfer progress also arrives during failed retries and is not evidence of recovery.
+        let is_request_progress =
+            matches!(&notification, ServerNotification::ModelRequestProgress(_));
+        if !is_resume_initial_replay && !is_retry_error && !is_request_progress {
             self.restore_retry_status_header_if_present();
         }
         match notification {
@@ -69,6 +72,22 @@ impl ChatWidget {
                     self.warning_display_state.startup_complete = true;
                     self.on_task_started();
                 }
+            }
+            ServerNotification::ModelRequestProgress(notification) => {
+                let phase = match notification.phase {
+                    codex_app_server_protocol::ModelRequestProgressPhase::Sending => {
+                        crate::status_indicator_widget::ModelTransferPhase::Sending
+                    }
+                    codex_app_server_protocol::ModelRequestProgressPhase::Receiving => {
+                        crate::status_indicator_widget::ModelTransferPhase::Receiving
+                    }
+                };
+                let status = self.status_state.update_model_transfer(
+                    phase,
+                    notification.sent_bytes,
+                    notification.received_bytes,
+                );
+                self.bottom_pane.update_model_transfer(Some(status));
             }
             ServerNotification::TurnCompleted(notification) => {
                 self.handle_turn_completed_notification(notification, replay_kind);
@@ -380,6 +399,9 @@ impl ChatWidget {
         notification: ItemStartedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        if replay_kind.is_none() && thread_item_has_effective_model_output(&notification.item) {
+            self.transcript.saw_effective_model_output_this_turn = true;
+        }
         match notification.item {
             ThreadItem::ContextCompaction { id }
                 if !matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) =>
@@ -394,6 +416,9 @@ impl ChatWidget {
                 } else {
                     Duration::ZERO
                 };
+                if replay_kind.is_none() {
+                    self.start_compaction_status();
+                }
                 self.on_context_compaction_started(id, elapsed);
             }
             item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_started(item),
@@ -450,6 +475,11 @@ impl ChatWidget {
         {
             self.add_async_questions(id, questions);
         }
+        if replay_kind.is_none() && thread_item_has_effective_model_output(&notification.item) {
+            self.transcript.saw_effective_model_output_this_turn = true;
+        }
+        let is_context_compaction =
+            matches!(&notification.item, ThreadItem::ContextCompaction { .. });
         match notification.item {
             item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_completed(item),
             item => self.handle_thread_item(
@@ -458,5 +488,38 @@ impl ChatWidget {
                 replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
             ),
         }
+        if is_context_compaction && replay_kind.is_none() {
+            self.finish_compaction_status();
+        }
+    }
+}
+
+fn thread_item_has_effective_model_output(item: &ThreadItem) -> bool {
+    match item {
+        ThreadItem::UserMessage { .. }
+        | ThreadItem::HookPrompt { .. }
+        | ThreadItem::Reasoning { .. }
+        | ThreadItem::ContextCompaction { .. } => false,
+        ThreadItem::AgentMessage { text, .. } | ThreadItem::Plan { text, .. } => {
+            !text.trim().is_empty()
+        }
+        ThreadItem::CommandExecution { source, .. } => match source {
+            ExecCommandSource::Agent
+            | ExecCommandSource::UnifiedExecStartup
+            | ExecCommandSource::UnifiedExecInteraction => true,
+            ExecCommandSource::UserShell => false,
+        },
+        ThreadItem::FunctionCallOutput { .. }
+        | ThreadItem::FileChange { .. }
+        | ThreadItem::McpToolCall { .. }
+        | ThreadItem::DynamicToolCall { .. }
+        | ThreadItem::CollabAgentToolCall { .. }
+        | ThreadItem::SubAgentActivity { .. }
+        | ThreadItem::WebSearch(_)
+        | ThreadItem::ImageView { .. }
+        | ThreadItem::Sleep(_)
+        | ThreadItem::ImageGeneration(_)
+        | ThreadItem::EnteredReviewMode { .. }
+        | ThreadItem::ExitedReviewMode { .. } => true,
     }
 }

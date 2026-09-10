@@ -1,6 +1,69 @@
 //! Status indicator and terminal-title state for `ChatWidget`.
 
+use crate::status_indicator_widget::ModelTransferPhase;
+use crate::status_indicator_widget::ModelTransferStatus;
 use crate::status_indicator_widget::STATUS_DETAILS_DEFAULT_MAX_LINES;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CompactionStatusKind {
+    Local,
+    RemoteV1,
+    RemoteV2,
+}
+
+impl CompactionStatusKind {
+    pub(super) fn header(self) -> &'static str {
+        match self {
+            Self::Local => "Compacting locally",
+            Self::RemoteV1 => "Compacting remotely (v1)",
+            Self::RemoteV2 => "Compacting remotely (v2)",
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ModelTransferAccumulator {
+    phase: Option<ModelTransferPhase>,
+    completed_sent_bytes: u64,
+    completed_received_bytes: u64,
+    request_sent_bytes: u64,
+    request_received_bytes: u64,
+}
+
+impl ModelTransferAccumulator {
+    fn update(
+        &mut self,
+        phase: ModelTransferPhase,
+        sent: u64,
+        received: u64,
+    ) -> ModelTransferStatus {
+        if matches!(phase, ModelTransferPhase::Sending) {
+            if self.phase.is_some() {
+                self.completed_sent_bytes = self
+                    .completed_sent_bytes
+                    .saturating_add(self.request_sent_bytes);
+                self.completed_received_bytes = self
+                    .completed_received_bytes
+                    .saturating_add(self.request_received_bytes);
+            }
+            self.request_sent_bytes = 0;
+            self.request_received_bytes = 0;
+        } else {
+            self.request_sent_bytes = sent;
+            self.request_received_bytes = received;
+        }
+        self.phase = Some(phase);
+        ModelTransferStatus {
+            phase,
+            sent_bytes: self
+                .completed_sent_bytes
+                .saturating_add(self.request_sent_bytes),
+            received_bytes: self
+                .completed_received_bytes
+                .saturating_add(self.request_received_bytes),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct StatusIndicatorState {
@@ -112,11 +175,14 @@ impl PendingGuardianReviewStatus {
 pub(super) struct StatusState {
     pub(super) compaction: Option<super::compaction::ActiveCompaction>,
     pub(super) current_status: StatusIndicatorState,
+    pub(super) active_compaction: Option<CompactionStatusKind>,
+    pub(super) pre_compaction_status: Option<StatusIndicatorState>,
     pub(super) pending_guardian_review_status: PendingGuardianReviewStatus,
     pub(super) terminal_title_status_kind: TerminalTitleStatusKind,
     pub(super) retry_status_header: Option<String>,
     pub(super) pending_status_indicator_restore: bool,
     pub(super) thread_title_generation_pending: bool,
+    model_transfer: ModelTransferAccumulator,
 }
 
 impl Default for StatusState {
@@ -124,11 +190,14 @@ impl Default for StatusState {
         Self {
             compaction: None,
             current_status: StatusIndicatorState::working(),
+            active_compaction: None,
+            pre_compaction_status: None,
             pending_guardian_review_status: PendingGuardianReviewStatus::default(),
             terminal_title_status_kind: TerminalTitleStatusKind::Working,
             retry_status_header: None,
             pending_status_indicator_restore: false,
             thread_title_generation_pending: false,
+            model_transfer: ModelTransferAccumulator::default(),
         }
     }
 }
@@ -136,6 +205,18 @@ impl Default for StatusState {
 impl StatusState {
     pub(super) fn set_status(&mut self, status: StatusIndicatorState) {
         self.current_status = status;
+    }
+
+    pub(super) fn begin_compaction(&mut self, kind: CompactionStatusKind) {
+        if self.active_compaction.is_none() {
+            self.pre_compaction_status = Some(self.current_status.clone());
+        }
+        self.active_compaction = Some(kind);
+    }
+
+    pub(super) fn finish_compaction(&mut self) -> Option<StatusIndicatorState> {
+        self.active_compaction = None;
+        self.pre_compaction_status.take()
     }
 
     pub(super) fn take_retry_status_header(&mut self) -> Option<String> {
@@ -146,6 +227,19 @@ impl StatusState {
         if self.retry_status_header.is_none() {
             self.retry_status_header = Some(self.current_status.header.clone());
         }
+    }
+
+    pub(super) fn reset_model_transfer(&mut self) {
+        self.model_transfer = ModelTransferAccumulator::default();
+    }
+
+    pub(super) fn update_model_transfer(
+        &mut self,
+        phase: ModelTransferPhase,
+        sent: u64,
+        received: u64,
+    ) -> ModelTransferStatus {
+        self.model_transfer.update(phase, sent, received)
     }
 }
 

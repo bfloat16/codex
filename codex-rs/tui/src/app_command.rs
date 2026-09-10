@@ -88,6 +88,9 @@ pub(crate) enum AppCommand {
         force_reload: bool,
     },
     Compact,
+    CompactWithMode {
+        mode: codex_protocol::protocol::CompactionMode,
+    },
     SetThreadName {
         name: String,
     },
@@ -228,6 +231,10 @@ impl AppCommand {
 
     pub(crate) fn compact() -> Self {
         Self::Compact
+    }
+
+    pub(crate) fn compact_with_mode(mode: codex_protocol::protocol::CompactionMode) -> Self {
+        Self::CompactWithMode { mode }
     }
 
     pub(crate) fn set_thread_name(name: String) -> Self {

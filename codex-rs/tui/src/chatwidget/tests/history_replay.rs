@@ -12,6 +12,43 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn replayed_manual_compact_renders_as_a_user_action_snapshot() {
+    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    let turn = AppServerTurn {
+        items: vec![
+            AppServerThreadItem::UserMessage {
+                id: "compact-command".to_string(),
+                client_id: None,
+                content: vec![AppServerUserInput::Text {
+                    text: "/compact local".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            },
+            AppServerThreadItem::ContextCompaction {
+                id: "compaction".to_string(),
+            },
+        ],
+        ..app_server_turn(
+            "compact-turn",
+            AppServerTurnStatus::Completed,
+            /*duration_ms*/ None,
+            /*error*/ None,
+        )
+    };
+
+    chat.replay_thread_turns(vec![turn], ReplayKind::ResumeInitialMessages);
+
+    let lines = drain_insert_history(&mut rx)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_chatwidget_snapshot!(
+        "replayed_manual_compact_user_action",
+        lines_to_single_string(&lines)
+    );
+}
+
+#[tokio::test]
 async fn resumed_initial_messages_render_history() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
 

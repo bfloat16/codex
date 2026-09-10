@@ -422,6 +422,7 @@ mod side;
 use self::safety_buffering::SafetyBufferingState;
 mod status_state;
 mod windows_sandbox_prompts;
+use self::status_state::CompactionStatusKind;
 use self::status_state::StatusIndicatorState;
 use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
@@ -798,6 +799,7 @@ pub(crate) struct ChatWidget {
     external_editor_state: ExternalEditorState,
     last_rendered_user_message_display: Option<UserMessageDisplay>,
     last_non_retry_error: Option<(String, String)>,
+    output_free_interrupt_turn_id: Option<String>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1785,7 +1787,10 @@ impl ChatWidget {
         if self.blocks_direct_input
             && matches!(
                 &op,
-                AppCommand::UserTurn { .. } | AppCommand::Review { .. } | AppCommand::Compact
+                AppCommand::UserTurn { .. }
+                    | AppCommand::Review { .. }
+                    | AppCommand::Compact
+                    | AppCommand::CompactWithMode { .. }
             )
         {
             self.add_error_message(if self.external_writer_view {
@@ -1828,6 +1833,7 @@ impl ChatWidget {
         if matches!(
             op,
             AppCommand::Compact
+                | AppCommand::CompactWithMode { .. }
                 | AppCommand::Review { .. }
                 | AppCommand::RunUserShellCommand { .. }
         ) {

@@ -843,7 +843,13 @@ impl App {
                 Ok(true)
             }
             AppCommand::Compact => {
-                app_server.thread_compact_start(thread_id).await?;
+                app_server.thread_compact_start(thread_id, None).await?;
+                Ok(true)
+            }
+            AppCommand::CompactWithMode { mode } => {
+                app_server
+                    .thread_compact_start(thread_id, Some(*mode))
+                    .await?;
                 Ok(true)
             }
             AppCommand::SetThreadName { name } => {

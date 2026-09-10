@@ -48,6 +48,19 @@ pub(crate) enum StatusDetailsCapitalization {
     Preserve,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModelTransferPhase {
+    Sending,
+    Receiving,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ModelTransferStatus {
+    pub(crate) phase: ModelTransferPhase,
+    pub(crate) sent_bytes: u64,
+    pub(crate) received_bytes: u64,
+}
+
 /// Displays a single-line in-progress status with optional wrapped details.
 pub(crate) struct StatusIndicatorWidget {
     /// Animated header text (defaults to "Working").
@@ -56,6 +69,7 @@ pub(crate) struct StatusIndicatorWidget {
     details_max_lines: usize,
     /// Optional suffix rendered after the elapsed/interrupt segment.
     inline_message: Option<String>,
+    model_transfer: Option<ModelTransferStatus>,
     /// Hook activity may move below the status row when it cannot fit in full.
     hook_status_message: Option<String>,
     show_interrupt_hint: bool,
@@ -94,6 +108,7 @@ impl StatusIndicatorWidget {
             details: None,
             details_max_lines: STATUS_DETAILS_DEFAULT_MAX_LINES,
             inline_message: None,
+            model_transfer: None,
             hook_status_message: None,
             show_interrupt_hint: true,
             interrupt_binding: Some(key_hint::plain(KeyCode::Esc).into()),
@@ -140,6 +155,11 @@ impl StatusIndicatorWidget {
         self.inline_message = message
             .map(|message| message.trim().to_string())
             .filter(|message| !message.is_empty());
+    }
+
+    pub(crate) fn update_model_transfer(&mut self, status: Option<ModelTransferStatus>) {
+        self.model_transfer = status;
+        self.frame_requester.schedule_frame();
     }
 
     pub(crate) fn update_hook_status_message(&mut self, message: Option<String>) {
@@ -218,7 +238,7 @@ impl StatusIndicator<'_> {
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
         let motion_mode = MotionMode::from_animations_enabled(row.animations_enabled);
 
-        let mut spans = Vec::with_capacity(5);
+        let mut spans = Vec::with_capacity(9);
         if let Some(indicator) = activity_indicator(
             Some(self.timer.last_resume_at),
             motion_mode,
@@ -237,10 +257,29 @@ impl StatusIndicator<'_> {
             spans.extend(vec![
                 format!("({pretty_elapsed} • ").dim(),
                 interrupt_binding.into(),
-                " to interrupt)".dim(),
+                " to interrupt".dim(),
             ]);
         } else {
-            spans.push(format!("({pretty_elapsed})").dim());
+            spans.push(format!("({pretty_elapsed}").dim());
+        }
+        if let Some(status) = row.model_transfer {
+            let sent = fmt_bytes(status.sent_bytes);
+            let received = fmt_bytes(status.received_bytes);
+            spans.push(" • ".dim());
+            let sent_transfer = format!("↑ {sent}");
+            spans.push(match status.phase {
+                ModelTransferPhase::Sending => sent_transfer.bold(),
+                ModelTransferPhase::Receiving => sent_transfer.dim(),
+            });
+            spans.push(" ".dim());
+            let received_transfer = format!("↓ {received}");
+            spans.push(match status.phase {
+                ModelTransferPhase::Sending => received_transfer.dim(),
+                ModelTransferPhase::Receiving => received_transfer.bold(),
+            });
+            spans.push(")".dim());
+        } else {
+            spans.push(")".dim());
         }
         if let Some(message) = &row.inline_message {
             // Keep optional context after elapsed/interrupt text so that core
@@ -297,6 +336,21 @@ impl Renderable for StatusIndicator<'_> {
     }
 }
 
+fn fmt_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = KIB * 1024;
+    let (divisor, unit) = if bytes >= MIB {
+        (MIB, "MiB")
+    } else if bytes >= KIB {
+        (KIB, "KiB")
+    } else {
+        return format!("{bytes} B");
+    };
+    let whole = bytes / divisor;
+    let hundredths = bytes % divisor * 100 / divisor;
+    format!("{whole}.{hundredths:03} {unit}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,6 +393,33 @@ mod tests {
             .draw(|f| w.with_timer(&timer).render(f.area(), f.buffer_mut()))
             .expect("draw");
         insta::assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
+    fn renders_receiving_transfer_progress() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut widget = StatusIndicatorWidget::new(
+            tx,
+            crate::tui::FrameRequester::test_dummy(),
+            /*animations_enabled*/ false,
+        );
+        widget.update_model_transfer(Some(ModelTransferStatus {
+            phase: ModelTransferPhase::Receiving,
+            sent_bytes: 2048,
+            received_bytes: 1024 * 1024,
+        }));
+        let mut timer = StatusTimer::default();
+        timer.pause_at(timer.last_resume_at);
+        let mut terminal = Terminal::new(TestBackend::new(80, 1)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                widget
+                    .with_timer(&timer)
+                    .render(frame.area(), frame.buffer_mut())
+            })
+            .expect("draw");
+        insta::assert_snapshot!(terminal.backend(), @"Working (0s • esc to interrupt • ↑ 2.00 KiB ↓ 1.00 MiB)                         ");
     }
 
     #[test]

@@ -1,0 +1,11 @@
+---
+source: tui/src/chatwidget/tests/provider_popup.rs
+expression: popup
+---
+  Select Provider
+  Choose a provider configured in config.toml for this session.
+
+› 1. alpha (current)  Alpha - https://alpha.example/v1
+  2. zeta             Zeta - https://zeta.example/v1
+
+  Press enter to confirm or esc to go back

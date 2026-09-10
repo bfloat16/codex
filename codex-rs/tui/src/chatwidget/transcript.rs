@@ -49,6 +49,8 @@ pub(super) struct TranscriptState {
     pub(super) latest_proposed_plan_markdown: Option<String>,
     /// Whether this turn already produced a copyable response.
     pub(super) saw_copy_source_this_turn: bool,
+    /// Whether this turn produced visible model text or started a model-requested tool action.
+    pub(super) saw_effective_model_output_this_turn: bool,
     /// Whether the next streamed assistant content should be preceded by a final message separator.
     pub(super) needs_final_message_separator: bool,
     /// Whether the current turn performed "work" (exec commands, MCP tool calls, patch applications).
@@ -106,6 +108,7 @@ impl TranscriptState {
 
     pub(super) fn reset_turn_flags(&mut self) {
         self.saw_copy_source_this_turn = false;
+        self.saw_effective_model_output_this_turn = false;
         self.last_completed_agent_message = None;
         self.saw_plan_update_this_turn = false;
         self.saw_plan_item_this_turn = false;
