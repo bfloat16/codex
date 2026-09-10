@@ -494,6 +494,25 @@ pub struct TurnStartedNotification {
     pub turn: Turn,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum ModelRequestProgressPhase {
+    Sending,
+    Receiving,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ModelRequestProgressNotification {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub phase: ModelRequestProgressPhase,
+    pub sent_bytes: u64,
+    pub received_bytes: u64,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

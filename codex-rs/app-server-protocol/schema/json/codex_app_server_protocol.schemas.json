@@ -4879,6 +4879,27 @@
           "type": "object"
         },
         {
+          "description": "Ephemeral byte progress for the active upstream model request.",
+          "properties": {
+            "method": {
+              "enum": [
+                "turn/modelRequestProgress"
+              ],
+              "title": "Turn/modelRequestProgressNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ModelRequestProgressNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Turn/modelRequestProgressNotification",
+          "type": "object"
+        },
+        {
           "properties": {
             "method": {
               "enum": [
@@ -8936,6 +8957,15 @@
           "name"
         ],
         "type": "object"
+      },
+      "CompactionMode": {
+        "description": "Explicit strategy for a manual or provider-configured context compaction.",
+        "enum": [
+          "local",
+          "remotev1",
+          "remotev2"
+        ],
+        "type": "string"
       },
       "ComputerUseConfig": {
         "properties": {
@@ -15185,6 +15215,46 @@
         "title": "ModelProviderCapabilitiesReadResponse",
         "type": "object"
       },
+      "ModelRequestProgressNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "phase": {
+            "$ref": "#/definitions/v2/ModelRequestProgressPhase"
+          },
+          "receivedBytes": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "sentBytes": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "receivedBytes",
+          "sentBytes",
+          "threadId",
+          "turnId"
+        ],
+        "title": "ModelRequestProgressNotification",
+        "type": "object"
+      },
+      "ModelRequestProgressPhase": {
+        "enum": [
+          "sending",
+          "receiving"
+        ],
+        "type": "string"
+      },
       "ModelRerouteReason": {
         "enum": [
           "highRiskCyberActivity"
@@ -20561,6 +20631,16 @@
       "ThreadCompactStartParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/CompactionMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "threadId": {
             "type": "string"
           }
@@ -23085,7 +23165,7 @@
       },
       "ThreadRevertParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "Replace a paginated thread's durable history with the prefix before one turn.\n\nThis only changes persisted conversation history. It does not revert local file changes.",
+        "description": "Truncate a paginated thread's existing rollout with the prefix before one turn.\n\nThis only changes persisted conversation history. It does not revert local file changes.",
         "properties": {
           "beforeTurnId": {
             "description": "Turn excluded from the replacement history, together with every later turn.",

@@ -548,6 +548,9 @@ pub struct ThreadSettingsOverrides {
     /// Updated model slug. When set, the model info is derived automatically.
     pub model: Option<String>,
 
+    /// Updated model provider id. When set, subsequent turns use the configured provider.
+    pub model_provider: Option<String>,
+
     /// Updated reasoning effort (honored only for reasoning-capable models).
     ///
     /// Use `Some(Some(_))` to set a specific effort, `Some(None)` to clear the
@@ -729,6 +732,9 @@ pub enum Op {
     /// to generate a summary which will be returned as an AgentMessage event.
     Compact,
 
+    /// Request compaction using an explicit strategy for this turn.
+    CompactWithMode { mode: CompactionMode },
+
     /// Set whether the thread remains eligible for memory generation.
     ///
     /// This persists thread-level memory mode metadata without involving the
@@ -777,6 +783,18 @@ pub enum ThreadHistoryMode {
     #[default]
     Legacy,
     Paginated,
+}
+
+/// Explicit strategy for a manual or provider-configured context compaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(rename_all = "lowercase")]
+pub enum CompactionMode {
+    Local,
+    #[serde(rename = "remotev1")]
+    RemoteV1,
+    #[serde(rename = "remotev2")]
+    RemoteV2,
 }
 
 impl ThreadHistoryMode {
@@ -953,6 +971,7 @@ impl Op {
             Self::RefreshMcpServers => "refresh_mcp_servers",
             Self::ReloadUserConfig => "reload_user_config",
             Self::Compact => "compact",
+            Self::CompactWithMode { .. } => "compact",
             Self::SetThreadMemoryMode { .. } => "set_thread_memory_mode",
             Self::ThreadRollback { .. } => "thread_rollback",
             Self::Review { .. } => "review",
@@ -1404,6 +1423,9 @@ pub enum EventMsg {
     /// v1 wire format uses `task_started`; accept `turn_started` for v2 interop.
     #[serde(rename = "task_started", alias = "turn_started")]
     TurnStarted(TurnStartedEvent),
+
+    /// Ephemeral byte progress for the active upstream model request.
+    ModelRequestProgress(ModelRequestProgressEvent),
 
     /// Persistent thread-settings overrides from the correlated submission have
     /// been applied to the session configuration.
@@ -2178,6 +2200,21 @@ pub struct TurnStartedEvent {
     pub model_context_window: Option<i64>,
     #[serde(default)]
     pub collaboration_mode_kind: ModeKind,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum ModelRequestProgressPhase {
+    Sending,
+    Receiving,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, TS)]
+pub struct ModelRequestProgressEvent {
+    pub phase: ModelRequestProgressPhase,
+    pub sent_bytes: u64,
+    pub received_bytes: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
@@ -3022,7 +3059,7 @@ pub struct HistoryPosition {
     ///
     /// `HistoryPosition` predates `thread/revert`, so this field is named `thread_id`. Treat its
     /// value as a `rollout_id`: ordinary rollouts use the thread ID as their rollout ID, while a
-    /// reverted thread's filename carries a distinct rollout ID. It is not necessarily
+    /// historical reverted filenames may carry a distinct rollout ID. It is not necessarily
     /// [`SessionMeta::id`], which remains the stable thread ID across revert.
     pub thread_id: ThreadId,
     /// First rollout ordinal not included from the prefix file.
@@ -3044,7 +3081,8 @@ pub struct SessionMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forked_from_id: Option<ThreadId>,
     /// Exclusive ordinal inherited from the logical fork parent, independent of `history_base`.
-    /// Revert may replace the physical history base while retaining this fork boundary.
+    /// Historical revert implementations could replace the physical history base while retaining
+    /// this fork boundary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forked_from_ordinal_exclusive: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

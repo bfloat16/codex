@@ -32,6 +32,7 @@ pub use codex_protocol::dynamic_tools::DynamicToolNamespaceTool;
 pub use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
+pub use codex_protocol::protocol::CompactionMode;
 use codex_protocol::protocol::ThreadGoalStatus as CoreThreadGoalStatus;
 use codex_protocol::protocol::TokenUsage as CoreTokenUsage;
 use codex_protocol::protocol::TokenUsageInfo as CoreTokenUsageInfo;
@@ -246,6 +247,9 @@ pub struct ThreadSettingsUpdateParams {
     /// Override the model for subsequent turns.
     #[ts(optional = nullable)]
     pub model: Option<String>,
+    /// Override the model provider for subsequent turns.
+    #[ts(optional = nullable)]
+    pub model_provider: Option<String>,
     /// Override the service tier for subsequent turns. `null` clears the
     /// current service tier; omission leaves it unchanged.
     #[serde(
@@ -1118,6 +1122,8 @@ pub struct ThreadUnarchiveResponse {
 #[ts(export_to = "v2/")]
 pub struct ThreadCompactStartParams {
     pub thread_id: String,
+    #[ts(optional = nullable)]
+    pub mode: Option<CompactionMode>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -1250,7 +1256,7 @@ pub struct ThreadRollbackResponse {
     pub thread: Thread,
 }
 
-/// Replace a paginated thread's durable history with the prefix before one turn.
+/// Truncate a paginated thread's existing rollout with the prefix before one turn.
 ///
 /// This only changes persisted conversation history. It does not revert local file changes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

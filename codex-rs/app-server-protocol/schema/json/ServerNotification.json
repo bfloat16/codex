@@ -2985,6 +2985,44 @@
       ],
       "type": "string"
     },
+    "ModelRequestProgressNotification": {
+      "properties": {
+        "phase": {
+          "$ref": "#/definitions/ModelRequestProgressPhase"
+        },
+        "receivedBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sentBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "receivedBytes",
+        "sentBytes",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "ModelRequestProgressPhase": {
+      "enum": [
+        "sending",
+        "receiving"
+      ],
+      "type": "string"
+    },
     "ModelRerouteReason": {
       "enum": [
         "highRiskCyberActivity"
@@ -7140,6 +7178,27 @@
         "params"
       ],
       "title": "Turn/startedNotification",
+      "type": "object"
+    },
+    {
+      "description": "Ephemeral byte progress for the active upstream model request.",
+      "properties": {
+        "method": {
+          "enum": [
+            "turn/modelRequestProgress"
+          ],
+          "title": "Turn/modelRequestProgressNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ModelRequestProgressNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Turn/modelRequestProgressNotification",
       "type": "object"
     },
     {
