@@ -693,6 +693,7 @@ async fn run_websocket_response_stream(
 ) -> Result<(), ApiError> {
     let mut last_server_model: Option<String> = None;
     let mut safety_buffering_treatment = SafetyBufferingTreatment::default();
+    let request_bytes = u64::try_from(request_text.len()).unwrap_or(u64::MAX);
     send_websocket_request(
         ws_stream,
         request_text,
@@ -701,6 +702,10 @@ async fn run_websocket_response_stream(
         timing_log_context.connection_reused,
     )
     .await?;
+    let _ = tx_event
+        .send(Ok(ResponseEvent::RequestBytesSent(request_bytes)))
+        .await;
+    let mut received_bytes = 0_u64;
 
     loop {
         let poll_start = Instant::now();
@@ -727,6 +732,11 @@ async fn run_websocket_response_stream(
 
         match message {
             Message::Text(text) => {
+                received_bytes =
+                    received_bytes.saturating_add(u64::try_from(text.len()).unwrap_or(u64::MAX));
+                let _ = tx_event
+                    .send(Ok(ResponseEvent::ResponseBytesReceived(received_bytes)))
+                    .await;
                 if let Some(wrapped_error) = parse_wrapped_websocket_error_event(&text)
                     && let Some(error) =
                         map_wrapped_websocket_error_event(wrapped_error, text.to_string())

@@ -100,6 +100,10 @@ pub struct ResponseId(pub String);
 
 #[derive(Debug)]
 pub enum ResponseEvent {
+    /// Exact request body bytes dispatched upstream.
+    RequestBytesSent(u64),
+    /// Cumulative raw response bytes received upstream.
+    ResponseBytesReceived(u64),
     Created {
         /// Existing server response ID, when supplied by the stream.
         response_id: Option<String>,

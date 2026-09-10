@@ -35,6 +35,7 @@ const TRUSTED_ACCESS_FOR_CYBER_VERIFICATION: &str = "trusted_access_for_cyber";
 
 pub fn spawn_response_stream(
     stream_response: StreamResponse,
+    request_bytes: Option<u64>,
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     turn_state: Option<Arc<OnceLock<String>>>,
@@ -71,6 +72,11 @@ pub fn spawn_response_stream(
     }
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
     tokio::spawn(async move {
+        if let Some(request_bytes) = request_bytes {
+            let _ = tx_event
+                .send(Ok(ResponseEvent::RequestBytesSent(request_bytes)))
+                .await;
+        }
         if let Some(model) = server_model {
             let _ = tx_event.send(Ok(ResponseEvent::ServerModel(model))).await;
         }
@@ -91,6 +97,7 @@ pub fn spawn_response_stream(
             idle_timeout,
             telemetry,
             safety_buffering_treatment,
+            true,
         )
         .await;
     });
@@ -561,6 +568,7 @@ pub async fn process_sse(
         idle_timeout,
         telemetry,
         SafetyBufferingTreatment::default(),
+        false,
     )
     .await;
 }
@@ -571,7 +579,20 @@ async fn process_sse_with_treatment(
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     safety_buffering_treatment: SafetyBufferingTreatment,
+    emit_progress: bool,
 ) {
+    let mut received_bytes = 0_u64;
+    let progress_tx = tx_event.clone();
+    let stream = stream.inspect(move |chunk| {
+        if let Ok(chunk) = chunk {
+            received_bytes =
+                received_bytes.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+            if emit_progress {
+                let _ =
+                    progress_tx.try_send(Ok(ResponseEvent::ResponseBytesReceived(received_bytes)));
+            }
+        }
+    });
     let mut stream = stream.eventsource();
     let mut response_error: Option<ApiError> = None;
     let mut last_server_model: Option<String> = None;
@@ -1509,6 +1530,7 @@ mod tests {
 
         let mut stream = spawn_response_stream(
             stream_response,
+            /*request_bytes*/ None,
             idle_timeout(),
             /*telemetry*/ None,
             /*turn_state*/ None,
@@ -1549,6 +1571,7 @@ mod tests {
 
         let mut stream = spawn_response_stream(
             stream_response,
+            /*request_bytes*/ None,
             idle_timeout(),
             /*telemetry*/ None,
             /*turn_state*/ None,

@@ -126,7 +126,7 @@ impl<T: HttpTransport> EndpointSession<T> {
         extra_headers: HeaderMap,
         body: Option<EncodedJsonBody>,
         configure: C,
-    ) -> Result<StreamResponse, ApiError>
+    ) -> Result<(StreamResponse, u64), ApiError>
     where
         C: Fn(&mut Request),
     {
@@ -134,6 +134,16 @@ impl<T: HttpTransport> EndpointSession<T> {
         let mut request = self.make_request(&method, path, &extra_headers, body.as_ref());
         configure(&mut request);
         let request = request.into_prepared().map_err(TransportError::Build)?;
+        let request_bytes = request
+            .body
+            .as_ref()
+            .map(|body| match body {
+                RequestBody::EncodedJson(body) => body.as_bytes().len(),
+                RequestBody::Raw(body) => body.len(),
+                RequestBody::Json(_) => 0,
+            })
+            .and_then(|len| u64::try_from(len).ok())
+            .unwrap_or(0);
         let make_request = || request.clone();
 
         let stream = run_with_request_telemetry(
@@ -151,6 +161,6 @@ impl<T: HttpTransport> EndpointSession<T> {
         )
         .await?;
 
-        Ok(stream)
+        Ok((stream, request_bytes))
     }
 }
