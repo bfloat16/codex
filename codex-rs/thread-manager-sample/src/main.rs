@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::IsTerminal;
