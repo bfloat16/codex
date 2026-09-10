@@ -1,9 +1,11 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
+use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tokio::task::JoinError;
 use tokio_util::either::Either;
@@ -45,19 +47,95 @@ pub(crate) struct ToolCallRuntime {
     step_context: Arc<StepContext>,
     tracker: SharedTurnDiffTracker,
     parallel_execution: Arc<RwLock<()>>,
+    execution_tracker: Arc<ToolExecutionTracker>,
+}
+
+#[derive(Default)]
+/// Tracks every tool call started during a turn, including code-mode nested calls.
+pub(crate) struct ToolExecutionTracker {
+    active_calls: AtomicUsize,
+    idle: Notify,
+}
+
+impl ToolExecutionTracker {
+    pub(crate) fn enter(self: &Arc<Self>) -> ToolExecutionGuard {
+        self.active_calls.fetch_add(1, Ordering::AcqRel);
+        ToolExecutionGuard {
+            tracker: Arc::clone(self),
+        }
+    }
+
+    pub(crate) async fn wait_for_all(&self) {
+        loop {
+            let notified = self.idle.notified();
+            if self.active_calls.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+pub(crate) struct ToolExecutionGuard {
+    tracker: Arc<ToolExecutionTracker>,
+}
+
+impl Drop for ToolExecutionGuard {
+    fn drop(&mut self) {
+        if self.tracker.active_calls.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.tracker.idle.notify_waiters();
+        }
+    }
 }
 
 impl ToolCallRuntime {
+    #[cfg(test)]
     pub(crate) fn new(
         session: Arc<Session>,
         step_context: Arc<StepContext>,
         tracker: SharedTurnDiffTracker,
+    ) -> Self {
+        Self::new_with_execution_gate(
+            session,
+            step_context,
+            tracker,
+            Arc::new(RwLock::new(())),
+            Arc::new(ToolExecutionTracker::default()),
+        )
+    }
+
+    pub(crate) fn new_with_execution_gate(
+        session: Arc<Session>,
+        step_context: Arc<StepContext>,
+        tracker: SharedTurnDiffTracker,
+        parallel_execution: Arc<RwLock<()>>,
+        execution_tracker: Arc<ToolExecutionTracker>,
+    ) -> Self {
+        Self {
+            session,
+            step_context,
+            tracker,
+            parallel_execution,
+            execution_tracker,
+        }
+    }
+
+    pub(crate) async fn wait_for_all_tools(&self) {
+        self.execution_tracker.wait_for_all().await;
+    }
+
+    pub(crate) fn new_with_execution_tracker(
+        session: Arc<Session>,
+        step_context: Arc<StepContext>,
+        tracker: SharedTurnDiffTracker,
+        execution_tracker: Arc<ToolExecutionTracker>,
     ) -> Self {
         Self {
             session,
             step_context,
             tracker,
             parallel_execution: Arc::new(RwLock::new(())),
+            execution_tracker,
         }
     }
 
@@ -121,6 +199,7 @@ impl ToolCallRuntime {
         let turn = Arc::clone(&step_context.turn);
         let tracker = Arc::clone(&self.tracker);
         let lock = Arc::clone(&self.parallel_execution);
+        let execution_guard = self.execution_tracker.enter();
         let invocation_cancellation_token = cancellation_token.clone();
         let started = Instant::now();
         let tool_call_timing_guard =
@@ -146,12 +225,12 @@ impl ToolCallRuntime {
 
         let mut dispatch_handle: AbortOnDropHandle<Result<AnyToolResult, FunctionCallError>> =
             AbortOnDropHandle::new(tokio::spawn(async move {
+                let _execution_guard = execution_guard;
                 if let Some(tool_runtime) = tool_runtime
                     && let Some(readiness) = tool_runtime.wait_until_ready(&session)
                 {
                     readiness.await;
                 }
-
                 let _guard = if supports_parallel {
                     Either::Left(lock.read().await)
                 } else {

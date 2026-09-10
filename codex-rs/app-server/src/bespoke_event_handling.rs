@@ -43,6 +43,8 @@ use codex_app_server_protocol::McpServerElicitationRequestParams;
 use codex_app_server_protocol::McpServerElicitationRequestResponse;
 use codex_app_server_protocol::McpServerStartupState;
 use codex_app_server_protocol::McpServerStatusUpdatedNotification;
+use codex_app_server_protocol::ModelRequestProgressNotification;
+use codex_app_server_protocol::ModelRequestProgressPhase;
 use codex_app_server_protocol::ModelReroutedNotification;
 use codex_app_server_protocol::ModelSafetyBufferingUpdatedNotification;
 use codex_app_server_protocol::ModelVerificationNotification;
@@ -106,6 +108,7 @@ use codex_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ExecApprovalRequestEvent;
+use codex_protocol::protocol::ModelRequestProgressPhase as CoreModelRequestProgressPhase;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::RealtimeEvent;
 use codex_protocol::protocol::ReviewDecision;
@@ -413,6 +416,23 @@ pub(crate) async fn apply_bespoke_event_handling(
             };
             outgoing
                 .send_server_notification(ServerNotification::ModelRerouted(notification))
+                .await;
+        }
+        EventMsg::ModelRequestProgress(event) => {
+            let phase = match event.phase {
+                CoreModelRequestProgressPhase::Sending => ModelRequestProgressPhase::Sending,
+                CoreModelRequestProgressPhase::Receiving => ModelRequestProgressPhase::Receiving,
+            };
+            outgoing
+                .send_server_notification(ServerNotification::ModelRequestProgress(
+                    ModelRequestProgressNotification {
+                        thread_id: conversation_id.to_string(),
+                        turn_id: event_turn_id,
+                        phase,
+                        sent_bytes: event.sent_bytes,
+                        received_bytes: event.received_bytes,
+                    },
+                ))
                 .await;
         }
         EventMsg::ModelVerification(event) => {

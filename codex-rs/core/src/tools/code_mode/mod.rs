@@ -35,6 +35,7 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
 use crate::tools::parallel::ToolCallRuntime;
+use crate::tools::parallel::ToolExecutionTracker;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
 use crate::unified_exec::resolve_max_tokens;
@@ -202,6 +203,7 @@ impl CodeModeService {
         session: &Arc<Session>,
         step_context: Arc<StepContext>,
         tracker: SharedTurnDiffTracker,
+        execution_tracker: Arc<ToolExecutionTracker>,
     ) -> Option<CodeModeDispatchWorker> {
         let turn = &step_context.turn;
         if !step_context.tool_router.requires_code_mode_worker() {
@@ -214,7 +216,7 @@ impl CodeModeService {
         };
         Some(
             self.dispatch_broker
-                .start_turn_worker(exec, step_context, tracker),
+                .start_turn_worker(exec, step_context, tracker, execution_tracker),
         )
     }
 
@@ -448,6 +450,7 @@ mod tests {
     use crate::session::step_context::StepContext;
     use crate::session::tests::make_session_and_context;
     use crate::tools::context::ToolPayload;
+    use crate::tools::parallel::ToolExecutionTracker;
     use crate::tools::registry::ToolRegistry;
     use crate::tools::router::ToolRouter;
     use crate::turn_diff_tracker::TurnDiffTracker;
@@ -476,12 +479,14 @@ mod tests {
         ));
         let step_context = step_context.with_tool_router_for_test(router);
         let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
+        let execution_tracker = Arc::new(ToolExecutionTracker::default());
 
-        let worker =
-            session
-                .services
-                .code_mode_service
-                .start_turn_worker(&session, step_context, tracker);
+        let worker = session.services.code_mode_service.start_turn_worker(
+            &session,
+            step_context,
+            tracker,
+            execution_tracker,
+        );
 
         assert!(worker.is_some());
     }

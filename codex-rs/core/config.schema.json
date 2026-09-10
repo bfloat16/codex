@@ -507,6 +507,15 @@
       },
       "type": "object"
     },
+    "CompactionMode": {
+      "description": "Explicit strategy for a manual or provider-configured context compaction.",
+      "enum": [
+        "local",
+        "remotev1",
+        "remotev2"
+      ],
+      "type": "string"
+    },
     "ComputerUseConfigToml": {
       "additionalProperties": false,
       "properties": {
@@ -2230,6 +2239,15 @@
         "base_url": {
           "description": "Base URL for the provider's OpenAI-compatible API.",
           "type": "string"
+        },
+        "compact": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CompactionMode"
+            }
+          ],
+          "default": null,
+          "description": "Optional compaction strategy override. When omitted, the provider name determines the default strategy."
         },
         "env_http_headers": {
           "additionalProperties": {

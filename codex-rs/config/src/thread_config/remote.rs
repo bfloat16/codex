@@ -182,6 +182,7 @@ fn model_provider_from_proto(
             .transpose()?,
         aws: None,
         wire_api,
+        compact: None,
         query_params: provider.query_params.map(redacted_string_map),
         http_headers: provider.http_headers.map(redacted_string_map),
         env_http_headers: provider.env_http_headers.map(|map| map.values),
@@ -210,6 +211,7 @@ fn model_provider_to_proto(
         auth,
         aws: _,
         wire_api,
+        compact: _,
         query_params,
         http_headers,
         env_http_headers,
@@ -552,6 +554,7 @@ mod tests {
                 cwd: workspace_dir(),
             }),
             wire_api: WireApi::Responses,
+            compact: None,
             query_params: Some(HashMap::from([(
                 "api-version".to_string(),
                 "2026-04-16".into(),

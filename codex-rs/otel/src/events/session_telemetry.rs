@@ -1270,6 +1270,8 @@ impl SessionTelemetry {
 
     fn responses_type(event: &ResponseEvent) -> String {
         match event {
+            ResponseEvent::RequestBytesSent(_) => "request_bytes_sent".into(),
+            ResponseEvent::ResponseBytesReceived(_) => "response_bytes_received".into(),
             ResponseEvent::Created { .. } => "created".into(),
             ResponseEvent::OutputItemDone(item) | ResponseEvent::OutputItemAdded(item) => {
                 SessionTelemetry::responses_item_type(item)

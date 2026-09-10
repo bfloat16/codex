@@ -6,6 +6,7 @@ mod review_request;
 
 pub use compact::SUMMARIZATION_PROMPT;
 pub use compact::SUMMARY_PREFIX;
+pub use compact::SUMMARY_SUFFIX;
 pub use permissions_instructions::ApprovalPromptContext;
 pub use permissions_instructions::PermissionsInstructions;
 pub use realtime::BACKEND_PROMPT;

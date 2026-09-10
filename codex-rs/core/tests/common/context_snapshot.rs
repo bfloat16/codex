@@ -6,6 +6,8 @@ use std::sync::OnceLock;
 
 use crate::responses::ResponsesRequest;
 use crate::responses::strip_response_item_ids_from_json;
+use codex_core::compact::SUMMARIZATION_PROMPT;
+use codex_core::compact::SUMMARY_SUFFIX;
 use codex_protocol::protocol::APPS_INSTRUCTIONS_OPEN_TAG;
 use codex_protocol::protocol::PLUGINS_INSTRUCTIONS_OPEN_TAG;
 use codex_protocol::protocol::SKILLS_INSTRUCTIONS_OPEN_TAG;
@@ -435,13 +437,24 @@ fn canonicalize_snapshot_text(text: &str) -> String {
             "<ENVIRONMENT_CONTEXT>".to_string()
         };
     }
-    if text.starts_with("You are performing a CONTEXT CHECKPOINT COMPACTION.") {
+    if text.trim_end() == SUMMARIZATION_PROMPT.trim_end()
+        || text.starts_with("You are performing a CONTEXT CHECKPOINT COMPACTION.")
+        || text.starts_with(
+            "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools while summarizing.",
+        )
+    {
         return "<SUMMARIZATION_PROMPT>".to_string();
     }
     if text.starts_with("Another language model started to solve this problem")
         && let Some((_, summary)) = text.split_once('\n')
     {
         return format!("<COMPACTION_SUMMARY>\n{summary}");
+    }
+    let summary_suffix = SUMMARY_SUFFIX.trim();
+    if let Some(summary) = text.trim_end().strip_suffix(summary_suffix)
+        && (summary.is_empty() || summary.ends_with('\n'))
+    {
+        return format!("<COMPACTION_SUMMARY>\n{}", summary.trim_end_matches('\n'));
     }
     normalize_dynamic_snapshot_paths(text)
 }

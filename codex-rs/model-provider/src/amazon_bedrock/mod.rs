@@ -27,6 +27,7 @@ use codex_protocol::account::ProviderAccount;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use codex_protocol::openai_models::ModelsResponse;
+use codex_protocol::protocol::CompactionMode;
 
 use crate::auth::auth_manager_for_provider;
 use crate::auth::resolve_provider_auth as resolve_configured_provider_auth;
@@ -196,12 +197,17 @@ impl ModelProvider for AmazonBedrockModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
+        let remote_compaction = match self.info.compact {
+            Some(CompactionMode::Local) => RemoteCompactionSupport::Unsupported,
+            Some(CompactionMode::RemoteV1) => RemoteCompactionSupport::V1,
+            Some(CompactionMode::RemoteV2) | None => RemoteCompactionSupport::V2,
+        };
         ProviderCapabilities {
             namespace_tools: true,
             image_generation: false,
             web_search: self.endpoint == BedrockEndpoint::Mantle,
             external_web_access: false,
-            remote_compaction: RemoteCompactionSupport::V2,
+            remote_compaction,
         }
     }
 

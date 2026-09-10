@@ -49,7 +49,6 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TruncationPolicy;
-use codex_protocol::protocol::TurnStartedEvent;
 use codex_rollout_trace::CompactionCheckpointTracePayload;
 use codex_rollout_trace::InferenceTraceContext;
 use codex_utils_output_truncation::approx_token_count;
@@ -113,15 +112,6 @@ pub(crate) async fn run_remote_compact_task(
     let step_context = sess
         .capture_step_context(Arc::clone(&turn_context), &CancellationToken::new())
         .await?;
-    let start_event = EventMsg::TurnStarted(TurnStartedEvent {
-        turn_id: turn_context.sub_id.clone(),
-        trace_id: turn_context.trace_id.clone(),
-        started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
-        model_context_window: turn_context.model_context_window(),
-        collaboration_mode_kind: turn_context.mode(),
-    });
-    sess.send_event(&turn_context, start_event).await;
-
     let compaction_metadata = CompactionTurnMetadata::new(
         CompactionTrigger::Manual,
         CompactionReason::UserRequested,
@@ -402,7 +392,6 @@ async fn run_remote_compaction_request_v2(
 
         match result {
             Ok(compaction_output) => return Ok(compaction_output),
-            Err(err) if !err.is_retryable() => return Err(err),
             Err(err) => {
                 handle_retryable_response_stream_error(
                     &mut retry_state,

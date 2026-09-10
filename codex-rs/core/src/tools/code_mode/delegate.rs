@@ -23,6 +23,7 @@ use crate::session::step_context::StepContext;
 use crate::tools::ExecutedToolCallRecorder;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
+use crate::tools::parallel::ToolExecutionTracker;
 
 pub(super) struct CodeModeDispatchBroker {
     dispatch_tx: async_channel::Sender<DispatchMessage>,
@@ -103,13 +104,19 @@ impl CodeModeDispatchBroker {
         exec: ExecContext,
         step_context: Arc<StepContext>,
         tracker: SharedTurnDiffTracker,
+        execution_tracker: Arc<ToolExecutionTracker>,
     ) -> CodeModeDispatchWorker {
         let track_completeness = exec
             .turn
             .config
             .features
             .enabled(codex_features::Feature::ExecutedToolCallMetadata);
-        let tool_runtime = ToolCallRuntime::new(Arc::clone(&exec.session), step_context, tracker);
+        let tool_runtime = ToolCallRuntime::new_with_execution_tracker(
+            Arc::clone(&exec.session),
+            step_context,
+            tracker,
+            execution_tracker,
+        );
         let host = Arc::new(CoreTurnHost { exec, tool_runtime });
         let dispatch_rx = self.dispatch_rx.clone();
         let dispatch_gates = Arc::clone(&self.dispatch_gates);

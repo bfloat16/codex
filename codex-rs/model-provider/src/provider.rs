@@ -22,6 +22,7 @@ use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelsResponse;
+use codex_protocol::protocol::CompactionMode;
 use http::HeaderValue;
 
 use crate::amazon_bedrock::AmazonBedrockModelProvider;
@@ -46,6 +47,8 @@ pub(crate) fn enforce_managed_residency(provider: &mut Provider) {
 pub enum RemoteCompactionSupport {
     /// The provider does not support remote compaction.
     Unsupported,
+    /// The provider supports the legacy remote compaction request.
+    V1,
     /// The provider supports `compaction_trigger` items over the Responses endpoint.
     V2,
 }
@@ -351,12 +354,18 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        let remote_compaction = if self.info.is_openai()
+        let default_remote_compaction = if self.info.is_openai()
             || is_azure_responses_provider(&self.info.name, self.info.base_url.as_deref())
         {
             RemoteCompactionSupport::V2
         } else {
             RemoteCompactionSupport::Unsupported
+        };
+        let remote_compaction = match self.info.compact {
+            Some(CompactionMode::Local) => RemoteCompactionSupport::Unsupported,
+            Some(CompactionMode::RemoteV1) => RemoteCompactionSupport::V1,
+            Some(CompactionMode::RemoteV2) => RemoteCompactionSupport::V2,
+            None => default_remote_compaction,
         };
 
         ProviderCapabilities {
@@ -576,6 +585,7 @@ mod tests {
             auth: None,
             aws: None,
             wire_api: WireApi::Responses,
+            compact: None,
             query_params: None,
             http_headers: None,
             env_http_headers: None,
@@ -681,6 +691,27 @@ mod tests {
             (
                 provider_for("https://example.test/v1".to_string()),
                 RemoteCompactionSupport::Unsupported,
+            ),
+            (
+                ModelProviderInfo {
+                    compact: Some(CompactionMode::Local),
+                    ..ModelProviderInfo::default()
+                },
+                RemoteCompactionSupport::Unsupported,
+            ),
+            (
+                ModelProviderInfo {
+                    compact: Some(CompactionMode::RemoteV1),
+                    ..ModelProviderInfo::default()
+                },
+                RemoteCompactionSupport::V1,
+            ),
+            (
+                ModelProviderInfo {
+                    compact: Some(CompactionMode::RemoteV2),
+                    ..ModelProviderInfo::default()
+                },
+                RemoteCompactionSupport::V2,
             ),
         ];
 
@@ -1006,6 +1037,7 @@ mod tests {
                 name: "Custom".to_string(),
                 base_url: Some("http://localhost:1234/v1".to_string()),
                 wire_api: WireApi::Responses,
+                compact: None,
                 requires_openai_auth: false,
                 ..Default::default()
             },

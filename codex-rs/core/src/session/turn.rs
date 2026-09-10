@@ -54,6 +54,7 @@ use crate::tasks::emit_compact_metric;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
+use crate::tools::parallel::ToolExecutionTracker;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolSuggestCandidates;
 use crate::tools::router::ToolSuggestPresentation;
@@ -97,9 +98,12 @@ use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
 use codex_protocol::protocol::AgentReasoningSectionBreakEvent;
 use codex_protocol::protocol::CodexErrorInfo;
+use codex_protocol::protocol::CompactionMode;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InternalSessionSource;
+use codex_protocol::protocol::ModelRequestProgressEvent;
+use codex_protocol::protocol::ModelRequestProgressPhase;
 use codex_protocol::protocol::PlanDeltaEvent;
 use codex_protocol::protocol::ReasoningContentDeltaEvent;
 use codex_protocol::protocol::ReasoningRawContentDeltaEvent;
@@ -323,6 +327,8 @@ pub(crate) async fn run_turn(
     let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(
         TurnDiffTracker::with_environment_display_roots(display_roots),
     ));
+    let tool_execution_gate = Arc::new(tokio::sync::RwLock::new(()));
+    let tool_execution_tracker = Arc::new(ToolExecutionTracker::default());
 
     // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
     // one instance across retries within this turn.
@@ -435,6 +441,8 @@ pub(crate) async fn run_turn(
                 Arc::clone(&step_context),
                 Arc::clone(&turn_context.extension_data),
                 Arc::clone(&turn_diff_tracker),
+                Arc::clone(&tool_execution_gate),
+                Arc::clone(&tool_execution_tracker),
                 &mut client_session,
                 &responses_metadata,
                 sampling_request_input,
@@ -1261,7 +1269,14 @@ async fn run_auto_compact(
 ) -> CodexResult<()> {
     let turn_context = &step_context.turn;
     let _profile_guard = turn_context.turn_timing_state.begin_compaction();
-    if turn_context.config.features.enabled(Feature::TokenBudget) {
+    let mode = turn_context.provider.info().compact;
+    let support = turn_context.provider.capabilities().remote_compaction;
+    if turn_context.config.features.enabled(Feature::TokenBudget)
+        && !matches!(
+            mode,
+            Some(CompactionMode::RemoteV1 | CompactionMode::RemoteV2)
+        )
+    {
         // Compaction is the reset request, so force a new context window
         // instead of consuming a pending `new_context` tool request.
         crate::compact_token_budget::run_inline_auto_compact_task(
@@ -1273,12 +1288,13 @@ async fn run_auto_compact(
         return Ok(());
     }
 
-    match turn_context.provider.capabilities().remote_compaction {
+    match support {
         RemoteCompactionSupport::V2
             if turn_context
                 .config
                 .features
-                .enabled(Feature::RemoteCompactionV2) =>
+                .enabled(Feature::RemoteCompactionV2)
+                || mode == Some(CompactionMode::RemoteV2) =>
         {
             emit_compact_metric(
                 &sess.services.session_telemetry,
@@ -1296,7 +1312,7 @@ async fn run_auto_compact(
             )
             .await?;
         }
-        RemoteCompactionSupport::V2 => {
+        RemoteCompactionSupport::V2 | RemoteCompactionSupport::V1 => {
             emit_compact_metric(
                 &sess.services.session_telemetry,
                 "remote",
@@ -1418,6 +1434,8 @@ async fn run_sampling_request(
     step_context: Arc<StepContext>,
     turn_store: Arc<codex_extension_api::ExtensionData>,
     turn_diff_tracker: SharedTurnDiffTracker,
+    tool_execution_gate: Arc<tokio::sync::RwLock<()>>,
+    tool_execution_tracker: Arc<ToolExecutionTracker>,
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
     input: Vec<ResponseItem>,
@@ -1426,15 +1444,18 @@ async fn run_sampling_request(
     let turn_context = Arc::clone(&step_context.turn);
     let base_instructions = sess.get_prompt_base_instructions().await;
 
-    let tool_runtime = ToolCallRuntime::new(
+    let tool_runtime = ToolCallRuntime::new_with_execution_gate(
         Arc::clone(&sess),
         Arc::clone(&step_context),
         Arc::clone(&turn_diff_tracker),
+        tool_execution_gate,
+        Arc::clone(&tool_execution_tracker),
     );
     let _code_mode_worker = sess.services.code_mode_service.start_turn_worker(
         &sess,
         Arc::clone(&step_context),
         Arc::clone(&turn_diff_tracker),
+        tool_execution_tracker,
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
     let mut retry_state = ResponsesStreamRetryState::default();
@@ -1499,10 +1520,6 @@ async fn run_sampling_request(
 
         if original_input.is_none() {
             original_input = Some(prompt.input);
-        }
-
-        if !err.is_retryable() {
-            return Err(err);
         }
 
         handle_retryable_response_stream_error(
@@ -1880,6 +1897,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<(String, Option<
         | EventMsg::ContextCompacted(_)
         | EventMsg::ThreadRolledBack(_)
         | EventMsg::TurnStarted(_)
+        | EventMsg::ModelRequestProgress(_)
         | EventMsg::ThreadSettingsApplied(_)
         | EventMsg::TurnComplete(_)
         | EventMsg::TokenCount(_)
@@ -2302,6 +2320,16 @@ async fn try_run_sampling_request(
         .features
         .enabled(Feature::ConcurrentReasoningSummaries)
         && turn_context.provider.info().is_openai();
+    tool_runtime.wait_for_all_tools().await;
+    sess.send_event(
+        &turn_context,
+        EventMsg::ModelRequestProgress(ModelRequestProgressEvent {
+            phase: ModelRequestProgressPhase::Sending,
+            sent_bytes: 0,
+            received_bytes: 0,
+        }),
+    )
+    .await;
     let mut stream = client_session
         .stream(
             prompt,
@@ -2317,6 +2345,7 @@ async fn try_run_sampling_request(
         .or_cancel(&cancellation_token)
         .await??;
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
+    let mut sent_bytes = 0_u64;
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
     let mut active_item: Option<TurnItem> = None;
@@ -2383,12 +2412,44 @@ async fn try_run_sampling_request(
             }
         };
 
+        match &event {
+            ResponseEvent::RequestBytesSent(request_bytes) => {
+                sent_bytes = *request_bytes;
+                sess.send_event(
+                    &turn_context,
+                    EventMsg::ModelRequestProgress(ModelRequestProgressEvent {
+                        phase: ModelRequestProgressPhase::Receiving,
+                        sent_bytes,
+                        received_bytes: 0,
+                    }),
+                )
+                .await;
+                continue;
+            }
+            ResponseEvent::ResponseBytesReceived(received_bytes) => {
+                sess.send_event(
+                    &turn_context,
+                    EventMsg::ModelRequestProgress(ModelRequestProgressEvent {
+                        phase: ModelRequestProgressPhase::Receiving,
+                        sent_bytes,
+                        received_bytes: *received_bytes,
+                    }),
+                )
+                .await;
+                continue;
+            }
+            _ => {}
+        }
+
         sess.services
             .session_telemetry
             .record_responses(&handle_responses, &event);
         record_turn_ttft_metric(&turn_context, &event).await;
 
         match event {
+            ResponseEvent::RequestBytesSent(_) | ResponseEvent::ResponseBytesReceived(_) => {
+                unreachable!("model transfer progress is handled before response processing")
+            }
             ResponseEvent::Created { response_id } => {
                 if let Some(response_id) = response_id {
                     turn_context

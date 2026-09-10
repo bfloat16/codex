@@ -74,6 +74,27 @@ fn compacted_user_message(text: &str) -> CompactedUserMessage {
 }
 
 #[test]
+fn summary_message_recognizes_suffixed_and_legacy_summaries() {
+    let suffixed = format!("summary text\n{}", SUMMARY_SUFFIX.trim());
+    let legacy = format!("{}\nsummary text", SUMMARY_PREFIX.trim());
+
+    assert!(is_summary_message(&suffixed));
+    assert!(is_summary_message(&legacy));
+    assert!(!is_summary_message("ordinary user input"));
+}
+
+#[test]
+fn normalize_compaction_summary_removes_analysis_block() {
+    assert_eq!(
+        normalize_compaction_summary(
+            "<analysis>internal reasoning</analysis>\n<summary>handoff details</summary>"
+                .to_string(),
+        ),
+        "Summary:\nhandoff details"
+    );
+}
+
+#[test]
 fn content_items_to_text_joins_non_empty_segments() {
     let items = vec![
         ContentItem::InputText {

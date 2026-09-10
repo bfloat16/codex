@@ -2,7 +2,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 use codex_core::TurnInputRequest;
 use codex_core::compact::SUMMARIZATION_PROMPT;
-use codex_core::compact::SUMMARY_PREFIX;
+use codex_core::compact::SUMMARY_SUFFIX;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_history::RolloutItem;
@@ -22,6 +22,7 @@ use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelServiceTier;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::CompactionMode;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::HookEventName;
 use codex_protocol::protocol::HookRunStatus;
@@ -151,8 +152,8 @@ fn auto_summary(summary: &str) -> String {
     summary.to_string()
 }
 
-fn summary_with_prefix(summary: &str) -> String {
-    format!("{SUMMARY_PREFIX}\n{summary}")
+fn summary_with_suffix(summary: &str) -> String {
+    format!("{summary}\n{}", SUMMARY_SUFFIX.trim())
 }
 
 fn set_test_compact_prompt(config: &mut Config) {
@@ -637,7 +638,7 @@ async fn summarize_context_three_requests_and_instructions(
     );
 
     let mut messages: Vec<(String, String)> = Vec::new();
-    let expected_summary_message = summary_with_prefix(SUMMARY_TEXT);
+    let expected_summary_message = summary_with_suffix(SUMMARY_TEXT);
 
     for item in input3 {
         if let Some("message") = item.get("type").and_then(|v| v.as_str()) {
@@ -1111,15 +1112,26 @@ async fn manual_compact_emits_context_compaction_items() {
 
     codex.submit(Op::Compact).await.unwrap();
 
+    let mut compact_command = None;
     let mut started_item = None;
     let mut completed_item = None;
     let mut legacy_event = false;
     let mut saw_turn_complete = false;
 
-    while !saw_turn_complete || started_item.is_none() || completed_item.is_none() || !legacy_event
+    while !saw_turn_complete
+        || compact_command.is_none()
+        || started_item.is_none()
+        || completed_item.is_none()
+        || !legacy_event
     {
         let event = codex.next_event().await.unwrap();
         match event.msg {
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                item: TurnItem::UserMessage(item),
+                ..
+            }) => {
+                compact_command = Some(item.message());
+            }
             EventMsg::ItemStarted(ItemStartedEvent {
                 item: TurnItem::ContextCompaction(item),
                 ..
@@ -1142,10 +1154,85 @@ async fn manual_compact_emits_context_compaction_items() {
         }
     }
 
+    assert_eq!(compact_command.as_deref(), Some("/compact"));
     let started_item = started_item.expect("context compaction item started");
     let completed_item = completed_item.expect("context compaction item completed");
     assert_eq!(started_item.id, completed_item.id);
     assert!(legacy_event);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_compact_can_be_rolled_back_without_dropping_the_previous_turn() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let responses_mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("m1", FIRST_REPLY),
+                ev_completed("r1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("m2", SUMMARY_TEXT),
+                ev_completed("r2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("m3", FINAL_REPLY),
+                ev_completed("r3"),
+            ]),
+        ],
+    )
+    .await;
+
+    let model_provider = non_openai_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        set_test_compact_prompt(config);
+    });
+    let codex = builder.build(&server).await?.codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "before compact".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    codex
+        .submit(Op::CompactWithMode {
+            mode: CompactionMode::Local,
+        })
+        .await?;
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    codex.submit(Op::ThreadRollback { num_turns: 1 }).await?;
+    wait_for_event(&codex, |event| {
+        matches!(event, EventMsg::ThreadRolledBack(_))
+    })
+    .await;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "after rollback".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    let requests = responses_mock.requests();
+    assert_eq!(requests.len(), 3);
+    let user_texts = requests[2].message_input_texts("user");
+    assert!(user_texts.iter().any(|text| text == "before compact"));
+    assert!(user_texts.iter().any(|text| text == "after rollback"));
+    assert!(!user_texts.iter().any(|text| text == "/compact local"));
+    assert!(!body_contains_text(
+        &requests[2].body_json().to_string(),
+        SUMMARY_TEXT
+    ));
+
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1173,10 +1260,10 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let first_summary_text = "The task is to create an app. I started to create a react app.";
     let second_summary_text = "The task is to create an app. I started to create a react app. then I realized that I need to create a node app.";
     let third_summary_text = "The task is to create an app. I started to create a react app. then I realized that I need to create a node app. then I realized that I need to create a python app.";
-    // summary texts with prefix
-    let prefixed_first_summary = summary_with_prefix(first_summary_text);
-    let prefixed_second_summary = summary_with_prefix(second_summary_text);
-    let prefixed_third_summary = summary_with_prefix(third_summary_text);
+    // summary texts with suffix
+    let suffixed_first_summary = summary_with_suffix(first_summary_text);
+    let suffixed_second_summary = summary_with_suffix(second_summary_text);
+    let suffixed_third_summary = summary_with_suffix(third_summary_text);
     // token used count after long work
     let token_count_used = 270_000;
     // token used count after compaction
@@ -1340,12 +1427,12 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let initial_input = normalize_inputs(input);
     let environment_message = initial_input[0]["content"][0]["text"].as_str().unwrap();
 
-    // test 1: after compaction, we should have one environment message, one user message, and one user message with summary prefix
+    // test 1: after compaction, we should have one environment message, one user message, and one user message with summary suffix
     let compaction_indices = [2, 4, 6];
     let expected_summaries = [
-        prefixed_first_summary.as_str(),
-        prefixed_second_summary.as_str(),
-        prefixed_third_summary.as_str(),
+        suffixed_first_summary.as_str(),
+        suffixed_second_summary.as_str(),
+        suffixed_third_summary.as_str(),
     ];
     for (i, expected_summary) in compaction_indices.into_iter().zip(expected_summaries) {
         let body = requests_payloads.clone()[i].body_json();
@@ -1470,7 +1557,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_first_summary.clone(),
+            "text": suffixed_first_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -1504,7 +1591,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_first_summary.clone(),
+            "text": suffixed_first_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -1570,7 +1657,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_second_summary.clone(),
+            "text": suffixed_second_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -1604,7 +1691,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_second_summary.clone(),
+            "text": suffixed_second_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -1670,7 +1757,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_third_summary.clone(),
+            "text": suffixed_third_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -3918,7 +4005,7 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
     let final_user_message = "post compact follow-up";
     let first_summary = "FIRST_MANUAL_SUMMARY";
     let second_summary = "SECOND_MANUAL_SUMMARY";
-    let expected_second_summary = summary_with_prefix(second_summary);
+    let expected_second_summary = summary_with_suffix(second_summary);
 
     let server = start_mock_server().await;
 

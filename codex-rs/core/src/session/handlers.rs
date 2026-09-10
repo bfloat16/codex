@@ -26,6 +26,7 @@ use crate::tasks::UserShellCommandTask;
 use crate::tasks::execute_user_shell_command;
 use codex_history::RolloutItem;
 use codex_protocol::protocol::CodexErrorInfo;
+use codex_protocol::protocol::CompactionMode;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
@@ -244,11 +245,16 @@ pub async fn reload_user_config(sess: &Arc<Session>) {
 }
 
 pub async fn compact(sess: &Arc<Session>, sub_id: String) {
+    compact_with_mode(sess, sub_id, None).await;
+}
+
+pub async fn compact_with_mode(sess: &Arc<Session>, sub_id: String, mode: Option<CompactionMode>) {
     let turn_context = sess
         .new_turn_with_default_settings(sub_id, Default::default())
         .await;
 
-    sess.spawn_task(turn_context, Vec::new(), CompactTask).await;
+    sess.spawn_task(turn_context, Vec::new(), CompactTask { mode })
+        .await;
 }
 
 pub async fn thread_rollback(sess: &Arc<Session>, sub_id: String, num_turns: u32) {
@@ -678,6 +684,10 @@ pub(super) async fn submission_loop(
                 }
                 Op::Compact => {
                     compact(&sess, sub.id.clone()).await;
+                    false
+                }
+                Op::CompactWithMode { mode } => {
+                    compact_with_mode(&sess, sub.id.clone(), Some(mode)).await;
                     false
                 }
                 Op::ThreadRollback { num_turns } => {

@@ -1059,4 +1059,54 @@ command = "   "
             )
         );
     }
+
+    #[test]
+    fn model_providers_accept_independent_compact_modes() {
+        let config = toml::from_str::<ConfigToml>(
+            r#"
+[model_providers.local-provider]
+name = "Local Provider"
+compact = "local"
+
+[model_providers.remote-v1-provider]
+name = "Remote V1 Provider"
+compact = "remotev1"
+
+[model_providers.remote-v2-provider]
+name = "Remote V2 Provider"
+compact = "remotev2"
+"#,
+        )
+        .expect("provider compaction modes should deserialize");
+
+        assert_eq!(
+            config.model_providers,
+            HashMap::from([
+                (
+                    "local-provider".to_string(),
+                    ModelProviderInfo {
+                        name: "Local Provider".to_string(),
+                        compact: Some(codex_protocol::protocol::CompactionMode::Local),
+                        ..ModelProviderInfo::default()
+                    },
+                ),
+                (
+                    "remote-v1-provider".to_string(),
+                    ModelProviderInfo {
+                        name: "Remote V1 Provider".to_string(),
+                        compact: Some(codex_protocol::protocol::CompactionMode::RemoteV1),
+                        ..ModelProviderInfo::default()
+                    },
+                ),
+                (
+                    "remote-v2-provider".to_string(),
+                    ModelProviderInfo {
+                        name: "Remote V2 Provider".to_string(),
+                        compact: Some(codex_protocol::protocol::CompactionMode::RemoteV2),
+                        ..ModelProviderInfo::default()
+                    },
+                ),
+            ])
+        );
+    }
 }

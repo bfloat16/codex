@@ -10,6 +10,7 @@ use app_test_support::ChatGptAuthFixture;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::write_chatgpt_auth;
+use codex_app_server_protocol::CompactionMode;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::JSONRPCError;
@@ -308,6 +309,7 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
     let compact_id = mcp
         .send_thread_compact_start_request(ThreadCompactStartParams {
             thread_id: thread_id.clone(),
+            mode: Some(CompactionMode::Local),
         })
         .await?;
     let _: ThreadCompactStartResponse =
@@ -393,6 +395,7 @@ async fn thread_compact_start_rejects_invalid_thread_id() -> Result<()> {
     let request_id = mcp
         .send_thread_compact_start_request(ThreadCompactStartParams {
             thread_id: "not-a-thread-id".to_string(),
+            mode: None,
         })
         .await?;
     let error: JSONRPCError = timeout(
@@ -423,6 +426,7 @@ async fn thread_compact_start_rejects_unknown_thread_id() -> Result<()> {
     let request_id = mcp
         .send_thread_compact_start_request(ThreadCompactStartParams {
             thread_id: "67e55044-10b1-426f-9247-bb680e5fe0c8".to_string(),
+            mode: None,
         })
         .await?;
     let error: JSONRPCError = timeout(

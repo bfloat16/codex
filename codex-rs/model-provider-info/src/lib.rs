@@ -12,6 +12,7 @@ use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::EnvVarError;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::protocol::CompactionMode;
 use codex_utils_redacted_string::RedactedString;
 use http::HeaderMap;
 use http::header::HeaderName;
@@ -30,9 +31,9 @@ const DEFAULT_REQUEST_MAX_RETRIES: u64 = 4;
 const DEFAULT_AWS_AUTH_REFRESH_TIMEOUT_MS: u64 = 300_000;
 pub const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = 15_000;
 /// Hard cap for user-configured `stream_max_retries`.
-const MAX_STREAM_MAX_RETRIES: u64 = 100;
+const MAX_STREAM_MAX_RETRIES: u64 = 9999;
 /// Hard cap for user-configured `request_max_retries`.
-const MAX_REQUEST_MAX_RETRIES: u64 = 100;
+const MAX_REQUEST_MAX_RETRIES: u64 = 9999;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
@@ -117,6 +118,10 @@ pub struct ModelProviderInfo {
     /// Which wire protocol this provider expects.
     #[serde(default)]
     pub wire_api: WireApi,
+    /// Optional compaction strategy override. When omitted, the provider name determines the
+    /// default strategy.
+    #[serde(default)]
+    pub compact: Option<CompactionMode>,
     /// Optional query parameters to append to the base URL.
     pub query_params: Option<HashMap<String, RedactedString>>,
     /// Additional HTTP headers to include in requests to this provider where
@@ -393,6 +398,7 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             wire_api: WireApi::Responses,
+            compact: None,
             query_params: None,
             http_headers: Some(
                 [("version".to_string(), env!("CARGO_PKG_VERSION").into())]
@@ -440,6 +446,7 @@ impl ModelProviderInfo {
                 auth_refresh: None,
             })),
             wire_api: WireApi::Responses,
+            compact: None,
             query_params: None,
             http_headers: Some(HashMap::from([(
                 AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER.to_string(),
@@ -561,10 +568,11 @@ pub fn merge_configured_model_providers(
             let auth_override = provider.auth.take();
             let aws_override = provider.aws.take();
             let http_headers_override = provider.http_headers.take();
+            let compact_override = provider.compact.take();
             if provider != ModelProviderInfo::default() {
                 return Err(format!(
                     "model_providers.{key} only supports changing \
-`base_url`, `auth`, `http_headers`, `aws.profile`, `aws.region`, and `aws.auth_refresh`; \
+`base_url`, `auth`, `http_headers`, `compact`, `aws.profile`, `aws.region`, and `aws.auth_refresh`; \
 other non-default provider fields are not supported"
                 ));
             }
@@ -572,6 +580,7 @@ other non-default provider fields are not supported"
             if let Some(built_in_provider) = model_providers.get_mut(&key) {
                 built_in_provider.base_url = base_url_override;
                 built_in_provider.auth = auth_override;
+                built_in_provider.compact = compact_override;
                 if let Some(aws_override) = aws_override {
                     built_in_provider.aws = Some(aws_override);
                 }
@@ -619,6 +628,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         auth: None,
         aws: None,
         wire_api,
+        compact: None,
         query_params: None,
         http_headers: None,
         env_http_headers: None,

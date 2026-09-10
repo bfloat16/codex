@@ -15,6 +15,9 @@ use crate::hook_runtime::run_pre_compact_hooks;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_metadata::CompactionTurnMetadata;
+use crate::responses_retry::ResponsesStreamRequest;
+use crate::responses_retry::ResponsesStreamRetryState;
+use crate::responses_retry::handle_retryable_response_stream_error;
 #[cfg(test)]
 use crate::session::PreviousTurnSettings;
 use crate::session::session::Session;
@@ -22,7 +25,6 @@ use crate::session::step_context::StepContext;
 use crate::session::turn::get_last_assistant_message_from_turn;
 use crate::session::turn_context::TurnContext;
 use crate::state::AutoCompactWindowIds;
-use crate::util::backoff;
 use codex_analytics::CodexCompactionEvent;
 use codex_analytics::CompactionImplementation;
 use codex_analytics::CompactionPhase;
@@ -35,12 +37,14 @@ use codex_context_fragments::AnnotatedContent;
 use codex_context_fragments::set_annotated_content;
 use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
+use codex_history::RolloutItem;
 use codex_protocol::ResponseItemId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::ContextCompactionItem;
 use codex_protocol::items::TurnItem;
+use codex_protocol::items::UserMessageItem;
 use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
@@ -48,7 +52,6 @@ use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::TurnStartedEvent;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 use codex_rollout_trace::InferenceTraceContext;
@@ -60,6 +63,7 @@ use tracing::error;
 
 pub use codex_prompts::SUMMARIZATION_PROMPT;
 pub use codex_prompts::SUMMARY_PREFIX;
+pub use codex_prompts::SUMMARY_SUFFIX;
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 
 /// Controls whether compaction replacement history must include initial context.
@@ -153,14 +157,6 @@ pub(crate) async fn run_compact_task(
     turn_context: Arc<TurnContext>,
     input: Vec<UserInput>,
 ) -> CodexResult<()> {
-    let start_event = EventMsg::TurnStarted(TurnStartedEvent {
-        turn_id: turn_context.sub_id.clone(),
-        trace_id: turn_context.trace_id.clone(),
-        started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
-        model_context_window: turn_context.model_context_window(),
-        collaboration_mode_kind: turn_context.mode(),
-    });
-    sess.send_event(&turn_context, start_event).await;
     run_compact_task_inner(
         sess.clone(),
         turn_context,
@@ -172,6 +168,26 @@ pub(crate) async fn run_compact_task(
     )
     .await?;
     Ok(())
+}
+
+pub(crate) async fn record_manual_compact_command(
+    sess: &Session,
+    turn_context: &TurnContext,
+    command: &str,
+) {
+    let input = vec![UserInput::Text {
+        text: command.to_string(),
+        text_elements: Vec::new(),
+    }];
+    let turn_item = TurnItem::UserMessage(UserMessageItem::new(&input));
+    let response_item = sess.response_item_from_user_input(input);
+    sess.persist_rollout_items(&[RolloutItem::ResponseItem(ResponseItemEnvelope::new(
+        response_item,
+    ))])
+    .await;
+
+    sess.emit_turn_item_started(turn_context, &turn_item).await;
+    sess.emit_turn_item_completed(turn_context, turn_item).await;
 }
 
 async fn run_compact_task_inner(
@@ -264,7 +280,7 @@ async fn run_compact_task_inner_impl(
     );
 
     let max_retries = turn_context.provider.info().stream_max_retries();
-    let mut retries = 0;
+    let mut retry_state = ResponsesStreamRetryState::default();
     let mut client_session = sess.services.model_client.new_session();
     // Reuse one client session so turn-scoped state (sticky routing, websocket incremental
     // request tracking)
@@ -321,7 +337,7 @@ async fn run_compact_task_inner_impl(
                         "Context window exceeded while compacting; removing oldest history item. Error: {e}"
                     );
                     history.remove_first_item();
-                    retries = 0;
+                    retry_state = ResponsesStreamRetryState::default();
                     continue;
                 }
                 sess.set_total_tokens_full(turn_context.as_ref()).await;
@@ -331,18 +347,17 @@ async fn run_compact_task_inner_impl(
                 return Err(e);
             }
             Err(e) => {
-                if retries < max_retries {
-                    retries += 1;
-                    let delay = backoff(retries);
-                    sess.notify_stream_error(
-                        turn_context.as_ref(),
-                        format!("Reconnecting... {retries}/{max_retries}"),
-                        e,
-                    )
-                    .await;
-                    tokio::time::sleep(delay).await;
-                    continue;
-                } else {
+                if let Err(e) = handle_retryable_response_stream_error(
+                    &mut retry_state,
+                    max_retries,
+                    e,
+                    &mut client_session,
+                    &sess,
+                    &turn_context,
+                    ResponsesStreamRequest::Compaction,
+                )
+                .await
+                {
                     sess.track_turn_codex_error(turn_context.as_ref(), &e);
                     let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
                     sess.send_event(&turn_context, event).await;
@@ -354,9 +369,10 @@ async fn run_compact_task_inner_impl(
 
     let history_snapshot = sess.clone_history().await;
     let history_items = history_snapshot.annotated_items();
-    let summary_suffix =
-        get_last_assistant_message_from_turn(history_snapshot.raw_items()).unwrap_or_default();
-    let summary_text = format!("{SUMMARY_PREFIX}\n{summary_suffix}");
+    let summary_body = normalize_compaction_summary(
+        get_last_assistant_message_from_turn(history_snapshot.raw_items()).unwrap_or_default(),
+    );
+    let summary_text = format!("{summary_body}\n{}", SUMMARY_SUFFIX.trim());
     let identity = if sess.guardian_context_mode == GuardianContextMode::ThreadOwned {
         CompactedMessageIdentity::Preserve
     } else {
@@ -405,7 +421,7 @@ async fn run_compact_task_inner_impl(
         message: "Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted.".to_string(),
     });
     sess.send_event(&turn_context, warning).await;
-    Ok(summary_suffix)
+    Ok(summary_body)
 }
 
 pub(crate) struct CompactionAnalyticsAttempt {
@@ -596,7 +612,39 @@ fn compacted_user_message(
 }
 
 pub(crate) fn is_summary_message(message: &str) -> bool {
-    message.starts_with(format!("{SUMMARY_PREFIX}\n").as_str())
+    let message = message.trim_end();
+    let legacy_prefix = SUMMARY_PREFIX.trim_end();
+    let summary_suffix = SUMMARY_SUFFIX.trim();
+    let has_legacy_prefix = message
+        .strip_prefix(legacy_prefix)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('\n'));
+    let has_summary_suffix = message
+        .strip_suffix(summary_suffix)
+        .is_some_and(|rest| rest.is_empty() || rest.ends_with('\n'));
+    has_legacy_prefix || has_summary_suffix
+}
+
+fn normalize_compaction_summary(mut summary: String) -> String {
+    if let Some(start) = summary.find("<analysis>")
+        && let Some(relative_end) = summary[start..].find("</analysis>")
+    {
+        let end = start + relative_end + "</analysis>".len();
+        summary.replace_range(start..end, "");
+    }
+
+    if let Some(start) = summary.find("<summary>")
+        && let Some(relative_end) = summary[start..].find("</summary>")
+    {
+        let end = start + relative_end;
+        let content = summary[start + "<summary>".len()..end].trim();
+        let replacement = format!("Summary:\n{content}");
+        summary.replace_range(start..end + "</summary>".len(), &replacement);
+    }
+
+    while summary.contains("\n\n\n") {
+        summary = summary.replace("\n\n\n", "\n\n");
+    }
+    summary.trim().to_string()
 }
 
 /// Inserts canonical initial context into compacted replacement history at the
