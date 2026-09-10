@@ -104,6 +104,10 @@ use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
+use codex_app_server_protocol::ThreadRevertParams;
+use codex_app_server_protocol::ThreadRevertResponse;
+use codex_app_server_protocol::ThreadRollbackParams;
+use codex_app_server_protocol::ThreadRollbackResponse;
 use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::ThreadSetNameResponse;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
@@ -1620,6 +1624,73 @@ impl AppServerSession {
             .await
             .wrap_err("thread/backgroundTerminals/clean failed in TUI")?;
         Ok(())
+    }
+
+    pub(crate) async fn truncate_thread_before_turn(
+        &mut self,
+        config: &Config,
+        local_settings: &crate::local_settings::LocalSettings,
+        thread_id: ThreadId,
+        before_turn_id: String,
+        legacy_num_turns: u32,
+    ) -> Result<Thread> {
+        let history_mode = match self
+            .history_pagination
+            .get(&thread_id)
+            .map(|state| state.history_mode)
+        {
+            Some(history_mode) => history_mode,
+            None => {
+                self.thread_read(thread_id, /*include_turns*/ false)
+                    .await?
+                    .history_mode
+            }
+        };
+        match history_mode {
+            ThreadHistoryMode::Paginated => {
+                let request_id = self.next_request_id();
+                let ThreadRevertResponse {
+                    mut thread,
+                    turns_backwards_cursor,
+                    items_backwards_cursor,
+                } = self
+                    .client
+                    .request_typed(ClientRequest::ThreadRevert {
+                        request_id,
+                        params: ThreadRevertParams {
+                            thread_id: thread_id.to_string(),
+                            before_turn_id,
+                        },
+                    })
+                    .await
+                    .wrap_err("thread/revert failed in TUI")?;
+                self.hydrate_initial_thread_history(
+                    &mut thread,
+                    turns_backwards_cursor,
+                    items_backwards_cursor,
+                    Some(config),
+                    Some(local_settings),
+                    HistoryHydrationScope::Initial,
+                )
+                .await?;
+                Ok(thread)
+            }
+            ThreadHistoryMode::Legacy => {
+                let request_id = self.next_request_id();
+                let response: ThreadRollbackResponse = self
+                    .client
+                    .request_typed(ClientRequest::ThreadRollback {
+                        request_id,
+                        params: ThreadRollbackParams {
+                            thread_id: thread_id.to_string(),
+                            num_turns: legacy_num_turns,
+                        },
+                    })
+                    .await
+                    .wrap_err("thread/rollback failed in TUI")?;
+                Ok(response.thread)
+            }
+        }
     }
 
     pub(crate) async fn review_start(

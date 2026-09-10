@@ -513,11 +513,16 @@ pub(crate) enum AppEvent {
         name: Option<String>,
     },
 
-    /// Branch before a selected prompt and reopen it in the new thread's composer.
-    ForkSessionForPromptEdit {
+    /// Roll back the current thread before a selected prompt and keep it in the composer.
+    RollbackSessionForPromptEdit {
         thread_id: ThreadId,
         nth_user_message: usize,
         prompt: UserMessage,
+    },
+
+    RollbackOutputFreeTurnForPromptRestore {
+        thread_id: ThreadId,
+        turn_id: String,
     },
 
     /// Request to exit the application.

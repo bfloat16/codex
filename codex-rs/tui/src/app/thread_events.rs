@@ -6,6 +6,7 @@
 //! together with the replay behavior that consumes them.
 
 use super::*;
+use codex_app_server_protocol::Thread;
 use std::borrow::Cow;
 
 #[derive(Debug, Clone)]
@@ -136,6 +137,14 @@ impl ThreadEventStore {
     pub(super) fn set_active_turn_id(&mut self, turn_id: String) {
         self.latest_turn_id = Some(turn_id.clone());
         self.active_turn_id = Some(turn_id);
+    }
+
+    pub(super) fn apply_thread_history_replacement(&mut self, thread: &Thread) {
+        self.turns = thread.turns.clone();
+        self.buffer.clear();
+        self.pending_interactive_replay = PendingInteractiveReplayState::default();
+        self.active_turn_id = None;
+        self.pending_interrupt_turn_id = None;
     }
 
     pub(super) fn push_notification(&mut self, notification: ServerNotification) {

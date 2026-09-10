@@ -55,7 +55,7 @@ impl App {
                         mode: crate::app_event::ManagedWorktreeMode::Fork,
                         ..
                     }
-                    | AppEvent::ForkSessionForPromptEdit { .. }
+                    | AppEvent::RollbackSessionForPromptEdit { .. }
                     | AppEvent::SetThreadGoalDraft { .. }
                     | AppEvent::SetThreadGoalStatus {
                         status: ThreadGoalStatus::Active,
@@ -74,6 +74,38 @@ impl App {
                 self.continue_misalignment(app_server, review).await;
             }
             AppEvent::CloseMisalignmentReview => self.chat_widget.show_misalignment_policy_precaution(),
+            AppEvent::RollbackOutputFreeTurnForPromptRestore { thread_id, turn_id } => {
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    let user_total = crate::app_backtrack::user_count(&self.transcript_cells);
+                    match app_server
+                        .truncate_thread_before_turn(
+                            &self.config,
+                            &self.local_settings,
+                            thread_id,
+                            turn_id,
+                            /*legacy_num_turns*/ 1,
+                        )
+                        .await
+                    {
+                        Ok(thread) => {
+                            if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+                                channel
+                                    .store
+                                    .lock()
+                                    .await
+                                    .apply_thread_history_replacement(&thread);
+                            }
+                            if let Some(nth_user_message) = user_total.checked_sub(1) {
+                                self.handle_backtrack_rollback_succeeded(nth_user_message);
+                            }
+                        }
+                        Err(err) => self.chat_widget.add_error_message(format!(
+                            "Failed to remove the interrupted turn from conversation history: {err}"
+                        )),
+                    }
+                }
+                tui.frame_requester().schedule_frame();
+            }
             AppEvent::SkillsListLoaded { ref cwd, .. }
                 if cwds_differ(cwd, self.config.cwd.as_path()) =>
             {
@@ -455,7 +487,7 @@ impl App {
                 self.chat_widget.maybe_send_next_queued_input();
                 tui.frame_requester().schedule_frame();
             }
-            AppEvent::ForkSessionForPromptEdit {
+            AppEvent::RollbackSessionForPromptEdit {
                 thread_id,
                 nth_user_message,
                 mut prompt,
@@ -463,29 +495,10 @@ impl App {
                 if self.chat_widget.thread_id() != Some(thread_id) {
                     return Ok(AppRunControl::Continue);
                 }
-                if self.pending_server_profiles.contains_key(&thread_id) {
-                    self.chat_widget.restore_user_message_to_composer(prompt);
-                    self.chat_widget.add_error_message(
-                        "Wait for permissions to update before editing this prompt.".into(),
-                    );
-                    tui.frame_requester().schedule_frame();
-                    return Ok(AppRunControl::Continue);
-                }
-                self.session_telemetry.counter(
-                    "codex.thread.fork",
-                    /*inc*/ 1,
-                    &[("source", "transcript")],
-                );
-                self.refresh_in_memory_config_from_disk_best_effort("forking the thread")
-                    .await;
-                let config = self.fresh_session_config();
-                let selected_profile = self.confirmed_server_profile(thread_id);
-                let turns = match self.thread_event_channels.get(&thread_id) {
+                let rollback_target = match self.thread_event_channels.get(&thread_id) {
                     Some(channel) => {
                         let store = channel.store.lock().await;
                         let mut turns = store.turns.clone();
-                        // Snapshot turns contain loaded history; newer live turns remain in
-                        // the replay buffer and must also be visible to prompt-edit lookups.
                         for event in &store.buffer {
                             let ThreadBufferedEvent::Notification(notification) = event else {
                                 continue;
@@ -530,68 +543,79 @@ impl App {
                                 _ => {}
                             }
                         }
-                        Some(turns)
+                        crate::app_backtrack::backtrack_rollback_target(
+                            &turns,
+                            nth_user_message,
+                            &mut prompt,
+                        )
                     }
-                    None => None,
-                };
-                let started = match turns {
-                    Some(turns) => match crate::app_backtrack::backtrack_fork_before_turn_id(
-                        &turns,
-                        nth_user_message,
-                        &mut prompt,
-                    ) {
-                        Ok(before_turn_id)
-                            if before_turn_id.is_some()
-                                || app_server.has_older_history(thread_id) =>
-                        {
-                            let before_turn_id = before_turn_id
-                                .or_else(|| turns.first().map(|turn| turn.id.clone()));
-                            app_server
-                                .fork_thread_at(&self.local_settings, config.clone(),
-                                    thread_id,
-                                    /*last_turn_id*/ None,
-                                    before_turn_id,
-                                    ForkGoalContinuation::StartIfIdle,
-                                    selected_profile.as_ref(),
-                                )
-                                .await
-                        }
-                        Ok(_) => {
-                            app_server
-                                .start_thread_with_session_start_source(
-&self.local_settings,
-                                    &config, /*session_start_source*/ None,
-                                    /*remote_cwd_override*/ None,
-                                    selected_profile.as_ref(),
-                                )
-                                .await
-                        }
-                        Err(err) => Err(err),
-                    },
                     None => Err(color_eyre::eyre::eyre!(
                         "the selected thread is no longer available for prompt editing"
                     )),
                 };
-                match started {
-                    Ok(forked) => {
-                        self.shutdown_current_thread(app_server).await;
-                        match self
-                            .replace_chat_widget_with_app_server_thread(
-                                tui,
-                                forked,
-                                ThreadAttachPresentation::PromptEdit,
-                                /*initial_user_message*/ None,
-                            )
+                let rollback_target = match rollback_target {
+                    Ok(target) => Ok(target),
+                    Err(_) => {
+                        let refreshed_thread = match app_server
+                            .thread_read(thread_id, /*include_turns*/ false)
                             .await
                         {
-                            Ok(()) => self.chat_widget.restore_user_message_to_composer(prompt),
-                            Err(err) => {
-                                self.restore_backtrack_prompt_after_branch_error(prompt, err);
-                            }
+                            Ok(mut thread) => match app_server
+                                .hydrate_initial_thread_history(
+                                    &mut thread,
+                                    /*turn_cursor*/ None,
+                                    /*item_cursor*/ None,
+                                    /*config*/ None,
+                                    /*local_settings*/ None,
+                                    crate::app_server_session::HistoryHydrationScope::Complete,
+                                )
+                                .await
+                            {
+                                Ok(()) => Ok(thread),
+                                Err(err) => Err(err),
+                            },
+                            Err(err) => Err(err),
+                        };
+                        match refreshed_thread {
+                            Ok(thread) => crate::app_backtrack::backtrack_rollback_target(
+                                &thread.turns,
+                                nth_user_message,
+                                &mut prompt,
+                            ),
+                            Err(err) => Err(err),
                         }
                     }
+                };
+                match rollback_target {
+                    Ok(target) => match app_server
+                        .truncate_thread_before_turn(
+                            &self.config,
+                            &self.local_settings,
+                            thread_id,
+                            target.before_turn_id,
+                            target.legacy_num_turns,
+                        )
+                        .await
+                    {
+                        Ok(thread) => {
+                            if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+                                channel
+                                    .store
+                                    .lock()
+                                    .await
+                                    .apply_thread_history_replacement(&thread);
+                            }
+                            self.chat_widget.restore_user_message_to_composer(prompt);
+                            self.handle_backtrack_rollback_succeeded(nth_user_message);
+                        }
+                        Err(err) => {
+                            self.handle_backtrack_rollback_failed();
+                            self.restore_backtrack_prompt_after_rollback_error(prompt, err);
+                        }
+                    },
                     Err(err) => {
-                        self.restore_backtrack_prompt_after_branch_error(prompt, err);
+                        self.handle_backtrack_rollback_failed();
+                        self.restore_backtrack_prompt_after_rollback_error(prompt, err);
                     }
                 }
                 tui.frame_requester().schedule_frame();
