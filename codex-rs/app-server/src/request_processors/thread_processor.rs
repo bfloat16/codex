@@ -26,6 +26,8 @@ use codex_thread_store::LocalThreadStore;
 use codex_thread_store::PersistContext;
 use std::ops::ControlFlow;
 
+mod file_change;
+
 pub(super) const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
 pub(super) const THREAD_LIST_MAX_LIMIT: usize = 100;
 const CODEX_TUI_CLIENT_NAME: &str = "codex-tui";
@@ -2195,7 +2197,7 @@ impl ThreadRequestProcessor {
             .thread_store
             .revert_thread(codex_thread_store::RevertThreadParams {
                 thread_id,
-                before_turn_id,
+                before_turn_id: before_turn_id.clone(),
                 multi_agent_version: thread.multi_agent_version(),
             })
             .await
@@ -2210,6 +2212,13 @@ impl ThreadRequestProcessor {
             )
             .await?;
         revert_result?;
+        if let Ok(thread) = self.thread_manager.get_thread(thread_id).await
+            && let Err(err) = thread
+                .discard_file_checkpoints_from_turn(&before_turn_id)
+                .await
+        {
+            warn!("failed to discard file checkpoints after reverting {thread_id}: {err}");
+        }
         Ok((response, thread_id.to_string()))
     }
 

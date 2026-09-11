@@ -1334,6 +1334,19 @@ impl MessageProcessor {
                     )
                     .await
             }
+            ClientRequest::ThreadFileChangeRead { params, .. } => {
+                self.thread_processor.thread_file_change_read(params).await
+            }
+            ClientRequest::ThreadFileChangeRestore { params, .. } => {
+                self.thread_processor
+                    .thread_file_change_restore(params)
+                    .await
+            }
+            ClientRequest::ThreadFileChangeDiscard { params, .. } => {
+                self.thread_processor
+                    .thread_file_change_discard(params)
+                    .await
+            }
             ClientRequest::ThreadList { params, .. } => {
                 self.thread_processor.thread_list(params).await
             }

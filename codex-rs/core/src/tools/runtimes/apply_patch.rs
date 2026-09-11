@@ -18,6 +18,8 @@ use codex_apply_patch::AppliedPatchDelta;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::ApplyPatchOptions;
 use codex_exec_server::FileSystemSandboxContext;
+use codex_file_checkpoint::FileAfterImage;
+use codex_file_checkpoint::FileImage;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::SandboxErr;
 use codex_protocol::exec_output::ExecToolCallOutput;
@@ -169,11 +171,23 @@ impl ToolRuntime<ApplyPatchRequest, ApplyPatchRuntimeOutput> for ApplyPatchRunti
         &mut self,
         req: &ApplyPatchRequest,
         attempt: &SandboxAttempt<'_>,
-        _ctx: &ToolCtx,
+        ctx: &ToolCtx,
     ) -> Result<ApplyPatchRuntimeOutput, ToolError> {
         let started_at = Instant::now();
         let fs = req.turn_environment.environment.get_filesystem();
         let sandbox = Self::file_system_sandbox_context_for_attempt(req, attempt);
+        if let Some(file_checkpoints) = &ctx.session.services.file_checkpoints
+            && let Err(err) = file_checkpoints
+                .capture_before_write(
+                    &ctx.step_context.turn.sub_id,
+                    &req.turn_environment.selection.environment_id,
+                    fs.as_ref(),
+                    &req.file_paths,
+                )
+                .await
+        {
+            tracing::warn!("failed to capture file checkpoint before apply_patch: {err}");
+        }
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let result = codex_apply_patch::apply_patch_with_options(
@@ -205,6 +219,18 @@ impl ToolRuntime<ApplyPatchRequest, ApplyPatchRuntimeOutput> for ApplyPatchRunti
             Err(failure) => failure.into_parts().1,
         };
         self.committed_delta.append(delta);
+        if let Some(file_checkpoints) = &ctx.session.services.file_checkpoints {
+            let after_images = after_images(self.committed_delta());
+            if let Err(err) = file_checkpoints
+                .record_after_images(
+                    &req.turn_environment.selection.environment_id,
+                    &after_images,
+                )
+                .await
+            {
+                tracing::warn!("failed to record file checkpoint after apply_patch: {err}");
+            }
+        }
         let output = ExecToolCallOutput {
             exit_code,
             stdout: StreamOutput::new(stdout.clone()),
@@ -235,6 +261,47 @@ impl ToolRuntime<ApplyPatchRequest, ApplyPatchRuntimeOutput> for ApplyPatchRunti
             delta: self.committed_delta.clone(),
         })
     }
+}
+
+fn after_images(delta: &AppliedPatchDelta) -> Vec<FileAfterImage> {
+    delta
+        .changes()
+        .iter()
+        .flat_map(|change| match &change.change {
+            codex_apply_patch::AppliedPatchFileChange::Add { content, .. } => {
+                vec![FileAfterImage {
+                    path: change.path.clone(),
+                    image: FileImage::Contents(content.as_bytes().to_vec()),
+                }]
+            }
+            codex_apply_patch::AppliedPatchFileChange::Delete { .. } => {
+                vec![FileAfterImage {
+                    path: change.path.clone(),
+                    image: FileImage::Absent,
+                }]
+            }
+            codex_apply_patch::AppliedPatchFileChange::Update {
+                move_path,
+                new_content,
+                ..
+            } => match move_path {
+                Some(move_path) => vec![
+                    FileAfterImage {
+                        path: change.path.clone(),
+                        image: FileImage::Absent,
+                    },
+                    FileAfterImage {
+                        path: move_path.clone(),
+                        image: FileImage::Contents(new_content.as_bytes().to_vec()),
+                    },
+                ],
+                None => vec![FileAfterImage {
+                    path: change.path.clone(),
+                    image: FileImage::Contents(new_content.as_bytes().to_vec()),
+                }],
+            },
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "LegacyAppPathString": {
+      "type": "string"
+    },
+    "ThreadFileChange": {
+      "properties": {
+        "changeKind": {
+          "$ref": "#/definitions/ThreadFileChangeKind"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "disposition": {
+          "$ref": "#/definitions/ThreadFileChangeDisposition"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/definitions/LegacyAppPathString"
+        }
+      },
+      "required": [
+        "changeKind",
+        "disposition",
+        "environmentId",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ThreadFileChangeDisposition": {
+      "enum": [
+        "restorable",
+        "conflict",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ThreadFileChangeKind": {
+      "enum": [
+        "create",
+        "update",
+        "delete"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "data": {
+      "items": {
+        "$ref": "#/definitions/ThreadFileChange"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "data"
+  ],
+  "title": "ThreadFileChangeReadResponse",
+  "type": "object"
+}

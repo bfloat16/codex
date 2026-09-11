@@ -14,6 +14,10 @@ use codex_exec_server::SelectedCapabilityRootsStatus;
 use codex_extension_api::ConversationHistorySnapshot;
 use codex_extension_api::ThreadIdleCause;
 use codex_features::Feature;
+use codex_file_checkpoint::FileCheckpointError;
+use codex_file_checkpoint::FileRestoreOutcome;
+use codex_file_checkpoint::FileRestorePreview;
+use codex_file_checkpoint::FileSystemsByEnvironment;
 use codex_history::RolloutItem;
 use codex_otel::SessionTelemetry;
 use codex_otel::current_span_w3c_trace_context;
@@ -469,6 +473,93 @@ impl CodexThread {
     /// Persist whether this thread is eligible for future memory generation.
     pub async fn set_thread_memory_mode(&self, mode: ThreadMemoryMode) -> anyhow::Result<()> {
         self.session.set_thread_memory_mode(mode).await
+    }
+
+    pub async fn preview_file_restore(
+        &self,
+        before_turn_id: &str,
+    ) -> Result<FileRestorePreview, FileCheckpointError> {
+        let store = self
+            .session
+            .services
+            .file_checkpoints
+            .as_ref()
+            .ok_or_else(|| {
+                FileCheckpointError::InvalidData(
+                    "file checkpoint storage is unavailable".to_string(),
+                )
+            })?;
+        let file_systems = self.file_checkpoint_file_systems().await;
+        let _access_permit = self.file_checkpoint_access_permit().await?;
+        self.ensure_file_checkpoint_idle().await?;
+        store.preview(before_turn_id, &file_systems).await
+    }
+
+    pub async fn restore_files_before_turn(
+        &self,
+        before_turn_id: &str,
+    ) -> Result<FileRestoreOutcome, FileCheckpointError> {
+        let store = self
+            .session
+            .services
+            .file_checkpoints
+            .as_ref()
+            .ok_or_else(|| {
+                FileCheckpointError::InvalidData(
+                    "file checkpoint storage is unavailable".to_string(),
+                )
+            })?;
+        let file_systems = self.file_checkpoint_file_systems().await;
+        let _access_permit = self.file_checkpoint_access_permit().await?;
+        self.ensure_file_checkpoint_idle().await?;
+        store.restore(before_turn_id, &file_systems).await
+    }
+
+    pub async fn discard_file_checkpoints_from_turn(
+        &self,
+        before_turn_id: &str,
+    ) -> Result<(), FileCheckpointError> {
+        let Some(store) = &self.session.services.file_checkpoints else {
+            return Ok(());
+        };
+        let _access_permit = self.file_checkpoint_access_permit().await?;
+        self.ensure_file_checkpoint_idle().await?;
+        store.discard_from_turn(before_turn_id).await
+    }
+
+    async fn file_checkpoint_access_permit(
+        &self,
+    ) -> Result<tokio::sync::SemaphorePermit<'_>, FileCheckpointError> {
+        self.session
+            .file_checkpoint_access
+            .acquire()
+            .await
+            .map_err(|_| FileCheckpointError::OperationLockClosed)
+    }
+
+    async fn ensure_file_checkpoint_idle(&self) -> Result<(), FileCheckpointError> {
+        if self.session.active_turn.lock().await.is_some() {
+            return Err(FileCheckpointError::InvalidData(
+                "cannot access file checkpoints while a turn is in progress".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn file_checkpoint_file_systems(&self) -> FileSystemsByEnvironment {
+        self.session
+            .services
+            .turn_environments
+            .snapshot()
+            .await
+            .turn_environments()
+            .map(|environment| {
+                (
+                    environment.selection.environment_id.clone(),
+                    environment.environment.get_filesystem(),
+                )
+            })
+            .collect()
     }
 
     /// Injects model-visible items into the currently active turn.

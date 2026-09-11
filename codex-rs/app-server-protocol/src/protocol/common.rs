@@ -735,6 +735,21 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadRevertResponse,
     },
+    ThreadFileChangeRead => "thread/fileChange/read" {
+        params: v2::ThreadFileChangeReadParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadFileChangeReadResponse,
+    },
+    ThreadFileChangeRestore => "thread/fileChange/restore" {
+        params: v2::ThreadFileChangeRestoreParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadFileChangeRestoreResponse,
+    },
+    ThreadFileChangeDiscard => "thread/fileChange/discard" {
+        params: v2::ThreadFileChangeDiscardParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadFileChangeDiscardResponse,
+    },
     ThreadList => "thread/list" {
         params: v2::ThreadListParams,
         inspect_params: true,

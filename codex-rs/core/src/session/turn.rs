@@ -172,6 +172,12 @@ pub(crate) async fn run_turn(
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<Option<String>> {
+    if let Some(file_checkpoints) = &sess.services.file_checkpoints
+        && let Err(err) = file_checkpoints.begin_turn(&turn_context.sub_id).await
+    {
+        warn!("failed to begin file checkpoint turn: {err}");
+    }
+
     // Record results from hooks that finished after the previous turn before this turn's user prompt.
     drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
 

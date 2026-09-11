@@ -16,6 +16,7 @@ use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::state::ActiveTurn;
 use codex_extension_api::ExtensionDataInit;
+use codex_file_checkpoint::FileCheckpointStore;
 use codex_http_client::ClientRouteClass;
 use codex_http_client::RouteAwareClientPool;
 use codex_login::auth::AgentIdentityAuthPolicy;
@@ -52,6 +53,8 @@ pub(crate) struct Session {
     /// Serializes rebuild/apply cycles for the running proxy; each cycle
     /// rebuilds from the current SessionState while holding this lock.
     pub(super) managed_network_proxy_refresh_lock: Semaphore,
+    /// Prevents a task from starting while checkpoint files are being inspected or restored.
+    pub(crate) file_checkpoint_access: Semaphore,
     /// The set of enabled features should be invariant for the lifetime of the
     /// session.
     pub(super) features: ManagedFeatures,
@@ -1424,6 +1427,17 @@ impl Session {
                 .features
                 .enabled(Feature::ExecutedToolCallMetadata)
                 .then(|| Arc::new(crate::state::ExecutedToolCallRecorder::default()));
+            let file_checkpoints = if rollout_path.is_some() {
+                match FileCheckpointStore::open(&config.codex_home, thread_id).await {
+                    Ok(store) => Some(Arc::new(store)),
+                    Err(err) => {
+                        warn!("failed to open file checkpoint store: {err}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
             let services = SessionServices {
                 // Start with an empty connection set. The initialized set is
                 // published after SessionConfigured so MCP events follow it.
@@ -1470,6 +1484,7 @@ impl Session {
                 managed_network_requirements_configured,
                 network_approval: Arc::clone(&network_approval),
                 state_db: state_db_ctx.clone(),
+                file_checkpoints,
                 live_thread: live_thread_init.as_ref().cloned(),
                 thread_store: Arc::clone(&thread_store),
                 attestation_provider: attestation_provider.clone(),
@@ -1522,6 +1537,7 @@ impl Session {
                 state: Mutex::new(state),
                 thread_settings_persistence: Semaphore::new(/*permits*/ 1),
                 managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
+                file_checkpoint_access: Semaphore::new(/*permits*/ 1),
                 features: config.features.clone(),
                 guardian_context_mode,
                 windows_sandbox_proxy_settings_mode,

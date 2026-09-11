@@ -285,6 +285,7 @@ impl Session {
         input: Vec<TurnInput>,
         task: T,
     ) {
+        let _file_checkpoint_access = self.file_checkpoint_access.acquire().await;
         // Inherited or recovered roots are applied before task start. Otherwise this
         // task owns its turn, including background work. Later mail cannot change it.
         turn_context

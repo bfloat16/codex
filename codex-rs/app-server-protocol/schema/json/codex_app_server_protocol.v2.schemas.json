@@ -2197,6 +2197,78 @@
             },
             "method": {
               "enum": [
+                "thread/fileChange/read"
+              ],
+              "title": "Thread/fileChange/readRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadFileChangeReadParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/fileChange/readRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "thread/fileChange/restore"
+              ],
+              "title": "Thread/fileChange/restoreRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadFileChangeRestoreParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/fileChange/restoreRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "thread/fileChange/discard"
+              ],
+              "title": "Thread/fileChange/discardRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadFileChangeDiscardParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/fileChange/discardRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/list"
               ],
               "title": "Thread/listRequestMethod",
@@ -18426,6 +18498,153 @@
     },
     "ThreadExtra": {
       "description": "Extra app-server data for a thread.",
+      "type": "object"
+    },
+    "ThreadFileChange": {
+      "properties": {
+        "changeKind": {
+          "$ref": "#/definitions/ThreadFileChangeKind"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "disposition": {
+          "$ref": "#/definitions/ThreadFileChangeDisposition"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/definitions/LegacyAppPathString"
+        }
+      },
+      "required": [
+        "changeKind",
+        "disposition",
+        "environmentId",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ThreadFileChangeDiscardParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "beforeTurnId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "beforeTurnId",
+        "threadId"
+      ],
+      "title": "ThreadFileChangeDiscardParams",
+      "type": "object"
+    },
+    "ThreadFileChangeDiscardResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ThreadFileChangeDiscardResponse",
+      "type": "object"
+    },
+    "ThreadFileChangeDisposition": {
+      "enum": [
+        "restorable",
+        "conflict",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ThreadFileChangeKind": {
+      "enum": [
+        "create",
+        "update",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "ThreadFileChangeReadParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "beforeTurnId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "beforeTurnId",
+        "threadId"
+      ],
+      "title": "ThreadFileChangeReadParams",
+      "type": "object"
+    },
+    "ThreadFileChangeReadResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/ThreadFileChange"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "title": "ThreadFileChangeReadResponse",
+      "type": "object"
+    },
+    "ThreadFileChangeRestoreParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "beforeTurnId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "beforeTurnId",
+        "threadId"
+      ],
+      "title": "ThreadFileChangeRestoreParams",
+      "type": "object"
+    },
+    "ThreadFileChangeRestoreResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "failed": {
+          "items": {
+            "$ref": "#/definitions/ThreadFileChange"
+          },
+          "type": "array"
+        },
+        "restored": {
+          "items": {
+            "$ref": "#/definitions/ThreadFileChange"
+          },
+          "type": "array"
+        },
+        "skipped": {
+          "items": {
+            "$ref": "#/definitions/ThreadFileChange"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "failed",
+        "restored",
+        "skipped"
+      ],
+      "title": "ThreadFileChangeRestoreResponse",
       "type": "object"
     },
     "ThreadForkParams": {

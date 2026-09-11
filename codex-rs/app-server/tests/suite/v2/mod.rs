@@ -101,6 +101,7 @@ mod sleep;
 mod thread_archive;
 mod thread_delete;
 mod thread_environments;
+mod thread_file_change;
 mod thread_fork;
 mod thread_inject_items;
 mod thread_list;

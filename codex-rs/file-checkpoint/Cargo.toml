@@ -1,0 +1,31 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "codex-file-checkpoint"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "codex_file_checkpoint"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+codex-file-system = { workspace = true }
+codex-protocol = { workspace = true }
+codex-utils-absolute-path = { workspace = true }
+codex-utils-path-uri = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+codex-exec-server = { workspace = true }
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
