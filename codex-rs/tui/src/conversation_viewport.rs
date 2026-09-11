@@ -10,11 +10,9 @@ use std::sync::Arc;
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
+use ratatui::layout::Position;
 use ratatui::layout::Rect;
-use ratatui::text::Text;
-use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
-use ratatui::widgets::Wrap;
 
 use crate::chatwidget::ActiveCellRenderKey;
 use crate::history_cell::HistoryCell;
@@ -25,15 +23,19 @@ use crate::render::Insets;
 use crate::render::renderable::InsetRenderable;
 use crate::render::renderable::Renderable;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
-use crate::terminal_hyperlinks::visible_lines;
+use crate::terminal_hyperlinks::HyperlinkParagraph;
+use crate::tui::MouseInteractionKind;
 use crate::tui::MouseScrollDirection;
+
+mod tool_groups;
 
 pub(crate) struct ConversationViewport {
     content: PagerContent,
     cells: Vec<Arc<dyn HistoryCell>>,
     render_mode: HistoryRenderMode,
     live_tail_key: Option<LiveTailKey>,
+    hovered_tool_group: Option<usize>,
+    expanded_tool_group: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,12 +52,19 @@ impl ConversationViewport {
         render_mode: HistoryRenderMode,
         keymap: PagerKeymap,
     ) -> Self {
-        let renderables = Self::render_cells(&cells, render_mode);
+        let renderables = Self::render_cells(
+            &cells,
+            render_mode,
+            /*hovered_tool_group*/ None,
+            /*expanded_tool_group*/ None,
+        );
         Self {
             content: PagerContent::new(renderables, keymap),
             cells,
             render_mode,
             live_tail_key: None,
+            hovered_tool_group: None,
+            expanded_tool_group: None,
         }
     }
 
@@ -67,21 +76,64 @@ impl ConversationViewport {
         self.content.handle_navigation_key(area, key_event)
     }
 
-    pub(crate) fn handle_mouse_scroll(&mut self, direction: MouseScrollDirection) {
-        self.content.handle_mouse_scroll(direction);
+    pub(crate) fn scroll_rows(&mut self, direction: MouseScrollDirection, rows: usize) {
+        self.content.scroll_rows(direction, rows);
+    }
+
+    pub(crate) fn scroll_to_bottom(&mut self) {
+        self.content.scroll_to_bottom();
+    }
+
+    pub(crate) fn handle_mouse_interaction(
+        &mut self,
+        area: Rect,
+        position: Position,
+        kind: MouseInteractionKind,
+    ) -> bool {
+        if self.render_mode != HistoryRenderMode::Rich {
+            return self.set_hovered_tool_group(/*next*/ None, area.width);
+        }
+        let hit = self
+            .content
+            .renderable_at_position(area, position)
+            .and_then(|(index, row)| {
+                let range = self.tool_group_at(index)?;
+                let top_padding = Self::tool_group_top_padding(&self.cells, range.start);
+                (row >= top_padding).then_some(range.start)
+            });
+
+        match kind {
+            MouseInteractionKind::Move => self.set_hovered_tool_group(hit, area.width),
+            MouseInteractionKind::LeftClick => {
+                let Some(group_start) = hit else {
+                    return false;
+                };
+                let previous = self.expanded_tool_group;
+                self.expanded_tool_group = (previous != Some(group_start)).then_some(group_start);
+                self.refresh_tool_groups(
+                    [previous, Some(group_start)].into_iter().flatten(),
+                    area.width,
+                );
+                true
+            }
+        }
     }
 
     pub(crate) fn push_cell(&mut self, cell: Arc<dyn HistoryCell>) {
         let follow_bottom = self.content.is_following_bottom();
         let had_prior_cells = !self.cells.is_empty();
         let tail_renderable = self.take_live_tail_renderable();
-        let renderable = Self::cell_renderable(
-            cell.clone(),
-            self.render_mode,
-            /*has_prior_cells*/ had_prior_cells,
-        );
         self.cells.push(cell);
-        self.content.push(renderable);
+        let mut rebuild_start = self.cells.len().saturating_sub(1);
+        if self.render_mode == HistoryRenderMode::Rich
+            && self.cells[rebuild_start].tool_activity().is_some()
+        {
+            while rebuild_start > 0 && self.cells[rebuild_start - 1].tool_activity().is_some() {
+                rebuild_start -= 1;
+            }
+        }
+        let renderables = self.render_cell_range(rebuild_start..self.cells.len());
+        self.content.replace_tail(rebuild_start, renderables);
 
         if let Some(tail) = tail_renderable {
             let tail = if !had_prior_cells
@@ -104,9 +156,71 @@ impl ConversationViewport {
         let follow_bottom = self.content.is_following_bottom();
         self.take_live_tail_renderable();
         self.live_tail_key = None;
+        self.hovered_tool_group = None;
+        self.expanded_tool_group = None;
         self.cells = cells;
-        self.content
-            .replace(Self::render_cells(&self.cells, self.render_mode));
+        self.content.replace(Self::render_cells(
+            &self.cells,
+            self.render_mode,
+            self.hovered_tool_group,
+            self.expanded_tool_group,
+        ));
+        if follow_bottom {
+            self.content.scroll_to_bottom();
+        }
+    }
+
+    pub(crate) fn insert_cells(
+        &mut self,
+        index: usize,
+        cells: Vec<Arc<dyn HistoryCell>>,
+        width: u16,
+    ) {
+        if cells.is_empty() {
+            return;
+        }
+        let follow_bottom = self.content.is_following_bottom();
+        let had_prior_cells = !self.cells.is_empty();
+        let index = index.min(self.cells.len());
+        let tail_renderable = self.take_live_tail_renderable();
+        let inserted_count = cells.len();
+        let mut rebuild_start = index;
+        while rebuild_start > 0 && self.cells[rebuild_start - 1].tool_activity().is_some() {
+            rebuild_start -= 1;
+        }
+        let mut old_rebuild_end = index;
+        while old_rebuild_end < self.cells.len()
+            && self.cells[old_rebuild_end].tool_activity().is_some()
+        {
+            old_rebuild_end += 1;
+        }
+        if index == 0 && old_rebuild_end == 0 && !self.cells.is_empty() {
+            old_rebuild_end = 1;
+        }
+        self.shift_tool_group_state(index, inserted_count);
+        self.cells.splice(index..index, cells);
+        self.validate_tool_group_state();
+        let new_rebuild_end = old_rebuild_end.saturating_add(inserted_count);
+        let renderables = self.render_cell_range(rebuild_start..new_rebuild_end);
+        self.content.splice_above_viewport(
+            rebuild_start,
+            old_rebuild_end.saturating_sub(rebuild_start),
+            renderables,
+            width,
+        );
+
+        if let Some(tail) = tail_renderable {
+            let tail = if !had_prior_cells
+                && self
+                    .live_tail_key
+                    .is_some_and(|key| !key.is_stream_continuation)
+            {
+                Self::with_leading_spacing(tail)
+            } else {
+                tail
+            };
+            self.content.push(tail);
+        }
         if follow_bottom {
             self.content.scroll_to_bottom();
         }
@@ -119,9 +233,15 @@ impl ConversationViewport {
         let follow_bottom = self.content.is_following_bottom();
         self.take_live_tail_renderable();
         self.live_tail_key = None;
+        self.hovered_tool_group = None;
+        self.expanded_tool_group = None;
         self.render_mode = render_mode;
-        self.content
-            .replace(Self::render_cells(&self.cells, self.render_mode));
+        self.content.replace(Self::render_cells(
+            &self.cells,
+            self.render_mode,
+            self.hovered_tool_group,
+            self.expanded_tool_group,
+        ));
         if follow_bottom {
             self.content.scroll_to_bottom();
         }
@@ -161,7 +281,6 @@ impl ConversationViewport {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn is_following_bottom(&self) -> bool {
         self.content.is_following_bottom()
     }
@@ -174,18 +293,16 @@ impl ConversationViewport {
     fn render_cells(
         cells: &[Arc<dyn HistoryCell>],
         render_mode: HistoryRenderMode,
+        hovered_tool_group: Option<usize>,
+        expanded_tool_group: Option<usize>,
     ) -> Vec<Box<dyn Renderable>> {
-        cells
-            .iter()
-            .enumerate()
-            .map(|(index, cell)| {
-                Self::cell_renderable(
-                    cell.clone(),
-                    render_mode,
-                    /*has_prior_cells*/ index > 0,
-                )
-            })
-            .collect()
+        Self::render_cell_range_from(
+            cells,
+            render_mode,
+            0..cells.len(),
+            hovered_tool_group,
+            expanded_tool_group,
+        )
     }
 
     fn cell_renderable(
@@ -248,11 +365,7 @@ impl Renderable for ConversationCellRenderable {
             HistoryRenderMode::Rich => self.cell.rich_block_style().unwrap_or_default(),
             HistoryRenderMode::Raw => Default::default(),
         };
-        Paragraph::new(Text::from(visible_lines(hyperlink_lines.clone())))
-            .style(block_style)
-            .wrap(Wrap { trim: false })
-            .render(area, buf);
-        mark_buffer_hyperlinks(buf, area, &hyperlink_lines, /*scroll_rows*/ 0);
+        HyperlinkParagraph::new(&hyperlink_lines, block_style).render(area, buf);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -265,6 +378,20 @@ impl Renderable for ConversationCellRenderable {
         self.cached_height.set(Some((width, height)));
         height
     }
+
+    fn render_scrolled(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) -> bool {
+        let hyperlink_lines = self
+            .cell
+            .display_hyperlink_lines_for_mode(area.width, self.render_mode);
+        let block_style = match self.render_mode {
+            HistoryRenderMode::Rich => self.cell.rich_block_style().unwrap_or_default(),
+            HistoryRenderMode::Raw => Default::default(),
+        };
+        HyperlinkParagraph::new(&hyperlink_lines, block_style)
+            .scroll(scroll_offset)
+            .render(area, buf);
+        true
+    }
 }
 
 struct HyperlinkLinesRenderable {
@@ -273,15 +400,11 @@ struct HyperlinkLinesRenderable {
 
 impl Renderable for HyperlinkLinesRenderable {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(Text::from(visible_lines(self.lines.clone())))
-            .wrap(Wrap { trim: false })
-            .render(area, buf);
-        mark_buffer_hyperlinks(buf, area, &self.lines, /*scroll_rows*/ 0);
+        HyperlinkParagraph::new(&self.lines, Default::default()).render(area, buf);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        Paragraph::new(Text::from(visible_lines(self.lines.clone())))
-            .wrap(Wrap { trim: false })
+        HyperlinkParagraph::new(&self.lines, Default::default())
             .line_count(width)
             .try_into()
             .unwrap_or(/*default*/ 0)

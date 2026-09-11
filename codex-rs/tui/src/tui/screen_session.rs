@@ -133,21 +133,27 @@ enum PhysicalAltScreen {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AltScreenInputMode {
     AlternateScroll,
-    MouseCapture,
+    OwnedInteractive,
 }
 
 impl AltScreenInputMode {
     fn enable(self, commands: &mut impl ScreenCommands) -> io::Result<()> {
         match self {
             Self::AlternateScroll => commands.enable_alternate_scroll(),
-            Self::MouseCapture => commands.enable_mouse_capture(),
+            Self::OwnedInteractive => {
+                commands.enable_alternate_scroll()?;
+                commands.enable_mouse_capture()
+            }
         }
     }
 
     fn disable(self, commands: &mut impl ScreenCommands) -> io::Result<()> {
         match self {
             Self::AlternateScroll => commands.disable_alternate_scroll(),
-            Self::MouseCapture => commands.disable_mouse_capture(),
+            Self::OwnedInteractive => merge_results(
+                commands.disable_mouse_capture(),
+                commands.disable_alternate_scroll(),
+            ),
         }
     }
 }
@@ -202,7 +208,7 @@ impl ScreenSession {
     }
 
     pub(super) fn enter_owned(&self, terminal: &mut Terminal) -> io::Result<()> {
-        self.enter_with_input_mode(terminal, AltScreenInputMode::MouseCapture)
+        self.enter_with_input_mode(terminal, AltScreenInputMode::OwnedInteractive)
     }
 
     fn enter_with_input_mode(

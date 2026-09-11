@@ -568,6 +568,8 @@ pub enum TuiEvent {
     Paste(String),
     /// A vertical mouse-wheel event reported while an owned screen has mouse capture.
     MouseScroll(MouseScrollEvent),
+    /// Pointer motion or a primary-button press reported by an interactive owned screen.
+    MouseInteraction(MouseInteractionEvent),
     /// A terminal size notification and its reported dimensions.
     ///
     /// Resize is separate from `Draw` so the app can run feature-gated pre-render logic without
@@ -591,6 +593,19 @@ pub struct MouseScrollEvent {
     pub direction: MouseScrollDirection,
     pub column: u16,
     pub row: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MouseInteractionEvent {
+    pub kind: MouseInteractionKind,
+    pub column: u16,
+    pub row: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MouseInteractionKind {
+    Move,
+    LeftClick,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -848,7 +863,7 @@ impl Tui {
         self.screen_session.enter(&mut self.terminal)
     }
 
-    /// Enter an application-owned alternate screen with direct mouse input.
+    /// Enter an application-owned alternate screen while preserving native terminal selection.
     pub fn enter_owned_alt_screen(&mut self) -> Result<()> {
         self.screen_session.enter_owned(&mut self.terminal)
     }

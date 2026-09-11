@@ -41,9 +41,44 @@ impl<'a> HyperlinkParagraph<'a> {
 
 impl Widget for HyperlinkParagraph<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        fill_line_backgrounds(self.lines, area, buf, usize::from(self.scroll_rows));
         self.paragraph
             .scroll((self.scroll_rows, 0))
             .render(area, buf);
         mark_buffer_hyperlinks(buf, area, self.lines, usize::from(self.scroll_rows));
+    }
+}
+
+fn fill_line_backgrounds(
+    lines: &[HyperlinkLine],
+    area: Rect,
+    buf: &mut Buffer,
+    scroll_rows: usize,
+) {
+    if area.is_empty() {
+        return;
+    }
+    let backgrounds = lines.iter().flat_map(|line| {
+        let wrapped_rows = Paragraph::new(line.line.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(area.width)
+            .max(/*other*/ 1);
+        std::iter::repeat_n(line.line.style.bg, wrapped_rows)
+    });
+    for (row, background) in backgrounds
+        .skip(scroll_rows)
+        .take(usize::from(area.height))
+        .enumerate()
+    {
+        let Some(background) = background else {
+            continue;
+        };
+        let Ok(row) = u16::try_from(row) else {
+            break;
+        };
+        let y = area.y.saturating_add(row);
+        for x in area.x..area.right() {
+            buf[(x, y)].set_bg(background);
+        }
     }
 }

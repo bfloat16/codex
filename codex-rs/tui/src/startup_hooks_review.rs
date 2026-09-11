@@ -182,7 +182,10 @@ async fn run_startup_hooks_review_app(
                     }
                 }
             }
-            TuiEvent::Paste(_) | TuiEvent::MouseScroll(_) | TuiEvent::FocusLost => {}
+            TuiEvent::Paste(_)
+            | TuiEvent::MouseScroll(_)
+            | TuiEvent::MouseInteraction(_)
+            | TuiEvent::FocusLost => {}
             TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained => {
                 draw_view(tui, &view)?;
             }

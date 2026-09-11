@@ -6,6 +6,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::text::Line;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::broadcast::error::TryRecvError;
 
 use super::*;
@@ -25,6 +26,47 @@ impl HistoryCell for TestCell {
     fn raw_lines(&self) -> Vec<Line<'static>> {
         vec![self.0.into()]
     }
+}
+
+#[test]
+fn continuous_scroll_accelerates_and_pause_or_reversal_resets_it() {
+    let mut acceleration = ScrollAcceleration::default();
+    let started_at = Instant::now();
+    let rows = (0..12)
+        .map(|step| {
+            acceleration.rows_at(
+                MouseScrollDirection::Down,
+                started_at + Duration::from_millis(step * 17),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(rows, vec![3, 4, 5, 6, 7, 7, 8, 9, 9, 10, 10, 10]);
+    assert_eq!(
+        (
+            acceleration.rows_at(
+                MouseScrollDirection::Down,
+                started_at + Duration::from_millis(/*millis*/ 500),
+            ),
+            acceleration.rows_at(
+                MouseScrollDirection::Up,
+                started_at + Duration::from_millis(/*millis*/ 517),
+            ),
+        ),
+        (3, 3),
+    );
+
+    let mut rapid = ScrollAcceleration::default();
+    let capped_rows = (0..100)
+        .map(|step| {
+            rapid.rows_at(
+                MouseScrollDirection::Down,
+                started_at + Duration::from_millis(step),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(capped_rows.last(), Some(&15));
+    assert!(capped_rows.iter().all(|rows| *rows <= 15));
 }
 
 #[tokio::test]
@@ -126,8 +168,8 @@ async fn navigation_does_not_steal_printable_or_draft_input() {
 
     let cases = [
         (KeyCode::Char('k'), false),
-        (KeyCode::Up, false),
-        (KeyCode::Down, false),
+        (KeyCode::Up, true),
+        (KeyCode::Down, true),
         (KeyCode::Home, false),
         (KeyCode::End, false),
         (KeyCode::PageUp, true),
@@ -147,6 +189,10 @@ async fn navigation_does_not_steal_printable_or_draft_input() {
     assert!(!app.handle_owned_screen_navigation_key(
         &mut tui,
         KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+    ));
+    assert!(app.handle_owned_screen_navigation_key(
+        &mut tui,
+        KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL),
     ));
 }
 
@@ -171,16 +217,23 @@ async fn mouse_wheel_scrolls_transcript_without_changing_draft() {
         column: 2,
         row: 2,
     }));
+    assert!(screen.handle_mouse_scroll(MouseScrollEvent {
+        direction: MouseScrollDirection::Up,
+        column: 2,
+        row: 2,
+    }));
+    assert_eq!(screen.scroll_acceleration.multiplier_per_mille, PER_MILLE);
     terminal
         .draw(|frame| {
             screen.render(&chat_widget, frame.area(), frame.buffer_mut());
         })
         .expect("render scrolled");
 
-    assert_snapshot!(normalized_backend_snapshot(terminal.backend()), @r###"
+    let single_frame_scroll = normalized_backend_snapshot(terminal.backend());
+    assert_snapshot!(single_frame_scroll, @r###"
 "                                        "
 "middle                                  "
-"                                        "
+"      ctrl + end jump to bottom ↓       "
 "                                        "
 "                                        "
 "› draft sentinel                        "
@@ -194,15 +247,23 @@ async fn mouse_wheel_scrolls_transcript_without_changing_draft() {
         row: 7,
     }));
 
-    assert!(screen.handle_mouse_scroll(MouseScrollEvent {
-        direction: MouseScrollDirection::Down,
-        column: 2,
-        row: 2,
-    }));
+    assert!(screen.handle_navigation_key(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL,)));
     terminal
         .draw(|frame| {
             screen.render(&chat_widget, frame.area(), frame.buffer_mut());
         })
         .expect("render restored bottom");
     assert!(screen.viewport.is_following_bottom());
+
+    assert!(screen.handle_navigation_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE,)));
+    assert!(screen.handle_navigation_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE,)));
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render coalesced key scroll");
+    assert_eq!(
+        normalized_backend_snapshot(terminal.backend()),
+        single_frame_scroll,
+    );
 }

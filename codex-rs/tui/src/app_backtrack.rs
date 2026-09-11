@@ -75,6 +75,8 @@ pub(crate) struct BacktrackState {
     pub(crate) nth_user_message: usize,
     /// Legacy transcript-preview state retained for paginated transcript bookkeeping.
     pub(crate) overlay_preview_active: bool,
+    /// True while older persisted pages are being loaded before opening the prompt picker.
+    pub(crate) loading_older_history: bool,
     pub(crate) pending_rollback: Option<PendingBacktrackRollback>,
 }
 
@@ -246,7 +248,17 @@ impl App {
     }
 
     /// Open the Claude-style prompt picker in the bottom pane.
-    fn open_backtrack_message_picker(&mut self, tui: &mut tui::Tui) {
+    pub(crate) fn open_backtrack_message_picker(&mut self, tui: &mut tui::Tui) {
+        if self.scrollback_has_older_history {
+            if !self.backtrack.loading_older_history
+                && let Some(thread_id) = self.chat_widget.thread_id()
+            {
+                self.backtrack.loading_older_history = true;
+                self.app_event_tx
+                    .send(AppEvent::RequestOlderScrollbackHistory { thread_id });
+            }
+            return;
+        }
         if !has_backtrack_target(&self.transcript_cells) {
             self.reset_backtrack_state();
             self.chat_widget
@@ -449,6 +461,7 @@ impl App {
         self.backtrack.primed = false;
         self.backtrack.base_id = None;
         self.backtrack.nth_user_message = usize::MAX;
+        self.backtrack.loading_older_history = false;
         // In case a hint is somehow still visible (e.g., race with overlay open/close).
         self.chat_widget.clear_esc_backtrack_hint();
     }

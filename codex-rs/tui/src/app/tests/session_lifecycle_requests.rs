@@ -1810,15 +1810,13 @@ async fn older_pagination_reconciles_review_prompts_across_page_boundaries() -> 
     Ok(())
 }
 
-#[tokio::test]
-async fn transcript_home_loads_every_older_history_page() -> Result<()> {
-    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
-    let codex_home = tempdir()?;
-    app.config.codex_home = codex_home.path().to_path_buf().abs();
-    app.config.sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
-    app.local_settings.tui.terminal_resize_reflow_max_rows = Some(2);
+fn create_large_paginated_history(
+    app: &App,
+    codex_home: &std::path::Path,
+    item_count: usize,
+) -> Result<ThreadId> {
     let thread_id = create_fake_paginated_rollout(
-        codex_home.path(),
+        codex_home,
         "2026-01-02T00-00-00",
         "2026-01-02T00:00:00Z",
         "multi-page transcript",
@@ -1827,11 +1825,7 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
     )
     .map_err(|error| color_eyre::eyre::eyre!("failed to create paginated rollout: {error}"))?;
     let thread_id = ThreadId::from_string(&thread_id)?;
-    let path = rollout_path(
-        codex_home.path(),
-        "2026-01-02T00-00-00",
-        &thread_id.to_string(),
-    );
+    let path = rollout_path(codex_home, "2026-01-02T00-00-00", &thread_id.to_string());
     let mut records = std::fs::read_to_string(&path)?
         .lines()
         .map(serde_json::from_str::<serde_json::Value>)
@@ -1843,7 +1837,23 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
         model_context_window: None,
         collaboration_mode_kind: Default::default(),
     }))
-    .chain((0..305).map(|index| {
+    .chain(std::iter::once(EventMsg::ItemCompleted(
+        ItemCompletedEvent {
+            thread_id,
+            turn_id: "multi-page-turn".to_string(),
+            item: TurnItem::UserMessage(UserMessageItem {
+                id: "older-user-prompt".to_string(),
+                client_id: None,
+                content: vec![CoreUserInput::Text {
+                    text: "prompt from before restart".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            }),
+            started_at_ms: None,
+            completed_at_ms: 0,
+        },
+    )))
+    .chain((0..item_count).map(|index| {
         EventMsg::ItemCompleted(ItemCompletedEvent {
             thread_id,
             turn_id: "multi-page-turn".to_string(),
@@ -1875,6 +1885,18 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
         .collect::<Vec<_>>()
         .join("\n");
     std::fs::write(path, format!("{records}\n"))?;
+    Ok(thread_id)
+}
+
+#[tokio::test]
+async fn transcript_home_loads_every_older_history_page() -> Result<()> {
+    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    let codex_home = tempdir()?;
+    app.config.codex_home = codex_home.path().to_path_buf().abs();
+    app.config.sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    app.local_settings.tui.terminal_resize_reflow_max_rows = Some(2);
+    let thread_id =
+        create_large_paginated_history(&app, codex_home.path(), /*item_count*/ 305)?;
 
     let (mut app_server, requests, proxy) = start_recording_app_server(
         &app.config,
@@ -1983,6 +2005,95 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
         .join("\n");
     assert!(visible.contains("history output 0"), "{visible}");
     assert!(!visible.contains("history output 304"), "{visible}");
+    app_server.shutdown().await?;
+    proxy.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn owned_screen_resume_loads_every_older_history_page() -> Result<()> {
+    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    let codex_home = tempdir()?;
+    app.config.codex_home = codex_home.path().to_path_buf().abs();
+    app.config.sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    app.local_settings.tui.terminal_resize_reflow_max_rows = Some(2);
+    let thread_id =
+        create_large_paginated_history(&app, codex_home.path(), /*item_count*/ 205)?;
+    let (mut app_server, requests, proxy) = start_recording_app_server(
+        &app.config,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+    )
+    .await?;
+    let started = app_server
+        .resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            thread_id,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+        )
+        .await?;
+    app.transcript_cells = crate::thread_transcript::thread_items_to_transcript_cells(
+        Some(thread_id),
+        &app.config.cwd,
+        started.turns.iter().flat_map(|turn| turn.items.clone()),
+        crate::thread_transcript::RawReasoningVisibility::Hidden,
+        Some(&app.config),
+    );
+    app.enqueue_primary_thread_session(started.session, started.turns)
+        .await?;
+    app.owned_screen = App::owned_screen_for_behavior(
+        crate::AltScreenBehavior::Owned,
+        &app.chat_widget,
+        app.keymap.pager.clone(),
+    );
+    app.sync_owned_screen_cells();
+    while app_event_rx.try_recv().is_ok() {}
+    let initial_page_requests = recorded_params(&requests, "thread/items/list").len();
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.open_transcript_overlay(&mut tui);
+
+    Box::pin(app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::EndInitialHistoryReplayBuffer,
+    ))
+    .await?;
+    while app_server.has_older_history(thread_id) {
+        let event = tokio::time::timeout(Duration::from_secs(5), app_event_rx.recv())
+            .await?
+            .ok_or_else(|| color_eyre::eyre::eyre!("history event channel closed"))?;
+        if matches!(event, AppEvent::OlderThreadHistoryLoaded { .. }) {
+            Box::pin(app.handle_event(&mut tui, &mut app_server, event)).await?;
+        }
+    }
+
+    assert!(recorded_params(&requests, "thread/items/list").len() >= initial_page_requests + 2);
+    let history = app
+        .transcript_cells
+        .iter()
+        .flat_map(|cell| cell.display_lines(/*width*/ 80))
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>();
+    assert!(history.iter().any(|line| line.contains("history output 0")));
+    assert!(
+        history
+            .iter()
+            .any(|line| line.contains("history output 204"))
+    );
+    assert_eq!(
+        app.owned_screen
+            .as_ref()
+            .expect("owned screen")
+            .viewport
+            .committed_cell_count(),
+        app.transcript_cells.len(),
+    );
+    assert!(!app.scrollback_has_older_history);
+    app.close_transcript_overlay(&mut tui);
+    app.handle_backtrack_esc_key(&mut tui);
+    app.handle_backtrack_esc_key(&mut tui);
+    assert!(!app.chat_widget.no_modal_or_popup_active());
     app_server.shutdown().await?;
     proxy.await??;
     Ok(())

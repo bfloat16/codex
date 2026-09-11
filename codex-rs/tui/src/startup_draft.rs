@@ -309,7 +309,8 @@ impl StartupDraftPump {
                 | TuiEvent::Resize(_)
                 | TuiEvent::Resume
                 | TuiEvent::FocusGained
-                | TuiEvent::MouseScroll(_) => {
+                | TuiEvent::MouseScroll(_)
+                | TuiEvent::MouseInteraction(_) => {
                     self.pending_paste_newline = Some((started_at, newlines));
                     if self.initial_screen == StartupDraftInitialScreen::Composer {
                         self.draw(tui, screen_size)?;
@@ -367,7 +368,7 @@ impl StartupDraftPump {
                     self.bottom_pane.handle_paste(text);
                 }
             }
-            TuiEvent::MouseScroll(_) => {}
+            TuiEvent::MouseScroll(_) | TuiEvent::MouseInteraction(_) => {}
             TuiEvent::Draw | TuiEvent::Resize(_) | TuiEvent::Resume | TuiEvent::FocusGained => {}
             TuiEvent::FocusLost => return Ok(()),
         }

@@ -144,6 +144,33 @@ pub(crate) enum HistoryRenderMode {
     Raw,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ToolActivity {
+    pub(crate) call_count: usize,
+    pub(crate) read_files: usize,
+    pub(crate) searches: usize,
+    pub(crate) listed_directories: usize,
+    pub(crate) shell_commands: usize,
+    pub(crate) mcp_calls: usize,
+    pub(crate) edited_files: usize,
+    pub(crate) has_failure: bool,
+}
+
+impl ToolActivity {
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.call_count = self.call_count.saturating_add(other.call_count);
+        self.read_files = self.read_files.saturating_add(other.read_files);
+        self.searches = self.searches.saturating_add(other.searches);
+        self.listed_directories = self
+            .listed_directories
+            .saturating_add(other.listed_directories);
+        self.shell_commands = self.shell_commands.saturating_add(other.shell_commands);
+        self.mcp_calls = self.mcp_calls.saturating_add(other.mcp_calls);
+        self.edited_files = self.edited_files.saturating_add(other.edited_files);
+        self.has_failure |= other.has_failure;
+    }
+}
+
 pub(crate) fn raw_lines_from_source(source: &str) -> Vec<Line<'static>> {
     if source.is_empty() {
         return Vec::new();
@@ -197,6 +224,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
 
     /// Returns copy-friendly plain logical lines for raw scrollback mode.
     fn raw_lines(&self) -> Vec<Line<'static>>;
+
+    /// Returns aggregateable tool activity for the owned full-screen transcript.
+    fn tool_activity(&self) -> Option<ToolActivity> {
+        None
+    }
 
     /// Returns rich visible lines plus terminal hyperlink metadata.
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {

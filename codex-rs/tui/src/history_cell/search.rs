@@ -120,6 +120,14 @@ impl HistoryCell for WebSearchCell {
             vec![Line::from(format!("{header}{separator}{detail}"))]
         }
     }
+
+    fn tool_activity(&self) -> Option<ToolActivity> {
+        Some(ToolActivity {
+            call_count: 1,
+            searches: 1,
+            ..ToolActivity::default()
+        })
+    }
 }
 
 pub(crate) fn new_active_web_search_call(

@@ -46,6 +46,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::buffer::Cell;
+use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -159,6 +160,7 @@ fn render_navigation_hints(area: Rect, buf: &mut Buffer, keymap: &PagerKeymap) {
 /// Generic widget for rendering a pager view.
 struct PagerView {
     renderables: Vec<Box<dyn Renderable>>,
+    layout: RenderableLayout,
     scroll_offset: usize,
     /// Rows to move upward from the freshly measured bottom on the next render.
     pending_rows_from_bottom: usize,
@@ -172,6 +174,53 @@ struct PagerView {
     pending_scroll_chunk: Option<usize>,
 }
 
+/// Cached row offsets for retained renderables at one terminal width.
+///
+/// Offsets contain one entry per renderable boundary, beginning with zero. Appending content only
+/// measures the new tail, while replacing content invalidates offsets from the changed index.
+#[derive(Default)]
+struct RenderableLayout {
+    width: Option<u16>,
+    offsets: Vec<usize>,
+}
+
+#[derive(Clone, Copy)]
+enum ScrollAdjustment {
+    KeepOffset,
+    PreserveAnchor,
+}
+
+impl RenderableLayout {
+    fn update(&mut self, renderables: &[Box<dyn Renderable>], width: u16) {
+        if self.width != Some(width) {
+            self.width = Some(width);
+            self.offsets.clear();
+        }
+        if self.offsets.is_empty() {
+            self.offsets.push(0);
+        }
+        self.offsets.truncate(renderables.len().saturating_add(1));
+        let measured = self.offsets.len().saturating_sub(1);
+        for renderable in &renderables[measured..] {
+            let next = self
+                .offsets
+                .last()
+                .copied()
+                .unwrap_or_default()
+                .saturating_add(usize::from(renderable.desired_height(width)));
+            self.offsets.push(next);
+        }
+    }
+
+    fn invalidate_from(&mut self, index: usize) {
+        self.offsets.truncate(index.saturating_add(1));
+    }
+
+    fn content_height(&self) -> usize {
+        self.offsets.last().copied().unwrap_or_default()
+    }
+}
+
 impl PagerView {
     fn new(
         renderables: Vec<Box<dyn Renderable>>,
@@ -181,6 +230,7 @@ impl PagerView {
     ) -> Self {
         Self {
             renderables,
+            layout: RenderableLayout::default(),
             scroll_offset,
             pending_rows_from_bottom: 0,
             title,
@@ -192,11 +242,96 @@ impl PagerView {
         }
     }
 
-    fn content_height(&self, width: u16) -> usize {
-        self.renderables
+    fn content_height(&mut self, width: u16) -> usize {
+        self.layout.update(&self.renderables, width);
+        self.layout.content_height()
+    }
+
+    fn replace_renderables(&mut self, renderables: Vec<Box<dyn Renderable>>) {
+        self.renderables = renderables;
+        self.layout.invalidate_from(/*index*/ 0);
+    }
+
+    fn push_renderable(&mut self, renderable: Box<dyn Renderable>) {
+        self.renderables.push(renderable);
+    }
+
+    fn splice_renderables(
+        &mut self,
+        index: usize,
+        remove_count: usize,
+        renderables: Vec<Box<dyn Renderable>>,
+        width: u16,
+        scroll_adjustment: ScrollAdjustment,
+    ) {
+        self.layout.update(&self.renderables, width);
+        let index = index.min(self.renderables.len());
+        let remove_count = remove_count.min(self.renderables.len().saturating_sub(index));
+        let old_end = index.saturating_add(remove_count);
+        let old_top = self.layout.offsets[index];
+        let old_bottom = self.layout.offsets[old_end];
+        let old_height = old_bottom.saturating_sub(old_top);
+        let heights = renderables
             .iter()
-            .map(|c| c.desired_height(width) as usize)
-            .sum()
+            .map(|renderable| usize::from(renderable.desired_height(width)))
+            .collect::<Vec<_>>();
+        let new_height = heights.iter().copied().fold(0usize, usize::saturating_add);
+
+        let mut offset = old_top;
+        let new_offsets = heights.into_iter().map(|height| {
+            offset = offset.saturating_add(height);
+            offset
+        });
+        self.layout.offsets.splice(
+            index.saturating_add(1)..old_end.saturating_add(1),
+            new_offsets,
+        );
+        let trailing_start = index.saturating_add(renderables.len()).saturating_add(1);
+        for trailing in &mut self.layout.offsets[trailing_start..] {
+            if new_height >= old_height {
+                *trailing = trailing.saturating_add(new_height - old_height);
+            } else {
+                *trailing = trailing.saturating_sub(old_height - new_height);
+            }
+        }
+        self.renderables.splice(index..old_end, renderables);
+
+        if matches!(scroll_adjustment, ScrollAdjustment::PreserveAnchor)
+            && self.scroll_offset != usize::MAX
+            && old_bottom <= self.scroll_offset
+        {
+            if new_height >= old_height {
+                self.scroll_offset = self
+                    .scroll_offset
+                    .saturating_add(new_height.saturating_sub(old_height));
+            } else {
+                self.scroll_offset = self
+                    .scroll_offset
+                    .saturating_sub(old_height.saturating_sub(new_height));
+            }
+        }
+        if let Some(last_rendered_height) = self.last_rendered_height.as_mut() {
+            if new_height >= old_height {
+                *last_rendered_height =
+                    last_rendered_height.saturating_add(new_height - old_height);
+            } else {
+                *last_rendered_height =
+                    last_rendered_height.saturating_sub(old_height - new_height);
+            }
+        }
+    }
+
+    fn replace_tail_renderables(&mut self, index: usize, renderables: Vec<Box<dyn Renderable>>) {
+        let index = index.min(self.renderables.len());
+        self.renderables.truncate(index);
+        self.renderables.extend(renderables);
+        self.layout.invalidate_from(index);
+    }
+
+    fn pop_renderable(&mut self) -> Option<Box<dyn Renderable>> {
+        let index = self.renderables.len().checked_sub(1)?;
+        self.layout.invalidate_from(index);
+        self.renderables.pop()
     }
 
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
@@ -227,25 +362,41 @@ impl PagerView {
     }
 
     fn render_content(&self, area: Rect, buf: &mut Buffer, empty_row_marker: Option<char>) {
-        let mut y = -(self.scroll_offset as isize);
         let mut drawn_bottom = area.y;
-        for renderable in &self.renderables {
-            let top = y;
-            let height = renderable.desired_height(area.width) as isize;
-            y += height;
-            let bottom = y;
-            if bottom < area.y as isize {
+        let viewport_top = self.scroll_offset;
+        let viewport_bottom = viewport_top.saturating_add(usize::from(area.height));
+        let first_visible = self
+            .layout
+            .offsets
+            .get(1..)
+            .unwrap_or_default()
+            .partition_point(|bottom| *bottom <= viewport_top);
+        for (index, renderable) in self.renderables.iter().enumerate().skip(first_visible) {
+            let top = self.layout.offsets[index];
+            let bottom = self.layout.offsets[index.saturating_add(1)];
+            if bottom <= viewport_top {
                 continue;
             }
-            if top > area.y as isize + area.height as isize {
+            if top >= viewport_bottom {
                 break;
             }
-            if top < 0 {
-                let drawn = render_offset_content(area, buf, &**renderable, (-top) as u16);
+            if top < viewport_top {
+                let scroll_offset = u16::try_from(viewport_top.saturating_sub(top))
+                    .unwrap_or(/*default*/ u16::MAX);
+                let drawn = render_offset_content(area, buf, &**renderable, scroll_offset);
                 drawn_bottom = drawn_bottom.max(area.y + drawn);
             } else {
-                let draw_height = (height as u16).min(area.height.saturating_sub(top as u16));
-                let draw_area = Rect::new(area.x, area.y + top as u16, area.width, draw_height);
+                let screen_top = u16::try_from(top.saturating_sub(viewport_top))
+                    .unwrap_or(/*default*/ u16::MAX);
+                let height =
+                    u16::try_from(bottom.saturating_sub(top)).unwrap_or(/*default*/ u16::MAX);
+                let draw_height = height.min(area.height.saturating_sub(screen_top));
+                let draw_area = Rect::new(
+                    area.x,
+                    area.y.saturating_add(screen_top),
+                    area.width,
+                    draw_height,
+                );
                 renderable.render(draw_area, buf);
                 drawn_bottom = drawn_bottom.max(draw_area.y.saturating_add(draw_area.height));
             }
@@ -433,6 +584,28 @@ impl PagerView {
         self.resolve_scroll_offset(content_height, area.height as usize);
         self.render_content(area, buf, /*empty_row_marker*/ None);
     }
+
+    fn renderable_at_position(&mut self, area: Rect, position: Position) -> Option<(usize, u16)> {
+        if !area.contains(position) || self.scroll_offset == usize::MAX {
+            return None;
+        }
+        self.content_height(area.width);
+        let content_row = self
+            .scroll_offset
+            .saturating_add(usize::from(position.y.saturating_sub(area.y)));
+        let index = self
+            .layout
+            .offsets
+            .get(1..)?
+            .partition_point(|bottom| *bottom <= content_row);
+        let top = *self.layout.offsets.get(index)?;
+        let bottom = *self.layout.offsets.get(index.saturating_add(1))?;
+        if content_row >= bottom {
+            return None;
+        }
+        let row = u16::try_from(content_row.saturating_sub(top)).ok()?;
+        Some((index, row))
+    }
 }
 
 impl PagerView {
@@ -466,13 +639,9 @@ impl PagerView {
         if area.height == 0 || idx >= self.renderables.len() {
             return;
         }
-        let first = self
-            .renderables
-            .iter()
-            .take(idx)
-            .map(|r| r.desired_height(area.width) as usize)
-            .sum();
-        let last = first + self.renderables[idx].desired_height(area.width) as usize;
+        self.content_height(area.width);
+        let first = self.layout.offsets[idx];
+        let last = self.layout.offsets[idx.saturating_add(1)];
         let current_top = self.scroll_offset;
         let current_bottom = current_top.saturating_add(area.height.saturating_sub(1) as usize);
         if first < current_top {
@@ -505,15 +674,51 @@ impl PagerContent {
     }
 
     pub(crate) fn replace(&mut self, renderables: Vec<Box<dyn Renderable>>) {
-        self.view.renderables = renderables;
+        self.view.replace_renderables(renderables);
     }
 
     pub(crate) fn push(&mut self, renderable: Box<dyn Renderable>) {
-        self.view.renderables.push(renderable);
+        self.view.push_renderable(renderable);
+    }
+
+    pub(crate) fn splice_above_viewport(
+        &mut self,
+        index: usize,
+        remove_count: usize,
+        renderables: Vec<Box<dyn Renderable>>,
+        width: u16,
+    ) {
+        self.view.splice_renderables(
+            index,
+            remove_count,
+            renderables,
+            width,
+            ScrollAdjustment::PreserveAnchor,
+        );
+    }
+
+    pub(crate) fn replace_range(
+        &mut self,
+        index: usize,
+        remove_count: usize,
+        renderables: Vec<Box<dyn Renderable>>,
+        width: u16,
+    ) {
+        self.view.splice_renderables(
+            index,
+            remove_count,
+            renderables,
+            width,
+            ScrollAdjustment::KeepOffset,
+        );
+    }
+
+    pub(crate) fn replace_tail(&mut self, index: usize, renderables: Vec<Box<dyn Renderable>>) {
+        self.view.replace_tail_renderables(index, renderables);
     }
 
     pub(crate) fn pop(&mut self) -> Option<Box<dyn Renderable>> {
-        self.view.renderables.pop()
+        self.view.pop_renderable()
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -536,8 +741,19 @@ impl PagerContent {
         self.view.apply_key_event(viewport_area, key_event)
     }
 
-    pub(crate) fn handle_mouse_scroll(&mut self, direction: MouseScrollDirection) {
-        self.view.apply_mouse_scroll(direction);
+    pub(crate) fn scroll_rows(&mut self, direction: MouseScrollDirection, rows: usize) {
+        match direction {
+            MouseScrollDirection::Up => self.view.scroll_up_rows(rows),
+            MouseScrollDirection::Down => self.view.scroll_down_rows(rows),
+        }
+    }
+
+    pub(crate) fn renderable_at_position(
+        &mut self,
+        area: Rect,
+        position: Position,
+    ) -> Option<(usize, u16)> {
+        self.view.renderable_at_position(area, position)
     }
 }
 
@@ -752,7 +968,7 @@ impl TranscriptOverlay {
             self.history_state,
         );
         self.cells.push(cell);
-        self.view.renderables.push(cell_renderable);
+        self.view.push_renderable(cell_renderable);
         if let Some(tail) = tail_renderable {
             let tail = if !had_prior_cells
                 && self
@@ -770,7 +986,7 @@ impl TranscriptOverlay {
             } else {
                 tail
             };
-            self.view.renderables.push(tail);
+            self.view.push_renderable(tail);
         }
         if follow_bottom {
             self.view.scroll_to_bottom();
@@ -930,7 +1146,7 @@ impl TranscriptOverlay {
         if let Some(key) = next_key {
             let lines = compute_lines(width).unwrap_or_default();
             if !lines.is_empty() {
-                self.view.renderables.push(Self::live_tail_renderable(
+                self.view.push_renderable(Self::live_tail_renderable(
                     lines,
                     !self.cells.is_empty(),
                     key.is_stream_continuation,
@@ -974,10 +1190,13 @@ impl TranscriptOverlay {
 
     // Detach the live tail before changing cells: their old count identifies the tail renderable.
     fn rebuild_renderables(&mut self, tail_renderable: Option<Box<dyn Renderable>>) {
-        self.view.renderables =
-            Self::render_cells(&self.cells, self.highlight_cell, self.history_state);
+        self.view.replace_renderables(Self::render_cells(
+            &self.cells,
+            self.highlight_cell,
+            self.history_state,
+        ));
         if let Some(tail) = tail_renderable {
-            self.view.renderables.push(tail);
+            self.view.push_renderable(tail);
         }
     }
 
@@ -987,7 +1206,7 @@ impl TranscriptOverlay {
     /// cell renderables, so this relies on the live tail always being the final entry in
     /// `view.renderables` when present.
     fn take_live_tail_renderable(&mut self) -> Option<Box<dyn Renderable>> {
-        (self.view.renderables.len() > self.cells.len()).then(|| self.view.renderables.pop())?
+        (self.view.renderables.len() > self.cells.len()).then(|| self.view.pop_renderable())?
     }
 
     fn live_tail_renderable(
@@ -1070,6 +1289,7 @@ impl TranscriptOverlay {
                 other => self.view.handle_key_event(tui, other),
             },
             TuiEvent::MouseScroll(event) => self.view.handle_mouse_scroll(tui, event),
+            TuiEvent::MouseInteraction(_) => Ok(()),
             TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained => {
                 tui.draw(u16::MAX, |frame| {
                     self.render(frame.area(), frame.buffer);
@@ -1145,6 +1365,7 @@ impl StaticOverlay {
                 other => self.view.handle_key_event(tui, other),
             },
             TuiEvent::MouseScroll(event) => self.view.handle_mouse_scroll(tui, event),
+            TuiEvent::MouseInteraction(_) => Ok(()),
             TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained => {
                 tui.draw(u16::MAX, |frame| {
                     self.render(frame.area(), frame.buffer);
@@ -1205,6 +1426,19 @@ mod tests {
     #[derive(Debug)]
     struct HeightCountingCell {
         height_calls: Arc<AtomicUsize>,
+    }
+
+    struct HeightCountingRenderable {
+        height_calls: Arc<AtomicUsize>,
+    }
+
+    impl Renderable for HeightCountingRenderable {
+        fn render(&self, _area: Rect, _buf: &mut Buffer) {}
+
+        fn desired_height(&self, _width: u16) -> u16 {
+            self.height_calls.fetch_add(1, Ordering::Relaxed);
+            1
+        }
     }
 
     impl crate::history_cell::HistoryCell for HeightCountingCell {
@@ -1747,6 +1981,50 @@ mod tests {
     }
 
     #[test]
+    fn pager_content_reuses_layout_and_only_measures_appended_tail() {
+        let height_calls = Arc::new(AtomicUsize::new(0));
+        let renderables = (0..100)
+            .map(|_| {
+                Box::new(HeightCountingRenderable {
+                    height_calls: height_calls.clone(),
+                }) as Box<dyn Renderable>
+            })
+            .collect();
+        let mut content = PagerContent::new(renderables, default_pager_keymap());
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 5,
+        );
+        let mut buffer = Buffer::empty(area);
+
+        content.render(area, &mut buffer);
+        content.render(area, &mut buffer);
+        assert_eq!(height_calls.load(Ordering::Relaxed), 100);
+
+        content.push(Box::new(HeightCountingRenderable {
+            height_calls: height_calls.clone(),
+        }));
+        content.render(area, &mut buffer);
+        assert_eq!(height_calls.load(Ordering::Relaxed), 101);
+
+        content.splice_above_viewport(
+            /*index*/ 1,
+            /*remove_count*/ 0,
+            vec![Box::new(HeightCountingRenderable {
+                height_calls: height_calls.clone(),
+            })],
+            area.width,
+        );
+        content.render(area, &mut buffer);
+        assert_eq!(height_calls.load(Ordering::Relaxed), 102);
+
+        let resized_area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 39, /*height*/ 5,
+        );
+        content.render(resized_area, &mut Buffer::empty(resized_area));
+        assert_eq!(height_calls.load(Ordering::Relaxed), 204);
+    }
+
+    #[test]
     fn transcript_overlay_history_rebuild_preserves_only_the_live_tail() {
         for replace in [false, true] {
             for tail in [
@@ -1974,7 +2252,7 @@ mod tests {
 
     #[test]
     fn pager_view_content_height_counts_renderables() {
-        let pv = pager_view(
+        let mut pv = pager_view(
             vec![
                 paragraph_block("a", /*lines*/ 2),
                 paragraph_block("b", /*lines*/ 3),

@@ -241,10 +241,20 @@ impl App {
             }
             AppEvent::RequestOlderScrollbackHistory { thread_id } => {
                 if self.chat_widget.thread_id() == Some(thread_id)
-                    && self.overlay.is_none()
+                    && (self.overlay.is_none()
+                        || self.has_owned_screen()
+                        || self.backtrack.loading_older_history)
                     && self.scrollback_has_older_history
                 {
-                    self.request_older_history_page(app_server, thread_id);
+                    let started = self.request_older_history_page(app_server, thread_id);
+                    if !started
+                        && !app_server.has_older_history(thread_id)
+                        && self.backtrack.loading_older_history
+                    {
+                        self.scrollback_has_older_history = false;
+                        self.backtrack.loading_older_history = false;
+                        self.open_backtrack_message_picker(tui);
+                    }
                 }
             }
             AppEvent::OlderThreadHistoryLoaded {
@@ -257,6 +267,14 @@ impl App {
                     .await
                 {
                     app_server.cancel_older_history_page(thread_id);
+                    if self.backtrack.loading_older_history {
+                        self.backtrack.loading_older_history = false;
+                        self.scrollback_has_older_history = false;
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to load earlier prompts before rewind: {err}"
+                        ));
+                        self.open_backtrack_message_picker(tui);
+                    }
                     if self.chat_widget.thread_id() == Some(thread_id)
                         && let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut()
                     {
@@ -737,11 +755,16 @@ impl App {
                 self.insert_history_cell(tui, cell);
             }
             AppEvent::EndInitialHistoryReplayBuffer => {
-                self.scrollback_has_older_history = self
-                    .chat_widget
-                    .thread_id()
+                let thread_id = self.chat_widget.thread_id();
+                self.scrollback_has_older_history = thread_id
                     .is_some_and(|thread_id| app_server.has_older_history(thread_id));
                 self.finish_initial_history_replay_buffer(tui);
+                if self.has_owned_screen()
+                    && self.scrollback_has_older_history
+                    && let Some(thread_id) = thread_id
+                {
+                    self.request_older_history_page(app_server, thread_id);
+                }
             }
             AppEvent::ConsolidateAgentMessage {
                 source,

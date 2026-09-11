@@ -7302,6 +7302,40 @@ async fn double_esc_opens_backtrack_picker_below_composer() -> Result<()> {
 }
 
 #[tokio::test]
+async fn double_esc_loads_older_prompts_before_opening_backtrack_picker() -> Result<()> {
+    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    let thread_id = ThreadId::new();
+    app.chat_widget
+        .handle_thread_session_quiet(test_thread_session(
+            thread_id,
+            test_path_buf("/tmp/project"),
+        ));
+    app.transcript_cells = vec![Arc::new(UserHistoryCell {
+        message: "latest loaded prompt".to_string(),
+        text_elements: Vec::new(),
+        local_image_paths: Vec::new(),
+        remote_image_urls: Vec::new(),
+    })];
+    app.scrollback_has_older_history = true;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+
+    app.handle_backtrack_esc_key(&mut tui);
+    app.handle_backtrack_esc_key(&mut tui);
+
+    assert!(app.backtrack.loading_older_history);
+    assert!(app.chat_widget.no_modal_or_popup_active());
+    let event = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::RequestOlderScrollbackHistory { .. }))
+        .expect("older prompt history should be requested");
+    assert_matches!(
+        event,
+        AppEvent::RequestOlderScrollbackHistory { thread_id: requested }
+            if requested == thread_id
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn backtrack_rollback_failure_restores_selected_prompt_snapshot() {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
 

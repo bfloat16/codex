@@ -27,8 +27,10 @@ const ENTER_AND_LEAVE: &[Effect] = &[
 const LEAVE: &[Effect] = &[Effect::DisableScroll, Effect::Leave];
 const OWNED_ENTER_AND_LEAVE: &[Effect] = &[
     Effect::Enter,
+    Effect::EnableScroll,
     Effect::EnableMouse,
     Effect::DisableMouse,
+    Effect::DisableScroll,
     Effect::Leave,
 ];
 
@@ -99,7 +101,11 @@ fn acquire(session: &ScreenSession, commands: &mut FakeCommands) {
 
 fn acquire_owned(session: &ScreenSession, commands: &mut FakeCommands) {
     session
-        .acquire(commands, Rect::default(), AltScreenInputMode::MouseCapture)
+        .acquire(
+            commands,
+            Rect::default(),
+            AltScreenInputMode::OwnedInteractive,
+        )
         .expect("acquire owned");
 }
 
@@ -255,10 +261,13 @@ fn owned_suspend_and_resume_restore_mouse_capture() {
         &commands,
         &[
             Effect::DisableMouse,
+            Effect::DisableScroll,
             Effect::Leave,
             Effect::Enter,
+            Effect::EnableScroll,
             Effect::EnableMouse,
             Effect::DisableMouse,
+            Effect::DisableScroll,
             Effect::Leave,
         ],
     );
@@ -323,7 +332,7 @@ fn partial_owned_acquire_disables_mouse_before_leaving() {
             .acquire(
                 &mut commands,
                 Rect::default(),
-                AltScreenInputMode::MouseCapture,
+                AltScreenInputMode::OwnedInteractive,
             )
             .is_err()
     );

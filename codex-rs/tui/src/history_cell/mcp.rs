@@ -312,6 +312,15 @@ impl HistoryCell for McpToolCallCell {
         lines
     }
 
+    fn tool_activity(&self) -> Option<ToolActivity> {
+        Some(ToolActivity {
+            call_count: 1,
+            mcp_calls: 1,
+            has_failure: self.success() == Some(false),
+            ..ToolActivity::default()
+        })
+    }
+
     fn transcript_animation_tick(&self) -> Option<u64> {
         if !self.animations_enabled || self.result.is_some() {
             return None;

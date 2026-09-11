@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Instant;
 
 use super::model::CommandOutput;
@@ -240,6 +241,54 @@ impl HistoryCell for ExecCell {
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         plain_lines(self.transcript_lines(u16::MAX))
+    }
+
+    fn tool_activity(&self) -> Option<crate::history_cell::ToolActivity> {
+        if self.calls.iter().any(|call| {
+            !matches!(
+                call.source,
+                ExecCommandSource::Agent | ExecCommandSource::UnifiedExecStartup
+            )
+        }) {
+            return None;
+        }
+
+        let mut activity = crate::history_cell::ToolActivity::default();
+        let mut read_paths = HashSet::new();
+        for call in &self.calls {
+            activity.call_count = activity.call_count.saturating_add(1);
+            activity.has_failure |= call
+                .output
+                .as_ref()
+                .is_some_and(|output| output.exit_code != 0);
+
+            if call.parsed.is_empty()
+                || call
+                    .parsed
+                    .iter()
+                    .any(|parsed| matches!(parsed, ParsedCommand::Unknown { .. }))
+            {
+                activity.shell_commands = activity.shell_commands.saturating_add(1);
+                continue;
+            }
+
+            for parsed in &call.parsed {
+                match parsed {
+                    ParsedCommand::Read { path, .. } => {
+                        read_paths.insert(path);
+                    }
+                    ParsedCommand::ListFiles { .. } => {
+                        activity.listed_directories = activity.listed_directories.saturating_add(1);
+                    }
+                    ParsedCommand::Search { .. } => {
+                        activity.searches = activity.searches.saturating_add(1);
+                    }
+                    ParsedCommand::Unknown { .. } => {}
+                }
+            }
+        }
+        activity.read_files = read_paths.len();
+        Some(activity)
     }
 }
 
@@ -990,6 +1039,80 @@ mod tests {
         • Exploring
           └ Read SKILL.md
         ");
+    }
+
+    #[test]
+    fn tool_activity_classifies_agent_reads_and_shell_commands() {
+        let reads = new_active_exec_command(
+            "read-call".to_string(),
+            vec!["reader".into()],
+            vec![
+                ParsedCommand::Read {
+                    cmd: "cat first".to_string(),
+                    name: "first".to_string(),
+                    path: std::path::PathBuf::from("first"),
+                },
+                ParsedCommand::Read {
+                    cmd: "cat second".to_string(),
+                    name: "second".to_string(),
+                    path: std::path::PathBuf::from("second"),
+                },
+            ],
+            ExecCommandSource::Agent,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        );
+        let shell = new_active_exec_command(
+            "shell-call".to_string(),
+            vec!["cargo".into(), "check".into()],
+            Vec::new(),
+            ExecCommandSource::Agent,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        );
+        let user_shell = new_active_exec_command(
+            "user-shell-call".to_string(),
+            vec!["git".into(), "status".into()],
+            Vec::new(),
+            ExecCommandSource::UserShell,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        );
+        let unified_exec = new_active_exec_command(
+            "unified-call".to_string(),
+            vec!["cargo".into(), "test".into()],
+            Vec::new(),
+            ExecCommandSource::UnifiedExecStartup,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        );
+
+        assert_eq!(
+            [
+                reads.tool_activity(),
+                shell.tool_activity(),
+                user_shell.tool_activity(),
+                unified_exec.tool_activity(),
+            ],
+            [
+                Some(crate::history_cell::ToolActivity {
+                    call_count: 1,
+                    read_files: 2,
+                    ..crate::history_cell::ToolActivity::default()
+                }),
+                Some(crate::history_cell::ToolActivity {
+                    call_count: 1,
+                    shell_commands: 1,
+                    ..crate::history_cell::ToolActivity::default()
+                }),
+                None,
+                Some(crate::history_cell::ToolActivity {
+                    call_count: 1,
+                    shell_commands: 1,
+                    ..crate::history_cell::ToolActivity::default()
+                }),
+            ],
+        );
     }
 
     #[test]

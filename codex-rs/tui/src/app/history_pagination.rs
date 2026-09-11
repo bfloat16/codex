@@ -114,6 +114,7 @@ impl App {
             RawReasoningVisibility::Hidden
         };
         let width = tui.terminal.last_known_screen_size.width;
+        let mut owned_screen_needs_full_sync = false;
         if !hidden_item_ids.is_empty() {
             let user_items = turns
                 .iter()
@@ -177,6 +178,7 @@ impl App {
                 for index in hidden_transcript_indices {
                     self.transcript_cells.remove(index);
                 }
+                owned_screen_needs_full_sync = self.has_owned_screen();
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                     overlay.replace_cells(self.transcript_cells.clone());
                 }
@@ -218,9 +220,11 @@ impl App {
         }
         self.scrollback_has_older_history = app_server.has_older_history(thread_id);
         let mut continue_to_start = false;
+        let owned_insert_index;
         if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
             let index = overlay.prepend(cells.clone(), width);
-            self.transcript_cells.splice(index..index, cells);
+            self.transcript_cells.splice(index..index, cells.clone());
+            owned_insert_index = index;
             let previous_state = overlay.set_history_state(if self.scrollback_has_older_history {
                 TranscriptHistoryState::Partial
             } else {
@@ -234,18 +238,41 @@ impl App {
                 .iter()
                 .rposition(|cell| cell.as_any().is::<SessionInfoCell>())
                 .map_or(/*default*/ 0, |index| index.saturating_add(/*rhs*/ 1));
-            self.transcript_cells.splice(index..index, cells);
-            let wrap_width = self.chat_widget.history_wrap_width(width);
-            let rendered_rows = self
-                .render_transcript_lines_for_reflow(wrap_width)
-                .lines
-                .len();
-            self.schedule_immediate_resize_reflow(tui);
-            if self.scrollback_history_needs_top_up(rendered_rows)
+            self.transcript_cells.splice(index..index, cells.clone());
+            owned_insert_index = index;
+            if self.has_owned_screen() {
+                continue_to_start = self.scrollback_has_older_history;
+            } else {
+                let wrap_width = self.chat_widget.history_wrap_width(width);
+                let rendered_rows = self
+                    .render_transcript_lines_for_reflow(wrap_width)
+                    .lines
+                    .len();
+                self.schedule_immediate_resize_reflow(tui);
+                if self.scrollback_history_needs_top_up(rendered_rows)
+                    && self.request_older_history_page(app_server, thread_id)
+                {
+                    return Ok(());
+                }
+            }
+        }
+        if self.has_owned_screen() {
+            if owned_screen_needs_full_sync {
+                self.sync_owned_screen_cells();
+            } else {
+                let wrap_width = self.chat_widget.history_wrap_width(width);
+                self.owned_screen_insert_cells(owned_insert_index, cells, wrap_width);
+            }
+            continue_to_start |= self.scrollback_has_older_history;
+        }
+        if self.backtrack.loading_older_history {
+            if self.scrollback_has_older_history
                 && self.request_older_history_page(app_server, thread_id)
             {
                 return Ok(());
             }
+            self.backtrack.loading_older_history = false;
+            self.open_backtrack_message_picker(tui);
         }
         if continue_to_start
             && self.request_older_history_page(app_server, thread_id)

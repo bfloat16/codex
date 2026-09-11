@@ -21,6 +21,14 @@ impl HistoryCell for PatchHistoryCell {
             RAW_DIFF_SUMMARY_WIDTH,
         ))
     }
+
+    fn tool_activity(&self) -> Option<ToolActivity> {
+        Some(ToolActivity {
+            call_count: 1,
+            edited_files: self.changes.len(),
+            ..ToolActivity::default()
+        })
+    }
 }
 /// Create a new `PendingPatch` cell that lists the file‑level summary of
 /// a proposed patch. The summary lines should already be formatted (e.g.

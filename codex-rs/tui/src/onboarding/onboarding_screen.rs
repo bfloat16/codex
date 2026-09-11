@@ -542,7 +542,7 @@ pub(crate) async fn run_onboarding_app(
                         TuiEvent::Paste(text) => {
                             onboarding_screen.handle_paste(text);
                         }
-                        TuiEvent::MouseScroll(_) => {}
+                        TuiEvent::MouseScroll(_) | TuiEvent::MouseInteraction(_) => {}
                         TuiEvent::Draw
                         | TuiEvent::Resume
                         | TuiEvent::Resize(_)

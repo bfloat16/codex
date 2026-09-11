@@ -55,6 +55,7 @@ pub(crate) async fn run_unarchive_prompt(
             }
             TuiEvent::Paste(_)
             | TuiEvent::MouseScroll(_)
+            | TuiEvent::MouseInteraction(_)
             | TuiEvent::Draw
             | TuiEvent::Resize(_)
             | TuiEvent::Resume

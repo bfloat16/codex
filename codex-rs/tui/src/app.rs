@@ -853,7 +853,11 @@ impl App {
         let screen_size = tui.screen_size_for_event(&event)?;
         if !matches!(
             &event,
-            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::MouseScroll(_) | TuiEvent::FocusLost
+            TuiEvent::Key(_)
+                | TuiEvent::Paste(_)
+                | TuiEvent::MouseScroll(_)
+                | TuiEvent::MouseInteraction(_)
+                | TuiEvent::FocusLost
         ) {
             self.expire_pending_key_chord();
             self.handle_draw_pre_render(tui, screen_size)?;
@@ -946,6 +950,9 @@ impl App {
                         )
                         .await;
                     }
+                }
+                TuiEvent::MouseInteraction(event) => {
+                    self.handle_owned_screen_mouse_interaction(tui, event);
                 }
                 TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained => {
                     if self.backtrack_render_pending {

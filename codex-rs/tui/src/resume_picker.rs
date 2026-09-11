@@ -611,7 +611,7 @@ async fn run_session_picker_with_loader(
                     TuiEvent::Paste(pasted) => {
                         state.handle_paste(pasted);
                     }
-                    TuiEvent::MouseScroll(_) => {}
+                    TuiEvent::MouseScroll(_) | TuiEvent::MouseInteraction(_) => {}
                     TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained => {
                         let list_width = list_viewport_width(screen_size.width);
                         let list_height =
