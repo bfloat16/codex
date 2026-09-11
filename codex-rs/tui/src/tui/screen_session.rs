@@ -545,6 +545,7 @@ impl<W: Write> ScreenCommands for WriterCommands<'_, W> {
 
 fn expand_to_full_screen(terminal: &mut Terminal) -> io::Result<()> {
     let size = terminal.size()?;
+    terminal.resize(size)?;
     terminal.set_viewport_area(Rect::new(
         /*x*/ 0,
         /*y*/ 0,

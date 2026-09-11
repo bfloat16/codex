@@ -67,7 +67,7 @@ pub(crate) fn normalize_snapshot_paths(text: impl Into<String>) -> String {
     }
 }
 
-pub(super) fn normalized_backend_snapshot<T: std::fmt::Display>(value: &T) -> String {
+pub(crate) fn normalized_backend_snapshot<T: std::fmt::Display>(value: &T) -> String {
     let platform_test_cwd = test_path_display("/tmp/project");
     let rendered = format!("{value}");
 

@@ -9,6 +9,7 @@ use std::time::Duration;
 use tokio::sync::broadcast::error::TryRecvError;
 
 use super::*;
+use crate::chatwidget::tests::helpers::normalized_backend_snapshot;
 use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
 use crate::tui::MouseScrollDirection;
 use crate::tui::MouseScrollEvent;
@@ -43,7 +44,7 @@ async fn renders_committed_conversation_above_fixed_composer() {
         })
         .expect("render owned screen");
 
-    assert_snapshot!(terminal.backend(), @r###"
+    assert_snapshot!(normalized_backend_snapshot(terminal.backend()), @r###"
 "committed response                                "
 "                                                  "
 "                                                  "
@@ -53,7 +54,7 @@ async fn renders_committed_conversation_above_fixed_composer() {
 "                                                  "
 "› draft sentinel                                  "
 "                                                  "
-"  gpt-5.5 default · /tmp/project                  "
+"  gpt-5.6-sol default · /tmp/project              "
 "###);
 }
 
@@ -176,7 +177,7 @@ async fn mouse_wheel_scrolls_transcript_without_changing_draft() {
         })
         .expect("render scrolled");
 
-    assert_snapshot!(terminal.backend(), @r###"
+    assert_snapshot!(normalized_backend_snapshot(terminal.backend()), @r###"
 "                                        "
 "middle                                  "
 "                                        "
@@ -184,7 +185,7 @@ async fn mouse_wheel_scrolls_transcript_without_changing_draft() {
 "                                        "
 "› draft sentinel                        "
 "                                        "
-"  gpt-5.5 default · /tmp/project        "
+"  gpt-5.6-sol default · /tmp/project    "
 "###);
     assert!(!screen.viewport.is_following_bottom());
     assert!(!screen.handle_mouse_scroll(MouseScrollEvent {

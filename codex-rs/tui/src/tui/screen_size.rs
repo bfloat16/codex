@@ -54,10 +54,7 @@ impl Tui {
         };
         self.screen_size.pending_draw_size = (!matches!(
             event,
-            TuiEvent::Key(_)
-                | TuiEvent::Paste(_)
-                | TuiEvent::MouseScroll(_)
-                | TuiEvent::FocusLost
+            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::MouseScroll(_) | TuiEvent::FocusLost
         ))
         .then_some(size);
         Ok(size)

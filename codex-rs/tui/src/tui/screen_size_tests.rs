@@ -3,6 +3,8 @@ use std::time::Duration;
 use pretty_assertions::assert_eq;
 use ratatui::layout::Size;
 
+use crate::tui::MouseScrollDirection;
+use crate::tui::MouseScrollEvent;
 use crate::tui::TuiEvent;
 
 #[tokio::test]
@@ -17,6 +19,14 @@ async fn draw_size_policy_refreshes_only_after_resume() {
         (TuiEvent::Resume, resumed),
         (TuiEvent::Resize(resized), resized),
         (TuiEvent::Paste(String::new()), cached),
+        (
+            TuiEvent::MouseScroll(MouseScrollEvent {
+                direction: MouseScrollDirection::Up,
+                column: 1,
+                row: 1,
+            }),
+            cached,
+        ),
         (TuiEvent::Draw, resized),
         (TuiEvent::Paste(String::new()), cached),
     ] {

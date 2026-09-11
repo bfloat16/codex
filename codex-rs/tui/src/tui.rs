@@ -54,9 +54,9 @@ use crate::tui::event_stream::EventBroker;
 use crate::tui::event_stream::TuiEventStream;
 #[cfg(unix)]
 use crate::tui::job_control::SuspendContext;
+use crate::tui::screen_session::ScreenSession;
 use crate::tui::screen_size::ScreenSizePolicy;
 use crate::tui::scrollback::ScrollbackStrategy;
-use crate::tui::screen_session::ScreenSession;
 use codex_config::types::NotificationCondition;
 use codex_config::types::NotificationMethod;
 
@@ -68,12 +68,12 @@ mod input_boundary;
 #[cfg(unix)]
 mod job_control;
 mod keyboard_modes;
+mod screen_session;
 mod screen_size;
 mod scrollback;
 #[cfg(all(test, unix))]
 #[path = "tui_startup_tests.rs"]
 mod startup_tests;
-mod screen_session;
 mod terminal_stderr;
 #[cfg(test)]
 pub(crate) mod test_support;
