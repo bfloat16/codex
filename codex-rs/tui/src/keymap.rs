@@ -2099,13 +2099,6 @@ impl RuntimeKeymap {
             validate_unique(context.config_name(), context_bindings(context))?;
         }
 
-        validate_no_reserved(
-            "pager",
-            context_bindings(KeymapContext::Pager),
-            TRANSCRIPT_BACKTRACK_RESERVED_BINDINGS,
-            [],
-        )?;
-
         validate_unique("list", context_bindings(KeymapContext::List))?;
 
         validate_unique("agents", context_bindings(KeymapContext::Agents))?;
@@ -2278,25 +2271,6 @@ const MAIN_RESERVED_BINDINGS: &[(&str, KeyBinding)] = &[
     (
         "fixed.connector_mentions",
         key_hint::plain(KeyCode::Char('$')),
-    ),
-];
-
-const TRANSCRIPT_BACKTRACK_RESERVED_BINDINGS: &[(&str, KeyBinding)] = &[
-    (
-        "fixed.transcript_edit_previous",
-        key_hint::plain(KeyCode::Esc),
-    ),
-    (
-        "fixed.transcript_edit_previous",
-        key_hint::plain(KeyCode::Left),
-    ),
-    (
-        "fixed.transcript_edit_next",
-        key_hint::plain(KeyCode::Right),
-    ),
-    (
-        "fixed.transcript_confirm_edit",
-        key_hint::plain(KeyCode::Enter),
     ),
 ];
 
@@ -3667,14 +3641,6 @@ mod tests {
             }
             expect_conflict(&keymap, "chat.interrupt_turn", action);
         }
-    }
-
-    #[test]
-    fn rejects_pager_bindings_that_collide_with_transcript_backtrack_keys() {
-        let mut keymap = TuiKeymap::default();
-        keymap.pager.close = Some(one("left"));
-
-        expect_conflict(&keymap, "close", "fixed.transcript_edit_previous");
     }
 
     #[test]

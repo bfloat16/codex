@@ -56,6 +56,7 @@ impl App {
                         ..
                     }
                     | AppEvent::RollbackSessionForPromptEdit { .. }
+                    | AppEvent::ApplyBacktrackRestore { .. }
                     | AppEvent::SetThreadGoalDraft { .. }
                     | AppEvent::SetThreadGoalStatus {
                         status: ThreadGoalStatus::Active,
@@ -496,6 +497,18 @@ impl App {
                 if self.chat_widget.thread_id() != Some(thread_id) {
                     return Ok(AppRunControl::Continue);
                 }
+                let selection = crate::app_backtrack::BacktrackSelection {
+                    thread_id,
+                    nth_user_message,
+                    newer_user_messages,
+                    prompt: prompt.clone(),
+                };
+                if self.backtrack.pending_rollback.is_none() {
+                    self.backtrack.pending_rollback =
+                        Some(crate::app_backtrack::PendingBacktrackRollback {
+                            selection: selection.clone(),
+                        });
+                }
                 let rollback_target = match self.thread_event_channels.get(&thread_id) {
                     Some(channel) => {
                         let store = channel.store.lock().await;
@@ -588,12 +601,70 @@ impl App {
                     }
                 };
                 match rollback_target {
-                    Ok(target) => match app_server
+                    Ok(target) => {
+                        let file_count = match app_server
+                            .thread_file_change_read(
+                                thread_id,
+                                target.before_turn_id.clone(),
+                            )
+                            .await
+                        {
+                            Ok(response) => response.data.len(),
+                            Err(err) => {
+                                tracing::warn!("failed to preview tracked file restore: {err}");
+                                0
+                            }
+                        };
+                        self.show_backtrack_restore_picker(selection, target, file_count);
+                    }
+                    Err(err) => {
+                        self.handle_backtrack_rollback_failed();
+                        self.restore_backtrack_prompt_after_rollback_error(prompt, err);
+                    }
+                }
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::ApplyBacktrackRestore {
+                thread_id,
+                nth_user_message,
+                target,
+                prompt,
+                mode,
+            } => {
+                if self.chat_widget.thread_id() != Some(thread_id) {
+                    self.handle_backtrack_rollback_failed();
+                    return Ok(AppRunControl::Continue);
+                }
+                let restore_files = matches!(
+                    mode,
+                    crate::app_event::BacktrackRestoreMode::CodeAndConversation
+                        | crate::app_event::BacktrackRestoreMode::Code
+                );
+                let restore_conversation = matches!(
+                    mode,
+                    crate::app_event::BacktrackRestoreMode::CodeAndConversation
+                        | crate::app_event::BacktrackRestoreMode::Conversation
+                );
+                let file_restore = if restore_files {
+                    Some(
+                        app_server
+                            .thread_file_change_restore(
+                                thread_id,
+                                target.before_turn_id.clone(),
+                            )
+                            .await,
+                    )
+                } else {
+                    None
+                };
+
+                if restore_conversation {
+                    match app_server
                         .truncate_thread_before_turn(
                             &self.config,
                             &self.local_settings,
                             thread_id,
-                            target.before_turn_id,
+                            target.before_turn_id.clone(),
                             target.legacy_num_turns,
                         )
                         .await
@@ -606,6 +677,17 @@ impl App {
                                     .await
                                     .apply_thread_history_replacement(&thread);
                             }
+                            if let Err(err) = app_server
+                                .thread_file_change_discard(
+                                    thread_id,
+                                    target.before_turn_id.clone(),
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    "failed to discard checkpoints after conversation rewind: {err}"
+                                );
+                            }
                             self.chat_widget.restore_user_message_to_composer(prompt);
                             self.handle_backtrack_rollback_succeeded(nth_user_message);
                         }
@@ -613,13 +695,37 @@ impl App {
                             self.handle_backtrack_rollback_failed();
                             self.restore_backtrack_prompt_after_rollback_error(prompt, err);
                         }
-                    },
-                    Err(err) => {
-                        self.handle_backtrack_rollback_failed();
-                        self.restore_backtrack_prompt_after_rollback_error(prompt, err);
+                    }
+                } else {
+                    self.handle_backtrack_rollback_failed();
+                    self.reset_backtrack_state();
+                }
+
+                if let Some(file_restore) = file_restore {
+                    match file_restore {
+                        Ok(response) => {
+                            let restored = response.restored.len();
+                            let skipped = response.skipped.len();
+                            let failed = response.failed.len();
+                            let message = if skipped == 0 && failed == 0 {
+                                format!("Restored {restored} tracked files.")
+                            } else {
+                                format!(
+                                    "Restored {restored} tracked files; skipped {skipped}; failed {failed}."
+                                )
+                            };
+                            self.chat_widget.add_info_message(message, /*hint*/ None);
+                        }
+                        Err(err) => self
+                            .chat_widget
+                            .add_error_message(format!("Failed to restore tracked files: {err}")),
                     }
                 }
                 tui.frame_requester().schedule_frame();
+            }
+            AppEvent::CancelBacktrackRestore => {
+                self.handle_backtrack_rollback_failed();
+                self.reset_backtrack_state();
             }
             AppEvent::BeginInitialHistoryReplayBuffer => {
                 self.begin_initial_history_replay_buffer();

@@ -1,20 +1,21 @@
-//! Backtracking and transcript overlay event routing.
+//! Prompt rewind and transcript overlay event routing.
 //!
-//! This file owns backtrack mode (Esc/Enter navigation in the transcript overlay) and also
-//! mediates a key rendering boundary for the transcript overlay.
+//! This file owns the double-Esc rewind flow and also mediates a key rendering boundary for the
+//! read-only transcript overlay.
 //!
-//! Overall goal: keep the main chat view and the transcript overlay in sync while allowing users
-//! to edit an earlier prompt in the original thread. Confirming a selection removes the selected
-//! turn and every later turn, then restores the prompt in the composer.
+//! Rewind stays in the main view. It first presents historical prompts below the composer, then
+//! offers separate choices for restoring tracked files, conversation history, or both. Conversation
+//! restore removes the selected turn and every later turn, then puts the prompt back in the
+//! composer.
 //!
 //! Backtrack operates as a small state machine:
 //! - The first `Esc` in the main view "primes" the feature and captures a base thread id.
-//! - A subsequent `Esc` opens the transcript overlay (`Ctrl+T`) and highlights a user message when
-//!   there is a prompt to reuse.
-//! - `Enter` rolls back before the selected prompt and reopens it for editing.
+//! - A subsequent `Esc` opens the prompt picker below the composer.
+//! - Selecting a prompt resolves its persisted turn and opens the restore-choice picker.
+//! - Selecting a restore mode applies the requested file and/or conversation rewind.
 //!
-//! The transcript overlay (`Ctrl+T`) renders committed transcript cells plus a render-only live
-//! tail derived from the current in-flight `ChatWidget.active_cell`.
+//! The separate transcript overlay (`Ctrl+T`) is read-only. It renders committed transcript cells
+//! plus a render-only live tail derived from the current in-flight `ChatWidget.active_cell`.
 //!
 //! That live tail is kept in sync during `TuiEvent::Draw` handling for `Overlay::Transcript` by
 //! asking `ChatWidget` for an active-cell cache key and transcript lines and by passing them into
@@ -30,6 +31,9 @@ use crate::app::App;
 use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
 use crate::bottom_pane::LocalImageAttachment;
+use crate::bottom_pane::SelectionItem;
+use crate::bottom_pane::SelectionRowDisplay;
+use crate::bottom_pane::SelectionViewParams;
 use crate::chatwidget::ChatWidget;
 use crate::chatwidget::UserMessage;
 use crate::chatwidget::mention_bindings_from_user_inputs;
@@ -48,11 +52,10 @@ use codex_protocol::ThreadId;
 use codex_protocol::models::local_image_label_text;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::bail;
-use crossterm::event::KeyCode;
-use crossterm::event::KeyEvent;
-use crossterm::event::KeyEventKind;
 
 const NO_PREVIOUS_MESSAGE_TO_EDIT: &str = "No previous message to edit.";
+const BACKTRACK_MESSAGE_VIEW_ID: &str = "backtrack-message";
+const BACKTRACK_RESTORE_VIEW_ID: &str = "backtrack-restore";
 pub(crate) const SIDE_EDIT_PREVIOUS_UNAVAILABLE_MESSAGE: &str =
     "Editing previous prompts is unavailable in side conversations.";
 
@@ -65,12 +68,12 @@ pub(crate) struct BacktrackState {
     ///
     /// If the current thread changes, backtrack selections become invalid and must be ignored.
     pub(crate) base_id: Option<ThreadId>,
-    /// Index of the currently highlighted user message.
+    /// Index of the user message selected by legacy backtrack tests and pagination state.
     ///
     /// This is an index into the filtered "user messages since the last session start" view,
     /// not an index into `transcript_cells`. `usize::MAX` indicates "no selection".
     pub(crate) nth_user_message: usize,
-    /// True when the transcript overlay is showing a backtrack preview.
+    /// Legacy transcript-preview state retained for paginated transcript bookkeeping.
     pub(crate) overlay_preview_active: bool,
     pub(crate) pending_rollback: Option<PendingBacktrackRollback>,
 }
@@ -124,13 +127,12 @@ impl App {
         if !self.backtrack.primed {
             self.prime_backtrack();
         } else if self.overlay.is_none() {
-            self.open_backtrack_preview(tui);
-        } else if self.backtrack.overlay_preview_active {
-            self.step_backtrack_and_highlight(tui);
+            self.open_backtrack_message_picker(tui);
         }
     }
 
     /// Request a rollback before the selected prompt in the current thread.
+    #[cfg(test)]
     pub(crate) fn apply_backtrack_selection(&mut self, selection: BacktrackSelection) {
         if self.chat_widget.side_conversation_active() {
             self.reset_backtrack_state();
@@ -242,8 +244,8 @@ impl App {
         }
     }
 
-    /// Open overlay and begin backtrack preview flow (first step + highlight).
-    fn open_backtrack_preview(&mut self, tui: &mut tui::Tui) {
+    /// Open the Claude-style prompt picker in the bottom pane.
+    fn open_backtrack_message_picker(&mut self, tui: &mut tui::Tui) {
         if !has_backtrack_target(&self.transcript_cells) {
             self.reset_backtrack_state();
             self.chat_widget
@@ -251,76 +253,117 @@ impl App {
             tui.frame_requester().schedule_frame();
             return;
         }
-
-        self.open_transcript_overlay(tui);
-        self.backtrack.overlay_preview_active = true;
-        // Composer is hidden by overlay; clear its hint.
         self.chat_widget.clear_esc_backtrack_hint();
-        self.step_backtrack_and_highlight(tui);
-    }
-
-    /// When overlay is already open, begin preview mode and select latest user message.
-    fn begin_overlay_backtrack_preview(&mut self, tui: &mut tui::Tui) {
-        if !has_backtrack_target(&self.transcript_cells) {
-            self.close_transcript_overlay(tui);
-            self.chat_widget
-                .add_info_message(NO_PREVIOUS_MESSAGE_TO_EDIT.to_string(), /*hint*/ None);
-            tui.frame_requester().schedule_frame();
-            return;
-        }
-
-        self.backtrack.primed = true;
-        self.backtrack.base_id = self.chat_widget.thread_id();
-        self.backtrack.overlay_preview_active = true;
         let count = user_count(&self.transcript_cells);
-        if let Some(last) = count.checked_sub(1) {
-            self.apply_backtrack_selection_internal(last);
-        }
+        let items = (0..count)
+            .filter_map(|nth_user_message| {
+                let selection = self.backtrack_selection(nth_user_message)?;
+                let name = selection
+                    .prompt
+                    .text
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                Some(SelectionItem {
+                    name,
+                    actions: vec![Box::new(move |tx| {
+                        tx.send(AppEvent::RollbackSessionForPromptEdit {
+                            thread_id: selection.thread_id,
+                            nth_user_message: selection.nth_user_message,
+                            newer_user_messages: selection.newer_user_messages,
+                            prompt: selection.prompt.clone(),
+                        });
+                    })],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                })
+            })
+            .collect();
+        self.chat_widget.show_selection_view(SelectionViewParams {
+            view_id: Some(BACKTRACK_MESSAGE_VIEW_ID),
+            title: Some("Rewind".to_string()),
+            subtitle: Some("Restore code and/or conversation to the point before...".to_string()),
+            items,
+            initial_selected_idx: count.checked_sub(1),
+            row_display: SelectionRowDisplay::SingleLine,
+            on_cancel: Some(Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore))),
+            ..Default::default()
+        });
         tui.frame_requester().schedule_frame();
     }
 
-    /// Step selection to the next older user message and update overlay.
-    fn step_backtrack_and_highlight(&mut self, tui: &mut tui::Tui) {
-        let count = user_count(&self.transcript_cells);
-        if count == 0 {
-            return;
+    pub(crate) fn show_backtrack_restore_picker(
+        &mut self,
+        selection: BacktrackSelection,
+        target: BacktrackRollbackTarget,
+        file_count: usize,
+    ) {
+        let mut options = Vec::new();
+        if file_count > 0 {
+            options.push((
+                "Restore code and conversation",
+                format!("Restore {file_count} tracked files and remove later messages"),
+                Some(crate::app_event::BacktrackRestoreMode::CodeAndConversation),
+            ));
         }
-
-        let last_index = count.saturating_sub(1);
-        let next_selection = if self.backtrack.nth_user_message == usize::MAX {
-            last_index
-        } else if self.backtrack.nth_user_message == 0 {
-            0
-        } else {
-            self.backtrack
-                .nth_user_message
-                .saturating_sub(1)
-                .min(last_index)
-        };
-
-        self.apply_backtrack_selection_internal(next_selection);
-        tui.frame_requester().schedule_frame();
-    }
-
-    /// Step selection to the next newer user message and update overlay.
-    fn step_forward_backtrack_and_highlight(&mut self, tui: &mut tui::Tui) {
-        let count = user_count(&self.transcript_cells);
-        if count == 0 {
-            return;
+        options.push((
+            "Restore conversation",
+            if file_count > 0 {
+                "Keep tracked file changes and remove later messages".to_string()
+            } else {
+                "Remove this message and every later message".to_string()
+            },
+            Some(crate::app_event::BacktrackRestoreMode::Conversation),
+        ));
+        if file_count > 0 {
+            options.push((
+                "Restore code",
+                format!("Restore {file_count} tracked files and keep the conversation"),
+                Some(crate::app_event::BacktrackRestoreMode::Code),
+            ));
         }
-
-        let last_index = count.saturating_sub(1);
-        let next_selection = if self.backtrack.nth_user_message == usize::MAX {
-            last_index
-        } else {
-            self.backtrack
-                .nth_user_message
-                .saturating_add(1)
-                .min(last_index)
-        };
-
-        self.apply_backtrack_selection_internal(next_selection);
-        tui.frame_requester().schedule_frame();
+        options.push((
+            "Never mind",
+            "Leave the code and conversation unchanged".to_string(),
+            None,
+        ));
+        let items = options
+            .into_iter()
+            .map(|(name, description, mode)| {
+                let prompt = selection.prompt.clone();
+                let target = target.clone();
+                SelectionItem {
+                    name: name.to_string(),
+                    description: Some(description),
+                    actions: vec![Box::new(move |tx| match mode {
+                        Some(mode) => tx.send(AppEvent::ApplyBacktrackRestore {
+                            thread_id: selection.thread_id,
+                            nth_user_message: selection.nth_user_message,
+                            target: target.clone(),
+                            prompt: prompt.clone(),
+                            mode,
+                        }),
+                        None => tx.send(AppEvent::CancelBacktrackRestore),
+                    })],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        self.chat_widget.show_selection_view(SelectionViewParams {
+            view_id: Some(BACKTRACK_RESTORE_VIEW_ID),
+            title: Some("Rewind".to_string()),
+            subtitle: Some("Choose what to restore.".to_string()),
+            footer_note: Some(
+                "Only changes made through Codex apply_patch are restored; shell and manual edits are left untouched."
+                    .into(),
+            ),
+            items,
+            initial_selected_idx: Some(0),
+            on_cancel: Some(Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore))),
+            ..Default::default()
+        });
     }
 
     /// Apply a computed backtrack selection to the overlay and internal counter.
@@ -391,43 +434,9 @@ impl App {
         Ok(())
     }
 
-    /// Handle Enter in overlay backtrack preview: confirm selection and reset state.
-    fn overlay_confirm_backtrack(&mut self, tui: &mut tui::Tui) {
-        let nth_user_message = self.backtrack.nth_user_message;
-        let selection = self.backtrack_selection(nth_user_message);
-        self.close_transcript_overlay(tui);
-        if let Some(selection) = selection {
-            self.apply_backtrack_selection(selection);
-            tui.frame_requester().schedule_frame();
-        }
-    }
-
-    /// Handle Esc in overlay backtrack preview: step selection if armed, else forward.
-    fn overlay_step_backtrack(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> Result<()> {
-        if self.backtrack.base_id.is_some() {
-            self.step_backtrack_and_highlight(tui);
-        } else {
-            self.overlay_forward_event(tui, event)?;
-        }
-        Ok(())
-    }
-
-    /// Handle Right in overlay backtrack preview: step selection forward if armed, else forward.
-    fn overlay_step_backtrack_forward(
-        &mut self,
-        tui: &mut tui::Tui,
-        event: TuiEvent,
-    ) -> Result<()> {
-        if self.backtrack.base_id.is_some() {
-            self.step_forward_backtrack_and_highlight(tui);
-        } else {
-            self.overlay_forward_event(tui, event)?;
-        }
-        Ok(())
-    }
-
     /// Confirm a primed backtrack from the main view (no overlay visible).
     /// Computes the prompt state from the selected user message.
+    #[cfg(test)]
     pub(crate) fn confirm_backtrack_from_main(&mut self) -> Option<BacktrackSelection> {
         let selection = self.backtrack_selection(self.backtrack.nth_user_message);
         self.reset_backtrack_state();

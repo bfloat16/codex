@@ -78,6 +78,12 @@ use codex_app_server_protocol::ThreadCompactStartParams;
 use codex_app_server_protocol::ThreadCompactStartResponse;
 use codex_app_server_protocol::ThreadDeleteParams;
 use codex_app_server_protocol::ThreadDeleteResponse;
+use codex_app_server_protocol::ThreadFileChangeDiscardParams;
+use codex_app_server_protocol::ThreadFileChangeDiscardResponse;
+use codex_app_server_protocol::ThreadFileChangeReadParams;
+use codex_app_server_protocol::ThreadFileChangeReadResponse;
+use codex_app_server_protocol::ThreadFileChangeRestoreParams;
+use codex_app_server_protocol::ThreadFileChangeRestoreResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadGoalClearParams;
@@ -1691,6 +1697,62 @@ impl AppServerSession {
                 Ok(response.thread)
             }
         }
+    }
+
+    pub(crate) async fn thread_file_change_read(
+        &mut self,
+        thread_id: ThreadId,
+        before_turn_id: String,
+    ) -> Result<ThreadFileChangeReadResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::ThreadFileChangeRead {
+                request_id,
+                params: ThreadFileChangeReadParams {
+                    thread_id: thread_id.to_string(),
+                    before_turn_id,
+                },
+            })
+            .await
+            .wrap_err("thread/fileChange/read failed in TUI")
+    }
+
+    pub(crate) async fn thread_file_change_restore(
+        &mut self,
+        thread_id: ThreadId,
+        before_turn_id: String,
+    ) -> Result<ThreadFileChangeRestoreResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::ThreadFileChangeRestore {
+                request_id,
+                params: ThreadFileChangeRestoreParams {
+                    thread_id: thread_id.to_string(),
+                    before_turn_id,
+                },
+            })
+            .await
+            .wrap_err("thread/fileChange/restore failed in TUI")
+    }
+
+    pub(crate) async fn thread_file_change_discard(
+        &mut self,
+        thread_id: ThreadId,
+        before_turn_id: String,
+    ) -> Result<()> {
+        let request_id = self.next_request_id();
+        let _: ThreadFileChangeDiscardResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadFileChangeDiscard {
+                request_id,
+                params: ThreadFileChangeDiscardParams {
+                    thread_id: thread_id.to_string(),
+                    before_turn_id,
+                },
+            })
+            .await
+            .wrap_err("thread/fileChange/discard failed in TUI")?;
+        Ok(())
     }
 
     pub(crate) async fn review_start(

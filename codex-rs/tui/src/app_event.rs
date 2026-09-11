@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::app_backtrack::BacktrackRollbackTarget;
 use crate::inline_visualization::InlineVisualizationContext;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
@@ -502,6 +503,16 @@ pub(crate) enum AppEvent {
         newer_user_messages: usize,
         prompt: UserMessage,
     },
+
+    ApplyBacktrackRestore {
+        thread_id: ThreadId,
+        nth_user_message: usize,
+        target: BacktrackRollbackTarget,
+        prompt: UserMessage,
+        mode: BacktrackRestoreMode,
+    },
+
+    CancelBacktrackRestore,
 
     RollbackOutputFreeTurnForPromptRestore {
         thread_id: ThreadId,
@@ -1484,6 +1495,13 @@ pub(crate) enum AppEvent {
         turn_revision: usize,
         result: Result<String, String>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BacktrackRestoreMode {
+    CodeAndConversation,
+    Conversation,
+    Code,
 }
 
 /// Named profile selection to apply after any required UI guardrails complete.

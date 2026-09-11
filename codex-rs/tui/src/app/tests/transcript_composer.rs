@@ -24,7 +24,7 @@ async fn press_key(
 }
 
 #[tokio::test]
-async fn transcript_flag_off_preserves_viewer_and_backtracking() -> Result<()> {
+async fn transcript_flag_off_preserves_read_only_viewer() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let keymap_config = toml::from_str("[composer]\nsubmit = [\"ctrl-x enter\"]")?;
     app.keymap =
@@ -85,25 +85,11 @@ async fn transcript_flag_off_preserves_viewer_and_backtracking() -> Result<()> {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!("transcript_flag_off_viewer", text);
-    for (key, selected) in [
-        (KeyCode::Esc, 1),
-        (KeyCode::Esc, 0),
-        (KeyCode::Right, 1),
-        (KeyCode::Right, 1),
-    ] {
-        press_key(&mut app, &mut tui, &mut app_server, key).await?;
-        assert_eq!(app.backtrack.nth_user_message, selected);
-    }
-    press_key(&mut app, &mut tui, &mut app_server, KeyCode::Enter).await?;
-    assert!(app.overlay.is_none());
+    press_key(&mut app, &mut tui, &mut app_server, KeyCode::Esc).await?;
+    assert!(app.overlay.is_some());
     assert!(
-        std::iter::from_fn(|| app_event_rx.try_recv().ok()).any(|event| matches!(
-            event,
-            AppEvent::RollbackSessionForPromptEdit {
-                nth_user_message: 1,
-                ..
-            }
-        ))
+        std::iter::from_fn(|| app_event_rx.try_recv().ok())
+            .all(|event| !matches!(event, AppEvent::RollbackSessionForPromptEdit { .. }))
     );
     Ok(())
 }

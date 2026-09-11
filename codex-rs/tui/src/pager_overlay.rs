@@ -27,6 +27,7 @@ use std::sync::Arc;
 use crate::chatwidget::ActiveCellTranscriptKey;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::SessionInfoCell;
+#[cfg(test)]
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::key_hint::KeyBindingListExt;
@@ -38,6 +39,7 @@ use crate::render::renderable::Renderable;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::tui;
 use crate::tui::TuiEvent;
+#[cfg(test)]
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
@@ -872,26 +874,10 @@ impl TranscriptOverlay {
         let line2 = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
         render_navigation_hints(line1, buf, &self.view.keymap);
 
-        let mut pairs: Vec<(Vec<ShortcutHint>, &str)> = vec![(
+        let pairs: Vec<(Vec<ShortcutHint>, &str)> = vec![(
             first_or_empty(&self.view.keymap, "close", &self.view.keymap.close),
             "close",
         )];
-        if self.highlight_cell.is_some() {
-            pairs.push((
-                vec![
-                    key_hint::plain(KeyCode::Esc).into(),
-                    key_hint::plain(KeyCode::Left).into(),
-                ],
-                "to edit prev",
-            ));
-            pairs.push((vec![key_hint::plain(KeyCode::Right).into()], "to edit next"));
-            pairs.push((
-                vec![key_hint::plain(KeyCode::Enter).into()],
-                "to edit message",
-            ));
-        } else {
-            pairs.push((vec![key_hint::plain(KeyCode::Esc).into()], "to edit prev"));
-        }
         render_key_hints(line2, buf, &pairs);
     }
 
@@ -1151,7 +1137,7 @@ mod tests {
     }
 
     #[test]
-    fn edit_prev_hint_is_visible() {
+    fn transcript_footer_does_not_offer_prompt_editing() {
         let mut overlay = transcript_overlay(vec![Arc::new(TestCell {
             lines: vec![Line::from("hello")],
         })]);
@@ -1162,10 +1148,8 @@ mod tests {
         overlay.render(area, &mut buf);
 
         let s = buffer_to_text(&buf, area);
-        assert!(
-            s.contains("edit prev"),
-            "expected 'edit prev' hint in overlay footer, got: {s:?}"
-        );
+        assert!(s.contains("close"), "expected close hint, got: {s:?}");
+        assert!(!s.contains("edit"), "unexpected edit hint: {s:?}");
     }
 
     #[test]
@@ -1185,7 +1169,7 @@ mod tests {
     }
 
     #[test]
-    fn edit_next_hint_is_visible_when_highlighted() {
+    fn highlighted_transcript_footer_remains_read_only() {
         let mut overlay = transcript_overlay(vec![Arc::new(TestCell {
             lines: vec![Line::from("hello")],
         })]);
@@ -1197,10 +1181,8 @@ mod tests {
         overlay.render(area, &mut buf);
 
         let s = buffer_to_text(&buf, area);
-        assert!(
-            s.contains("edit next"),
-            "expected 'edit next' hint in overlay footer, got: {s:?}"
-        );
+        assert!(s.contains("close"), "expected close hint, got: {s:?}");
+        assert!(!s.contains("edit"), "unexpected edit hint: {s:?}");
     }
 
     #[test]

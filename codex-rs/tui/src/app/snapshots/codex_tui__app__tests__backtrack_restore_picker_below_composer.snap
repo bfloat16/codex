@@ -1,0 +1,22 @@
+---
+source: tui/src/app/tests.rs
+expression: terminal.backend()
+---
+"                                                                                "
+"                                                                                "
+"  Rewind                                                                        "
+"  Choose what to restore.                                                       "
+"                                                                                "
+"› 1. Restore code and conversation  Restore 2 tracked files and remove later    "
+"                                    messages                                    "
+"  2. Restore conversation           Keep tracked file changes and remove later  "
+"                                    messages                                    "
+"  3. Restore code                   Restore 2 tracked files and keep the        "
+"                                    conversation                                "
+"  4. Never mind                     Leave the code and conversation unchanged   "
+"                                                                                "
+"  Only changes made through Codex apply_patch are restored; shell and manual    "
+"  edits are left untouched.                                                     "
+"  Press enter to confirm or esc to go back                                      "
+"                                                                                "
+"                                                                                "

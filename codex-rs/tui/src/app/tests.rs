@@ -58,6 +58,7 @@ mod transcript_composer;
 mod turn_submission;
 
 use super::*;
+use crate::app_backtrack::BacktrackRollbackTarget;
 use crate::app_backtrack::BacktrackSelection;
 use crate::app_backtrack::BacktrackState;
 use crate::app_backtrack::user_count;
@@ -7220,6 +7221,82 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_rollback() {
         .map(|cell| lines_to_single_string(&cell.display_lines(/*width*/ 80)))
         .collect();
     assert_eq!(transcript_after, transcript_before);
+}
+
+#[tokio::test]
+async fn double_esc_opens_backtrack_picker_below_composer() -> Result<()> {
+    let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    let thread_id = ThreadId::new();
+    app.chat_widget.handle_thread_session(ThreadSessionState {
+        thread_id,
+        forked_from_id: None,
+        fork_parent_title: None,
+        thread_name: None,
+        model: "gpt-test".to_string(),
+        model_provider_id: "test-provider".to_string(),
+        service_tier: None,
+        approval_policy: AskForApproval::Never,
+        approvals_reviewer: ApprovalsReviewer::User,
+        permission_profile: PermissionProfile::read_only(),
+        active_permission_profile: None,
+        cwd: test_path_buf("/home/user/project").abs(),
+        runtime_workspace_roots: Vec::new(),
+        instruction_source_paths: Vec::new(),
+        reasoning_effort: None,
+        collaboration_mode: None,
+        personality: None,
+        message_history: None,
+        network_proxy: None,
+        rollout_path: Some(PathBuf::new()),
+    });
+    app.transcript_cells = vec![
+        Arc::new(UserHistoryCell {
+            message: "first request".to_string(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: Vec::new(),
+        }),
+        Arc::new(UserHistoryCell {
+            message: "most recent request".to_string(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: Vec::new(),
+        }),
+    ];
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+
+    app.handle_backtrack_esc_key(&mut tui);
+    app.handle_backtrack_esc_key(&mut tui);
+
+    assert!(app.overlay.is_none());
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
+        /*width*/ 80, /*height*/ 18,
+    ))?;
+    terminal.draw(|frame| {
+        app.chat_widget.render(frame.area(), frame.buffer_mut());
+    })?;
+    insta::assert_snapshot!("backtrack_prompt_picker_below_composer", terminal.backend());
+    app.show_backtrack_restore_picker(
+        BacktrackSelection {
+            thread_id,
+            nth_user_message: 1,
+            newer_user_messages: 0,
+            prompt: crate::chatwidget::UserMessage::from("most recent request"),
+        },
+        BacktrackRollbackTarget {
+            before_turn_id: "turn-2".to_string(),
+            legacy_num_turns: 1,
+        },
+        /*file_count*/ 2,
+    );
+    terminal.draw(|frame| {
+        app.chat_widget.render(frame.area(), frame.buffer_mut());
+    })?;
+    insta::assert_snapshot!(
+        "backtrack_restore_picker_below_composer",
+        terminal.backend()
+    );
+    Ok(())
 }
 
 #[tokio::test]
