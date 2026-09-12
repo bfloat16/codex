@@ -10,12 +10,6 @@ pub(crate) fn create_wait_tool() -> ToolSpec {
             JsonSchema::string(Some("Identifier of the running exec cell.".to_string())),
         ),
         (
-            "yield_time_ms".to_string(),
-            JsonSchema::number(Some(
-                "Wait before yielding more output. Defaults to 10000 ms.".to_string(),
-            )),
-        ),
-        (
             "max_tokens".to_string(),
             JsonSchema::number(Some(
                 "Output token budget for this wait call. Defaults to 10000 tokens.".to_string(),
@@ -84,13 +78,6 @@ mod tests {
                             "terminate".to_string(),
                             JsonSchema::boolean(Some(
                                 "True stops the running exec cell; false or omitted waits for output."
-                                    .to_string(),
-                            )),
-                        ),
-                        (
-                            "yield_time_ms".to_string(),
-                            JsonSchema::number(Some(
-                                "Wait before yielding more output. Defaults to 10000 ms."
                                     .to_string(),
                             )),
                         ),

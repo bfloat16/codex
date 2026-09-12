@@ -269,7 +269,7 @@ fn registry_rejects_default_namespace_alias_collisions() {
         );
         assert_eq!(
             registry.supports_parallel_tool_calls(&duplicate_name),
-            Some(false)
+            Some(true)
         );
         assert!(
             registry

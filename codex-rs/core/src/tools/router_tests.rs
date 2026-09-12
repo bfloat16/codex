@@ -375,7 +375,7 @@ async fn mcp_parallel_support_uses_handler_data() -> anyhow::Result<()> {
         },
         encrypted_function_args: None,
     };
-    assert!(!router.tool_supports_parallel(&different_server_call));
+    assert!(router.tool_supports_parallel(&different_server_call));
     assert_eq!(
         router
             .tool_runtime(&different_server_call.tool_name)

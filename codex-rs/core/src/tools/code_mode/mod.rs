@@ -6,7 +6,9 @@ mod telemetry;
 mod wait_handler;
 pub(crate) mod wait_spec;
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -35,6 +37,7 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
 use crate::tools::parallel::ToolCallRuntime;
+use crate::tools::parallel::ToolExecutionAdmission;
 use crate::tools::parallel::ToolExecutionTracker;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
@@ -54,7 +57,34 @@ pub(crate) use wait_handler::CodeModeWaitHandler;
 
 pub(crate) const PUBLIC_TOOL_NAME: &str = codex_code_mode::PUBLIC_TOOL_NAME;
 pub(crate) const WAIT_TOOL_NAME: &str = codex_code_mode::WAIT_TOOL_NAME;
-pub(crate) const DEFAULT_WAIT_YIELD_TIME_MS: u64 = codex_code_mode::DEFAULT_WAIT_YIELD_TIME_MS;
+const WAIT_BACKOFF_STEP_MS: u64 = 30_000;
+const MAX_WAIT_BACKOFF_STEPS: u8 = 6;
+
+#[derive(Default)]
+struct WaitBackoff {
+    steps_by_cell: Mutex<HashMap<CellId, u8>>,
+}
+
+impl WaitBackoff {
+    fn next_yield_time_ms(&self, cell_id: &CellId) -> u64 {
+        let mut steps_by_cell = self
+            .steps_by_cell
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let step = steps_by_cell
+            .entry(cell_id.clone())
+            .and_modify(|step| *step = step.saturating_add(1).min(MAX_WAIT_BACKOFF_STEPS))
+            .or_insert(1);
+        u64::from(*step).saturating_mul(WAIT_BACKOFF_STEP_MS)
+    }
+
+    fn clear(&self, cell_id: &CellId) {
+        self.steps_by_cell
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(cell_id);
+    }
+}
 
 /// Returns true for the code-mode `exec` tool in the default namespace.
 pub(crate) fn is_exec_tool_name(tool_name: &ToolName) -> bool {
@@ -73,8 +103,10 @@ pub(crate) struct CodeModeService {
     availability: Result<(), String>,
     dispatch_broker: Arc<CodeModeDispatchBroker>,
     default_exec_yield_time_ms: u64,
+    wait_backoff: WaitBackoff,
     shutdown_token: CancellationToken,
     unavailable_warning_emitted: AtomicBool,
+    execution_tracker: Arc<ToolExecutionTracker>,
 }
 
 impl CodeModeService {
@@ -83,7 +115,11 @@ impl CodeModeService {
         config: &CodeModeConfig,
         executed_tool_calls: Option<Arc<ExecutedToolCallRecorder>>,
     ) -> Self {
-        let dispatch_broker = Arc::new(CodeModeDispatchBroker::new(executed_tool_calls));
+        let execution_tracker = Arc::new(ToolExecutionTracker::default());
+        let dispatch_broker = Arc::new(CodeModeDispatchBroker::new(
+            executed_tool_calls,
+            Arc::clone(&execution_tracker),
+        ));
         let availability = session_provider.availability();
         Self {
             session: OnceCell::new(),
@@ -91,8 +127,10 @@ impl CodeModeService {
             availability,
             dispatch_broker,
             default_exec_yield_time_ms: config.default_exec_yield_time_ms,
+            wait_backoff: WaitBackoff::default(),
             shutdown_token: CancellationToken::new(),
             unavailable_warning_emitted: AtomicBool::new(false),
+            execution_tracker,
         }
     }
 
@@ -120,6 +158,10 @@ impl CodeModeService {
         Arc::clone(&self.session_provider)
     }
 
+    pub(crate) fn tool_execution_tracker(&self) -> Arc<ToolExecutionTracker> {
+        Arc::clone(&self.execution_tracker)
+    }
+
     pub(crate) async fn execute(
         &self,
         mut request: codex_code_mode::ExecuteRequest,
@@ -132,15 +174,32 @@ impl CodeModeService {
 
     pub(crate) async fn wait(
         &self,
-        request: codex_code_mode::WaitRequest,
+        cell_id: CellId,
     ) -> Result<codex_code_mode::WaitOutcome, String> {
-        self.session().await?.wait(request).await
+        let yield_time_ms = self.wait_backoff.next_yield_time_ms(&cell_id);
+        let outcome = self
+            .session()
+            .await?
+            .wait(codex_code_mode::WaitRequest {
+                cell_id: cell_id.clone(),
+                yield_time_ms,
+            })
+            .await?;
+        if !matches!(
+            &outcome,
+            codex_code_mode::WaitOutcome::LiveCell(RuntimeResponse::Yielded { .. })
+                | codex_code_mode::WaitOutcome::MissingCell(RuntimeResponse::Yielded { .. })
+        ) {
+            self.wait_backoff.clear(&cell_id);
+        }
+        Ok(outcome)
     }
 
     pub(crate) async fn terminate(
         &self,
         cell_id: CellId,
     ) -> Result<codex_code_mode::WaitOutcome, String> {
+        self.wait_backoff.clear(&cell_id);
         self.session().await?.terminate(cell_id).await
     }
 
@@ -195,6 +254,7 @@ impl CodeModeService {
     }
 
     pub(crate) fn finish_cell_dispatch(&self, cell_id: &CellId) {
+        self.wait_backoff.clear(cell_id);
         self.dispatch_broker.close_cell(cell_id);
     }
 
@@ -203,7 +263,6 @@ impl CodeModeService {
         session: &Arc<Session>,
         step_context: Arc<StepContext>,
         tracker: SharedTurnDiffTracker,
-        execution_tracker: Arc<ToolExecutionTracker>,
     ) -> Option<CodeModeDispatchWorker> {
         let turn = &step_context.turn;
         if !step_context.tool_router.requires_code_mode_worker() {
@@ -216,7 +275,7 @@ impl CodeModeService {
         };
         Some(
             self.dispatch_broker
-                .start_turn_worker(exec, step_context, tracker, execution_tracker),
+                .start_turn_worker(exec, step_context, tracker),
         )
     }
 
@@ -349,6 +408,7 @@ fn submit_nested_tool(
     tool_runtime: ToolCallRuntime,
     invocation: CodeModeNestedToolCall,
     cancellation_token: CancellationToken,
+    execution_admission: ToolExecutionAdmission,
 ) -> Result<
     impl std::future::Future<Output = Result<JsonValue, FunctionCallError>> + Send + 'static,
     FunctionCallError,
@@ -386,13 +446,14 @@ fn submit_nested_tool(
             call_id: call.call_id.clone(),
             cell_id: cell_id.to_string(),
         });
-    let result = tool_runtime.handle_tool_call_with_source(
+    let result = tool_runtime.handle_tool_call_with_source_admission(
         call,
         ToolCallSource::CodeMode {
             cell_id: cell_id.to_string(),
             runtime_tool_call_id,
         },
         cancellation_token,
+        execution_admission,
     );
     Ok(async move { Ok(result.await?.code_mode_result()) })
 }
@@ -445,20 +506,38 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
+    use super::WaitBackoff;
     use super::build_nested_tool_payload;
     use super::truncate_code_mode_result;
     use crate::session::step_context::StepContext;
     use crate::session::tests::make_session_and_context;
     use crate::tools::context::ToolPayload;
-    use crate::tools::parallel::ToolExecutionTracker;
     use crate::tools::registry::ToolRegistry;
     use crate::tools::router::ToolRouter;
     use crate::turn_diff_tracker::TurnDiffTracker;
+    use codex_code_mode::CellId;
     use codex_code_mode::CodeModeToolKind;
     use codex_protocol::models::FunctionCallOutputContentItem;
     use codex_protocol::openai_models::ToolMode;
     use codex_tools::ToolName;
     use serde_json::json;
+
+    #[test]
+    fn wait_backoff_increases_per_cell_and_resets_after_completion() {
+        let backoff = WaitBackoff::default();
+        let first = CellId::new("cell-1".to_string());
+        let second = CellId::new("cell-2".to_string());
+
+        assert_eq!(
+            (0..7)
+                .map(|_| backoff.next_yield_time_ms(&first))
+                .collect::<Vec<_>>(),
+            vec![30_000, 60_000, 90_000, 120_000, 150_000, 180_000, 180_000]
+        );
+        assert_eq!(backoff.next_yield_time_ms(&second), 30_000);
+        backoff.clear(&first);
+        assert_eq!(backoff.next_yield_time_ms(&first), 30_000);
+    }
 
     #[tokio::test]
     async fn turn_worker_uses_step_router_mode_instead_of_admitted_turn() {
@@ -479,14 +558,11 @@ mod tests {
         ));
         let step_context = step_context.with_tool_router_for_test(router);
         let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
-        let execution_tracker = Arc::new(ToolExecutionTracker::default());
-
-        let worker = session.services.code_mode_service.start_turn_worker(
-            &session,
-            step_context,
-            tracker,
-            execution_tracker,
-        );
+        let worker =
+            session
+                .services
+                .code_mode_service
+                .start_turn_worker(&session, step_context, tracker);
 
         assert!(worker.is_some());
     }

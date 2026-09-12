@@ -1832,6 +1832,41 @@ text(JSON.stringify(results));
     Ok(())
 }
 
+#[cfg_attr(windows, ignore = "code mode exec is unavailable on Windows")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_up_prompt_snapshot_waits_for_nested_tool_completion() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, follow_up) = run_code_mode_turn(
+        &server,
+        "wait for the nested tool before continuing",
+        r#"
+const pending = tools.test_sync_tool({ sleep_after_ms: 250 });
+await new Promise(resolve => setTimeout(resolve, 25));
+yield_control();
+await pending;
+await new Promise(() => {});
+"#,
+    )
+    .await?;
+
+    let request = follow_up.single_request();
+    let output = request.custom_tool_call_output("call-1");
+    assert!(
+        output["internal_chat_message_metadata_passthrough"]["executed_tool_calls"]
+            .as_array()
+            .is_some_and(|calls| calls.iter().any(|call| {
+                call == &serde_json::json!({
+                    "name": "test_sync_tool",
+                    "arguments": { "sleep_after_ms": 250 }
+                })
+            })),
+        "the serialized prompt must include the nested call that completed after exec yielded: {output}"
+    );
+    Ok(())
+}
+
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_write_stdin_calls_run_in_parallel_across_sessions() -> Result<()> {

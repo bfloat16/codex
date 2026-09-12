@@ -120,7 +120,7 @@ pub trait ToolExecutor<Invocation>: Send + Sync {
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
-        false
+        true
     }
 
     /// Handles one invocation without retaining capabilities borrowed by the host.

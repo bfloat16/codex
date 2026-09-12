@@ -23,6 +23,7 @@ use crate::session::step_context::StepContext;
 use crate::tools::ExecutedToolCallRecorder;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
+use crate::tools::parallel::ToolExecutionAdmission;
 use crate::tools::parallel::ToolExecutionTracker;
 
 pub(super) struct CodeModeDispatchBroker {
@@ -30,6 +31,7 @@ pub(super) struct CodeModeDispatchBroker {
     dispatch_rx: async_channel::Receiver<DispatchMessage>,
     dispatch_gates: Arc<Mutex<HashMap<CellId, CellDispatchGate>>>,
     executed_tool_calls: Option<Arc<ExecutedToolCallRecorder>>,
+    execution_tracker: Arc<ToolExecutionTracker>,
 }
 
 struct CellDispatchGate {
@@ -39,13 +41,17 @@ struct CellDispatchGate {
 }
 
 impl CodeModeDispatchBroker {
-    pub(super) fn new(executed_tool_calls: Option<Arc<ExecutedToolCallRecorder>>) -> Self {
+    pub(super) fn new(
+        executed_tool_calls: Option<Arc<ExecutedToolCallRecorder>>,
+        execution_tracker: Arc<ToolExecutionTracker>,
+    ) -> Self {
         let (dispatch_tx, dispatch_rx) = async_channel::unbounded();
         Self {
             dispatch_tx,
             dispatch_rx,
             dispatch_gates: Arc::new(Mutex::new(HashMap::new())),
             executed_tool_calls,
+            execution_tracker,
         }
     }
 
@@ -104,7 +110,6 @@ impl CodeModeDispatchBroker {
         exec: ExecContext,
         step_context: Arc<StepContext>,
         tracker: SharedTurnDiffTracker,
-        execution_tracker: Arc<ToolExecutionTracker>,
     ) -> CodeModeDispatchWorker {
         let track_completeness = exec
             .turn
@@ -115,7 +120,7 @@ impl CodeModeDispatchBroker {
             Arc::clone(&exec.session),
             step_context,
             tracker,
-            execution_tracker,
+            Arc::clone(&self.execution_tracker),
         );
         let host = Arc::new(CoreTurnHost { exec, tool_runtime });
         let dispatch_rx = self.dispatch_rx.clone();
@@ -155,6 +160,7 @@ impl CodeModeDispatchBroker {
                     DispatchMessage::InvokeTool {
                         invocation,
                         cancellation_token,
+                        execution_admission,
                         response_tx,
                         span,
                     } => {
@@ -186,7 +192,11 @@ impl CodeModeDispatchBroker {
                                 }
                                 // Submission and cell closure share this gate.
                                 span.in_scope(|| {
-                                    host.submit_tool(invocation, cancellation_token.clone())
+                                    host.submit_tool(
+                                        invocation,
+                                        cancellation_token.clone(),
+                                        execution_admission,
+                                    )
                                 })
                                 .instrument(span)
                             };
@@ -283,10 +293,12 @@ impl CodeModeSessionDelegate for CodeModeDispatchBroker {
                 return Err("code mode nested tool call cancelled".to_string());
             }
             let (response_tx, response_rx) = oneshot::channel();
+            let execution_admission = self.execution_tracker.reserve();
             self.dispatch_tx
                 .send(DispatchMessage::InvokeTool {
                     invocation,
                     cancellation_token: cancellation_token.clone(),
+                    execution_admission,
                     response_tx,
                     span: tracing::Span::current(),
                 })
@@ -343,6 +355,7 @@ enum DispatchMessage {
     InvokeTool {
         invocation: CodeModeNestedToolCall,
         cancellation_token: CancellationToken,
+        execution_admission: ToolExecutionAdmission,
         response_tx: oneshot::Sender<Result<JsonValue, String>>,
         span: tracing::Span,
     },
@@ -377,12 +390,14 @@ impl CoreTurnHost {
         &self,
         invocation: CodeModeNestedToolCall,
         cancellation_token: CancellationToken,
+        execution_admission: ToolExecutionAdmission,
     ) -> impl std::future::Future<Output = Result<JsonValue, String>> + Send + 'static {
         let invocation = submit_nested_tool(
             self.exec.clone(),
             self.tool_runtime.clone(),
             invocation,
             cancellation_token,
+            execution_admission,
         )
         .map_err(|error| error.to_string());
         async move { invocation?.await.map_err(|error| error.to_string()) }

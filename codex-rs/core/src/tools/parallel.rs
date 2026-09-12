@@ -50,28 +50,71 @@ pub(crate) struct ToolCallRuntime {
     execution_tracker: Arc<ToolExecutionTracker>,
 }
 
-#[derive(Default)]
 /// Tracks every tool call started during a turn, including code-mode nested calls.
 pub(crate) struct ToolExecutionTracker {
     active_calls: AtomicUsize,
-    idle: Notify,
+    serialization_requested: AtomicBool,
+    state_changed: Notify,
+}
+
+impl Default for ToolExecutionTracker {
+    fn default() -> Self {
+        Self {
+            active_calls: AtomicUsize::new(0),
+            serialization_requested: AtomicBool::new(false),
+            state_changed: Notify::new(),
+        }
+    }
 }
 
 impl ToolExecutionTracker {
-    pub(crate) fn enter(self: &Arc<Self>) -> ToolExecutionGuard {
+    pub(crate) fn reserve(self: &Arc<Self>) -> ToolExecutionAdmission {
+        if self.serialization_requested.load(Ordering::Acquire) {
+            return ToolExecutionAdmission::Waiting(Arc::clone(self));
+        }
         self.active_calls.fetch_add(1, Ordering::AcqRel);
-        ToolExecutionGuard {
-            tracker: Arc::clone(self),
+        if self.serialization_requested.load(Ordering::Acquire) {
+            self.leave();
+            ToolExecutionAdmission::Waiting(Arc::clone(self))
+        } else {
+            ToolExecutionAdmission::Ready(ToolExecutionGuard {
+                tracker: Arc::clone(self),
+            })
         }
     }
 
-    pub(crate) async fn wait_for_all(&self) {
+    async fn enter_after_serialization(self: Arc<Self>) -> ToolExecutionGuard {
         loop {
-            let notified = self.idle.notified();
-            if self.active_calls.load(Ordering::Acquire) == 0 {
-                return;
+            let changed = self.state_changed.notified();
+            if !self.serialization_requested.load(Ordering::Acquire) {
+                self.active_calls.fetch_add(1, Ordering::AcqRel);
+                if !self.serialization_requested.load(Ordering::Acquire) {
+                    return ToolExecutionGuard {
+                        tracker: Arc::clone(&self),
+                    };
+                }
+                self.leave();
             }
-            notified.await;
+            changed.await;
+        }
+    }
+
+    pub(crate) async fn block_for_serialization(self: &Arc<Self>) -> ToolSerializationGuard {
+        self.serialization_requested.store(true, Ordering::Release);
+        loop {
+            let changed = self.state_changed.notified();
+            if self.active_calls.load(Ordering::Acquire) == 0 {
+                return ToolSerializationGuard {
+                    tracker: Arc::clone(self),
+                };
+            }
+            changed.await;
+        }
+    }
+
+    fn leave(&self) {
+        if self.active_calls.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.state_changed.notify_waiters();
         }
     }
 }
@@ -82,9 +125,34 @@ pub(crate) struct ToolExecutionGuard {
 
 impl Drop for ToolExecutionGuard {
     fn drop(&mut self) {
-        if self.tracker.active_calls.fetch_sub(1, Ordering::AcqRel) == 1 {
-            self.tracker.idle.notify_waiters();
+        self.tracker.leave();
+    }
+}
+
+pub(crate) enum ToolExecutionAdmission {
+    Ready(ToolExecutionGuard),
+    Waiting(Arc<ToolExecutionTracker>),
+}
+
+impl ToolExecutionAdmission {
+    async fn admit(self) -> ToolExecutionGuard {
+        match self {
+            Self::Ready(guard) => guard,
+            Self::Waiting(tracker) => tracker.enter_after_serialization().await,
         }
+    }
+}
+
+pub(crate) struct ToolSerializationGuard {
+    tracker: Arc<ToolExecutionTracker>,
+}
+
+impl Drop for ToolSerializationGuard {
+    fn drop(&mut self) {
+        self.tracker
+            .serialization_requested
+            .store(false, Ordering::Release);
+        self.tracker.state_changed.notify_waiters();
     }
 }
 
@@ -120,8 +188,8 @@ impl ToolCallRuntime {
         }
     }
 
-    pub(crate) async fn wait_for_all_tools(&self) {
-        self.execution_tracker.wait_for_all().await;
+    pub(crate) async fn block_tools_for_serialization(&self) -> ToolSerializationGuard {
+        self.execution_tracker.block_for_serialization().await
     }
 
     pub(crate) fn new_with_execution_tracker(
@@ -176,6 +244,22 @@ impl ToolCallRuntime {
         source: ToolCallSource,
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
+        let execution_admission = self.execution_tracker.reserve();
+        self.handle_tool_call_with_source_admission(
+            call,
+            source,
+            cancellation_token,
+            execution_admission,
+        )
+    }
+
+    pub(crate) fn handle_tool_call_with_source_admission(
+        self,
+        call: ToolCall,
+        source: ToolCallSource,
+        cancellation_token: CancellationToken,
+        execution_admission: ToolExecutionAdmission,
+    ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
         if self
             .step_context
             .turn
@@ -199,7 +283,6 @@ impl ToolCallRuntime {
         let turn = Arc::clone(&step_context.turn);
         let tracker = Arc::clone(&self.tracker);
         let lock = Arc::clone(&self.parallel_execution);
-        let execution_guard = self.execution_tracker.enter();
         let invocation_cancellation_token = cancellation_token.clone();
         let started = Instant::now();
         let tool_call_timing_guard =
@@ -225,7 +308,7 @@ impl ToolCallRuntime {
 
         let mut dispatch_handle: AbortOnDropHandle<Result<AnyToolResult, FunctionCallError>> =
             AbortOnDropHandle::new(tokio::spawn(async move {
-                let _execution_guard = execution_guard;
+                let _execution_guard = execution_admission.admit().await;
                 if let Some(tool_runtime) = tool_runtime
                     && let Some(readiness) = tool_runtime.wait_until_ready(&session)
                 {
@@ -450,6 +533,50 @@ mod tests {
     use tokio::sync::Notify;
     use tokio::sync::oneshot;
     use tracing_test::internal::MockWriter;
+
+    #[tokio::test]
+    async fn serialization_barrier_waits_for_tools_and_blocks_new_admission() {
+        let tracker = Arc::new(ToolExecutionTracker::default());
+        let active_tool = tracker.reserve().admit().await;
+        let serialization_tracker = Arc::clone(&tracker);
+        let (serialization_tx, mut serialization_rx) = oneshot::channel();
+        let serialization_task = tokio::spawn(async move {
+            let guard = serialization_tracker.block_for_serialization().await;
+            let _ = serialization_tx.send(());
+            guard
+        });
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut serialization_rx)
+                .await
+                .is_err()
+        );
+        drop(active_tool);
+        serialization_rx
+            .await
+            .expect("serialization should start after active tools finish");
+        let serialization_guard = serialization_task
+            .await
+            .expect("serialization task should join");
+
+        let next_tool_tracker = Arc::clone(&tracker);
+        let (tool_tx, mut tool_rx) = oneshot::channel();
+        let next_tool_task = tokio::spawn(async move {
+            let guard = next_tool_tracker.reserve().admit().await;
+            let _ = tool_tx.send(());
+            guard
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut tool_rx)
+                .await
+                .is_err()
+        );
+        drop(serialization_guard);
+        tool_rx
+            .await
+            .expect("tool should start after serialization finishes");
+        drop(next_tool_task.await.expect("tool task should join"));
+    }
 
     #[test]
     fn tool_call_timing_guard_ignores_code_mode_source() {

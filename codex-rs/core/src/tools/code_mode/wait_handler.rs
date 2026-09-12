@@ -12,7 +12,6 @@ use crate::tools::registry::ToolExecutor;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
-use super::DEFAULT_WAIT_YIELD_TIME_MS;
 use super::ExecContext;
 use super::WAIT_TOOL_NAME;
 use super::handle_runtime_response;
@@ -24,16 +23,10 @@ pub struct CodeModeWaitHandler;
 #[derive(Debug, Deserialize)]
 struct ExecWaitArgs {
     cell_id: String,
-    #[serde(default = "default_wait_yield_time_ms")]
-    yield_time_ms: u64,
     #[serde(default)]
     max_tokens: Option<usize>,
     #[serde(default)]
     terminate: bool,
-}
-
-fn default_wait_yield_time_ms() -> u64 {
-    DEFAULT_WAIT_YIELD_TIME_MS
 }
 
 fn parse_arguments<T>(arguments: &str) -> Result<T, FunctionCallError>
@@ -52,6 +45,10 @@ impl ToolExecutor<ToolInvocation> for CodeModeWaitHandler {
 
     fn spec(&self) -> ToolSpec {
         create_wait_tool()
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
     }
 
     fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
@@ -103,14 +100,7 @@ impl CodeModeWaitHandler {
                         .terminate(cell_id)
                         .await
                 } else {
-                    exec.session
-                        .services
-                        .code_mode_service
-                        .wait(codex_code_mode::WaitRequest {
-                            cell_id,
-                            yield_time_ms: args.yield_time_ms,
-                        })
-                        .await
+                    exec.session.services.code_mode_service.wait(cell_id).await
                 }
                 .map_err(|error| {
                     telemetry.finish(/*success*/ false);

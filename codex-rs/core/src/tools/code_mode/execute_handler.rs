@@ -152,6 +152,10 @@ impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
         self.spec.clone()
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
     fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
     where
         ToolInvocation: 'a,

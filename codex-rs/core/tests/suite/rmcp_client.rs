@@ -195,12 +195,6 @@ fn user_turn_with_permission_profile(
     })
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum McpCallEvent {
-    Begin(String),
-    End(String),
-}
-
 const REMOTE_MCP_ENVIRONMENT: &str = "remote";
 
 pub(super) fn remote_aware_environment_id() -> String {
@@ -1966,7 +1960,7 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn stdio_mcp_parallel_tool_calls_default_false_runs_serially() -> anyhow::Result<()> {
+async fn stdio_mcp_tool_calls_run_concurrently_by_default() -> anyhow::Result<()> {
     // TODO(anp): Remove after packaging a Windows stdio test server for Wine exec.
     skip_if_wine_exec!(
         Ok(()),
@@ -1976,11 +1970,19 @@ async fn stdio_mcp_parallel_tool_calls_default_false_runs_serially() -> anyhow::
 
     let server = responses::start_mock_server().await;
 
-    let first_call_id = "sync-serial-1";
-    let second_call_id = "sync-serial-2";
+    let first_call_id = "sync-default-parallel-1";
+    let second_call_id = "sync-default-parallel-2";
     let server_name = "rmcp";
     let namespace = format!("mcp__{server_name}");
-    let args = json!({ "sleep_after_ms": 100 }).to_string();
+    let args = json!({
+        "sleep_after_ms": 100,
+        "barrier": {
+            "id": "stdio-mcp-default-parallel-tool-calls",
+            "participants": 2,
+            "timeout_ms": 1_000
+        }
+    })
+    .to_string();
 
     mount_sse_once(
         &server,
@@ -2030,41 +2032,6 @@ async fn stdio_mcp_parallel_tool_calls_default_false_runs_serially() -> anyhow::
             "call the rmcp sync tool twice",
         ))
         .await?;
-
-    let mut call_events = Vec::new();
-    while call_events.len() < 4 {
-        let event = wait_for_event(&fixture.codex, |ev| {
-            matches!(
-                ev,
-                EventMsg::McpToolCallBegin(_) | EventMsg::McpToolCallEnd(_)
-            )
-        })
-        .await;
-        match event {
-            EventMsg::McpToolCallBegin(begin) => {
-                call_events.push(McpCallEvent::Begin(begin.call_id));
-            }
-            EventMsg::McpToolCallEnd(end) => {
-                call_events.push(McpCallEvent::End(end.call_id));
-            }
-            _ => unreachable!("event guard guarantees MCP call events"),
-        }
-    }
-
-    let event_index = |needle: McpCallEvent| {
-        call_events
-            .iter()
-            .position(|event| event == &needle)
-            .expect("expected MCP call event")
-    };
-    let first_begin = event_index(McpCallEvent::Begin(first_call_id.to_string()));
-    let first_end = event_index(McpCallEvent::End(first_call_id.to_string()));
-    let second_begin = event_index(McpCallEvent::Begin(second_call_id.to_string()));
-    let second_end = event_index(McpCallEvent::End(second_call_id.to_string()));
-    assert!(
-        first_end < second_begin || second_end < first_begin,
-        "default MCP tool calls should run serially; saw events: {call_events:?}"
-    );
 
     wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
