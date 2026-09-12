@@ -77,12 +77,19 @@ use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::SandboxErr;
+use codex_protocol::exec_output::bytes_to_string_smart;
+use codex_protocol::items::CommandExecutionItem;
+use codex_protocol::items::CommandExecutionStatus;
+use codex_protocol::items::TurnItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ExecCommandSource;
+use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::TerminalInteractionEvent;
 use codex_protocol::shell_environment::is_non_inheritable_env_var;
+use codex_rollout::RolloutItem;
 use codex_sandboxing::SandboxCommand;
 use codex_shell_command::is_dangerous_command::DangerousCommandPlatform;
+use codex_shell_command::parse_command::parse_command;
 use codex_tools::ToolName;
 use codex_utils_output_truncation::approx_tokens_from_byte_count;
 use codex_utils_path_uri::PathUri;
@@ -265,6 +272,8 @@ struct PreparedProcessHandles {
     network_approval: Option<DeferredNetworkApproval>,
     call_id: String,
     hook_command: String,
+    command: Vec<String>,
+    cwd: PathUri,
     process_id: i32,
     tty: bool,
 }
@@ -910,6 +919,8 @@ impl UnifiedExecProcessManager {
             network_approval,
             call_id,
             hook_command,
+            command,
+            cwd,
             process_id,
             tty,
             ..
@@ -1040,7 +1051,7 @@ impl UnifiedExecProcessManager {
             exit_code,
             original_token_count: Some(original_token_count),
             output_omitted_bytes,
-            hook_command: Some(hook_command),
+            hook_command: Some(hook_command.clone()),
         };
 
         let should_emit_interaction = !request.input.is_empty() || response.process_id.is_some();
@@ -1058,6 +1069,39 @@ impl UnifiedExecProcessManager {
             session
                 .send_event(turn.as_ref(), EventMsg::TerminalInteraction(interaction))
                 .await;
+            if request.input.is_empty() {
+                let output = bytes_to_string_smart(&response.raw_output);
+                let parsed_cmd = parse_command(&command);
+                let wait_item = TurnItem::CommandExecution(CommandExecutionItem {
+                    id: format!("{}:wait", context.call_id),
+                    plugin_id: None,
+                    script_path: None,
+                    process_id: Some(request.process_id.to_string()),
+                    parsed_cmd,
+                    command,
+                    cwd,
+                    source: ExecCommandSource::UnifiedExecInteraction,
+                    interaction_input: Some(String::new()),
+                    status: CommandExecutionStatus::Completed,
+                    stdout: (!output.is_empty()).then_some(output.clone()),
+                    stderr: None,
+                    aggregated_output: (!output.is_empty()).then_some(output),
+                    exit_code: response.exit_code,
+                    duration: Some(response.wall_time),
+                    formatted_output: None,
+                });
+                session
+                    .persist_rollout_items(&[RolloutItem::EventMsg(EventMsg::ItemCompleted(
+                        ItemCompletedEvent {
+                            thread_id: session.thread_id(),
+                            turn_id: turn.sub_id.clone(),
+                            item: wait_item,
+                            started_at_ms: None,
+                            completed_at_ms: 0,
+                        },
+                    ))])
+                    .await;
+            }
         }
 
         Ok(response)
@@ -1118,6 +1162,8 @@ impl UnifiedExecProcessManager {
             network_approval: entry.network_approval.clone(),
             call_id: entry.call_id.clone(),
             hook_command: entry.hook_command.clone(),
+            command: entry.command.clone(),
+            cwd: entry.cwd.clone(),
             process_id: entry.process_id,
             tty: entry.tty,
         })
@@ -1150,6 +1196,7 @@ impl UnifiedExecProcessManager {
             plugin_metrics_sidecar: plugin_metrics_sidecar.clone(),
             call_id: context.call_id.clone(),
             process_id,
+            command: command.to_vec(),
             cwd: cwd.clone(),
             initial_exec_command_active,
             hook_command,
