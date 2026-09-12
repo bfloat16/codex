@@ -14,6 +14,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Alignment;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::Clear;
@@ -23,89 +24,40 @@ use ratatui::widgets::Widget;
 use super::*;
 use crate::AltScreenBehavior;
 use crate::tui::MouseInteractionEvent;
+use crate::tui::MouseInteractionKind;
 use crate::tui::MouseScrollDirection;
 use crate::tui::MouseScrollEvent;
 
-const BASE_SCROLL_ROWS: usize = 3;
-const SCROLL_ACCELERATION_HALF_LIFE_MS: usize = 150;
-const SCROLL_ACCELERATION_RESET_AFTER: Duration = Duration::from_millis(250);
-const SCROLL_ACCELERATION_BOOST_PER_MILLE: usize = 400;
-const MAX_SCROLL_MULTIPLIER_PER_MILLE: usize = 5_000;
-const PER_MILLE: usize = 1_000;
+mod scroll;
+mod selection;
+
+#[cfg(test)]
+use scroll::PER_MILLE;
+use scroll::ScrollAcceleration;
+use selection::ScreenTextSelection;
+use selection::SelectionRelease;
+
+const COPY_NOTICE_DURATION: Duration = Duration::from_secs(2);
 
 pub(super) struct OwnedScreen {
     pub(super) viewport: ConversationViewport,
     replay_in_progress: bool,
     last_conversation_area: Rect,
-    scroll_frame_pending: bool,
+    last_selection_area: Rect,
     scroll_acceleration: ScrollAcceleration,
+    selection: ScreenTextSelection,
+    copy_notice: Option<CopyNotice>,
 }
 
-/// Decaying scroll multiplier modeled after native desktop wheel acceleration.
-#[derive(Debug)]
-struct ScrollAcceleration {
-    direction: Option<MouseScrollDirection>,
-    last_at: Option<Instant>,
-    multiplier_per_mille: usize,
+struct CopyNotice {
+    char_count: usize,
+    expires_at: Instant,
 }
 
-impl Default for ScrollAcceleration {
-    fn default() -> Self {
-        Self {
-            direction: None,
-            last_at: None,
-            multiplier_per_mille: PER_MILLE,
-        }
-    }
-}
-
-impl ScrollAcceleration {
-    fn rows(&mut self, direction: MouseScrollDirection) -> usize {
-        self.rows_at(direction, Instant::now())
-    }
-
-    fn rows_at(&mut self, direction: MouseScrollDirection, now: Instant) -> usize {
-        let elapsed = self
-            .last_at
-            .and_then(|last_at| now.checked_duration_since(last_at));
-        if self.direction == Some(direction)
-            && elapsed.is_some_and(|elapsed| elapsed <= SCROLL_ACCELERATION_RESET_AFTER)
-        {
-            let elapsed_ms = elapsed
-                .and_then(|elapsed| usize::try_from(elapsed.as_millis()).ok())
-                .unwrap_or(usize::MAX);
-            let decay_denominator = SCROLL_ACCELERATION_HALF_LIFE_MS
-                .saturating_add(elapsed_ms)
-                .max(1);
-            // This rational decay reaches one half at the configured half-life without putting
-            // floating-point work in the input hot path.
-            let retained = self
-                .multiplier_per_mille
-                .saturating_sub(PER_MILLE)
-                .saturating_mul(SCROLL_ACCELERATION_HALF_LIFE_MS)
-                / decay_denominator;
-            let boost = SCROLL_ACCELERATION_BOOST_PER_MILLE
-                .saturating_mul(SCROLL_ACCELERATION_HALF_LIFE_MS)
-                / decay_denominator;
-            self.multiplier_per_mille = PER_MILLE
-                .saturating_add(retained)
-                .saturating_add(boost)
-                .min(MAX_SCROLL_MULTIPLIER_PER_MILLE);
-        } else {
-            self.multiplier_per_mille = PER_MILLE;
-        }
-        self.direction = Some(direction);
-        self.last_at = Some(now);
-
-        BASE_SCROLL_ROWS
-            .saturating_mul(self.multiplier_per_mille)
-            .saturating_add(PER_MILLE / 2)
-            / PER_MILLE
-    }
-
-    fn reset(&mut self) {
-        *self = Self::default();
-    }
+enum OwnedScreenMouseAction {
+    Ignored,
+    Redraw,
+    Copy(String),
 }
 
 struct RenderedOwnedScreen {
@@ -123,8 +75,10 @@ impl OwnedScreen {
             ),
             replay_in_progress: false,
             last_conversation_area: Rect::default(),
-            scroll_frame_pending: false,
+            last_selection_area: Rect::default(),
             scroll_acceleration: ScrollAcceleration::default(),
+            selection: ScreenTextSelection::default(),
+            copy_notice: None,
         }
     }
 
@@ -134,7 +88,6 @@ impl OwnedScreen {
         area: Rect,
         buffer: &mut Buffer,
     ) -> RenderedOwnedScreen {
-        self.scroll_frame_pending = false;
         Clear.render(area, buffer);
 
         let bottom_pane = chat_widget.bottom_pane_renderable();
@@ -153,6 +106,7 @@ impl OwnedScreen {
             bottom_height,
         );
         self.last_conversation_area = conversation_area;
+        self.last_selection_area = area;
 
         self.viewport
             .set_render_mode(chat_widget.history_render_mode());
@@ -162,10 +116,13 @@ impl OwnedScreen {
                 chat_widget.active_cell_display_hyperlink_lines(width)
             });
         self.viewport.render(conversation_area, buffer);
+        Self::extend_conversation_backgrounds(conversation_area, area.right(), buffer);
         if !self.viewport.is_following_bottom() {
             Self::render_jump_to_bottom_hint(conversation_area, buffer);
         }
         bottom_pane.render(bottom_area, buffer);
+        self.selection.capture_and_render(area, buffer);
+        self.render_copy_notice(bottom_area, buffer);
 
         RenderedOwnedScreen {
             cursor: bottom_pane.cursor_pos(bottom_area),
@@ -175,32 +132,17 @@ impl OwnedScreen {
 
     fn handle_navigation_key(&mut self, key_event: KeyEvent) -> bool {
         if crate::key_hint::ctrl(KeyCode::End).is_press(key_event) {
+            self.selection.clear();
             self.scroll_acceleration.reset();
             self.viewport.scroll_to_bottom();
             return true;
         }
-        // Alternate-scroll wheel events arrive as arrow keys. The app-level guard leaves arrows
-        // with the composer whenever it contains a draft.
         if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-            || !matches!(
-                key_event.code,
-                KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown
-            )
+            || !matches!(key_event.code, KeyCode::PageUp | KeyCode::PageDown)
         {
             return false;
         }
-        if self.scroll_frame_pending {
-            return true;
-        }
         let handled = match key_event.code {
-            KeyCode::Up => {
-                self.scroll(MouseScrollDirection::Up);
-                true
-            }
-            KeyCode::Down => {
-                self.scroll(MouseScrollDirection::Down);
-                true
-            }
             KeyCode::PageUp | KeyCode::PageDown => {
                 self.scroll_acceleration.reset();
                 self.viewport
@@ -208,7 +150,9 @@ impl OwnedScreen {
             }
             _ => false,
         };
-        self.scroll_frame_pending = handled;
+        if handled {
+            self.selection.clear();
+        }
         handled
     }
 
@@ -219,25 +163,90 @@ impl OwnedScreen {
         {
             return false;
         }
-        if self.scroll_frame_pending {
-            return true;
-        }
-        self.scroll_frame_pending = true;
+        self.selection.clear();
         self.scroll(event.direction);
         true
     }
 
-    fn handle_mouse_interaction(&mut self, event: MouseInteractionEvent) -> bool {
-        self.viewport.handle_mouse_interaction(
-            self.last_conversation_area,
-            Position::new(event.column, event.row),
-            event.kind,
-        )
+    fn handle_mouse_interaction(&mut self, event: MouseInteractionEvent) -> OwnedScreenMouseAction {
+        let position = Position::new(event.column, event.row);
+        match event.kind {
+            MouseInteractionKind::Move => {
+                if self
+                    .viewport
+                    .handle_mouse_move(self.last_conversation_area, position)
+                {
+                    OwnedScreenMouseAction::Redraw
+                } else {
+                    OwnedScreenMouseAction::Ignored
+                }
+            }
+            MouseInteractionKind::LeftDown => {
+                if self.selection.left_down(self.last_selection_area, position) {
+                    OwnedScreenMouseAction::Redraw
+                } else {
+                    OwnedScreenMouseAction::Ignored
+                }
+            }
+            MouseInteractionKind::LeftDrag => {
+                if self.selection.left_drag(self.last_selection_area, position) {
+                    OwnedScreenMouseAction::Redraw
+                } else {
+                    OwnedScreenMouseAction::Ignored
+                }
+            }
+            MouseInteractionKind::LeftUp => {
+                match self.selection.left_up(self.last_selection_area, position) {
+                    SelectionRelease::Ignored => OwnedScreenMouseAction::Ignored,
+                    SelectionRelease::Click(position) => {
+                        self.viewport
+                            .handle_left_click(self.last_conversation_area, position);
+                        OwnedScreenMouseAction::Redraw
+                    }
+                    SelectionRelease::Copy(text) => OwnedScreenMouseAction::Copy(text),
+                    SelectionRelease::Redraw => OwnedScreenMouseAction::Redraw,
+                }
+            }
+        }
     }
 
     fn scroll(&mut self, direction: MouseScrollDirection) {
         let rows = self.scroll_acceleration.rows(direction);
         self.viewport.scroll_rows(direction, rows);
+    }
+
+    fn show_copy_notice(&mut self, char_count: usize) {
+        self.copy_notice = Some(CopyNotice {
+            char_count,
+            expires_at: Instant::now()
+                .checked_add(COPY_NOTICE_DURATION)
+                .unwrap_or_else(Instant::now),
+        });
+    }
+
+    fn copy_notice_delay(&self) -> Option<Duration> {
+        self.copy_notice
+            .as_ref()?
+            .expires_at
+            .checked_duration_since(Instant::now())
+    }
+
+    fn render_copy_notice(&mut self, area: Rect, buffer: &mut Buffer) {
+        let Some(notice) = &self.copy_notice else {
+            return;
+        };
+        if Instant::now() >= notice.expires_at {
+            self.copy_notice = None;
+            return;
+        }
+        if area.is_empty() {
+            return;
+        }
+        let notice_area = Rect::new(area.x, area.y, area.width.saturating_sub(/*rhs*/ 2), 1);
+        Paragraph::new(format!("copied {} chars to clipboard", notice.char_count))
+            .fg(selection::selection_background())
+            .alignment(Alignment::Right)
+            .render(notice_area, buffer);
     }
 
     fn render_jump_to_bottom_hint(area: Rect, buffer: &mut Buffer) {
@@ -260,6 +269,22 @@ impl OwnedScreen {
             .style(crate::style::user_message_style())
             .alignment(Alignment::Center)
             .render(hint_area, buffer);
+    }
+
+    fn extend_conversation_backgrounds(area: Rect, right: u16, buffer: &mut Buffer) {
+        if area.is_empty() || right <= area.right() {
+            return;
+        }
+        let source_x = area.right().saturating_sub(/*rhs*/ 1);
+        for y in area.y..area.bottom() {
+            let background = buffer[(source_x, y)].bg;
+            if background == Color::Reset {
+                continue;
+            }
+            for x in area.right()..right {
+                buffer[(x, y)].set_bg(background);
+            }
+        }
     }
 }
 
@@ -361,14 +386,34 @@ impl App {
         if !self.chat_widget.no_modal_or_popup_active() {
             return false;
         }
-        let handled = self
+        let action = self
             .owned_screen
             .as_mut()
-            .is_some_and(|screen| screen.handle_mouse_interaction(event));
-        if handled {
-            tui.frame_requester().schedule_frame();
+            .map_or(OwnedScreenMouseAction::Ignored, |screen| {
+                screen.handle_mouse_interaction(event)
+            });
+        match action {
+            OwnedScreenMouseAction::Ignored => false,
+            OwnedScreenMouseAction::Redraw => {
+                tui.frame_requester().schedule_frame();
+                true
+            }
+            OwnedScreenMouseAction::Copy(text) => {
+                let char_count = text.chars().count();
+                match self.chat_widget.copy_owned_screen_selection(&text) {
+                    Ok(()) => {
+                        if let Some(screen) = &mut self.owned_screen {
+                            screen.show_copy_notice(char_count);
+                        }
+                        tui.frame_requester().schedule_frame();
+                    }
+                    Err(error) => self
+                        .chat_widget
+                        .add_error_message(format!("Copy failed: {error}")),
+                }
+                true
+            }
         }
-        handled
     }
 
     pub(crate) fn sync_owned_screen_cells(&mut self) {
@@ -417,6 +462,9 @@ impl App {
                 frame.set_cursor_position((x, y));
             }
         })?;
+        if let Some(delay) = screen.copy_notice_delay() {
+            tui.frame_requester().schedule_frame_in(delay);
+        }
         Ok(Some(rendered_area))
     }
 }

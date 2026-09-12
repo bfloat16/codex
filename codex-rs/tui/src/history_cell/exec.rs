@@ -27,7 +27,7 @@ impl HistoryCell for UnifiedExecInteractionCell {
         let waited_only = self.stdin.is_empty();
 
         let mut header_spans = if waited_only {
-            vec!["• Waited for background terminal".bold()]
+            vec!["● ".dim().bold(), "Waited for background terminal".bold()]
         } else {
             vec!["↳ ".dim(), "Interacted with background terminal".bold()]
         };
@@ -93,6 +93,14 @@ impl HistoryCell for UnifiedExecInteractionCell {
         }
         out.extend(raw_lines_from_source(&self.stdin));
         out
+    }
+
+    fn tool_activity(&self) -> Option<ToolActivity> {
+        self.stdin.is_empty().then_some(ToolActivity {
+            call_count: 1,
+            background_terminal_waits: 1,
+            ..ToolActivity::default()
+        })
     }
 }
 

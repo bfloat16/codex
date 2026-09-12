@@ -237,6 +237,13 @@ impl ChatWidget {
     /// When there are queued user messages, restore them into the composer
     /// separated by newlines rather than auto-submitting the next one.
     pub(super) fn on_interrupted_turn(&mut self, reason: TurnAbortReason) {
+        if reason == TurnAbortReason::Interrupted {
+            self.interrupted_unified_exec_calls.extend(
+                self.unified_exec_processes
+                    .iter()
+                    .map(|process| process.call_id.clone()),
+            );
+        }
         let output_free_turn_id = (reason == TurnAbortReason::Interrupted
             && !self.current_turn_has_model_output())
         .then(|| self.output_free_interrupt_turn_id.take())

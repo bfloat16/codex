@@ -1,0 +1,39 @@
+---
+source: tui/src/conversation_viewport_tests.rs
+expression: "format!(\"collapsed top:\\n{}\\nhovered top:\\n{}\\nexpanded top:\\n{}\\nexpanded tail:\\n{}\\ncollapsed tail:\\n{}\",\nframe(&collapsed_top), frame(&hovered_top), frame(&expanded_top),\nframe(&expanded_tail), frame(&collapsed_tail),)"
+---
+collapsed top:
+● Added src/large.rs (+55 -0)
+     1 +let value_01 = 1;
+     2 +let value_02 = 2;
+     3 +let value_03 = 3;
+     4 +let value_04 = 4;
+     5 +let value_05 = 5;
+hovered top:
+● Added src/large.rs (+55 -0)
+     1 +let value_01 = 1;
+     2 +let value_02 = 2;
+     3 +let value_03 = 3;
+     4 +let value_04 = 4;
+     5 +let value_05 = 5;
+expanded top:
+● Added src/large.rs (+55 -0)
+     1 +let value_01 = 1;
+     2 +let value_02 = 2;
+     3 +let value_03 = 3;
+     4 +let value_04 = 4;
+     5 +let value_05 = 5;
+expanded tail:
+    51 +let value_51 = 51;
+    52 +let value_52 = 52;
+    53 +let value_53 = 53;
+    54 +let value_54 = 54;
+    55 +let value_55 = 55;
+  Show less ↑
+collapsed tail:
+    45 +let value_45 = 45;
+    46 +let value_46 = 46;
+    47 +let value_47 = 47;
+    48 +let value_48 = 48;
+    49 +let value_49 = 49;
+  Show more ↓

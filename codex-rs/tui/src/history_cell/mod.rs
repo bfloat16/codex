@@ -94,6 +94,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
@@ -152,8 +153,13 @@ pub(crate) struct ToolActivity {
     pub(crate) listed_directories: usize,
     pub(crate) shell_commands: usize,
     pub(crate) mcp_calls: usize,
-    pub(crate) edited_files: usize,
-    pub(crate) has_failure: bool,
+    pub(crate) background_terminal_waits: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FileChangeDisplayLines {
+    pub(crate) lines: Arc<[HyperlinkLine]>,
+    pub(crate) heading_rows: usize,
 }
 
 impl ToolActivity {
@@ -166,8 +172,9 @@ impl ToolActivity {
             .saturating_add(other.listed_directories);
         self.shell_commands = self.shell_commands.saturating_add(other.shell_commands);
         self.mcp_calls = self.mcp_calls.saturating_add(other.mcp_calls);
-        self.edited_files = self.edited_files.saturating_add(other.edited_files);
-        self.has_failure |= other.has_failure;
+        self.background_terminal_waits = self
+            .background_terminal_waits
+            .saturating_add(other.background_terminal_waits);
     }
 }
 
@@ -228,6 +235,20 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Returns aggregateable tool activity for the owned full-screen transcript.
     fn tool_activity(&self) -> Option<ToolActivity> {
         None
+    }
+
+    /// Returns cached, physically wrapped rows for an interactive file-change cell.
+    fn file_change_display_lines(&self, _width: u16) -> Option<FileChangeDisplayLines> {
+        None
+    }
+
+    fn is_file_change(&self) -> bool {
+        false
+    }
+
+    /// Returns the detailed representation used when an owned-screen tool group is expanded.
+    fn tool_group_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.transcript_hyperlink_lines(width)
     }
 
     /// Returns rich visible lines plus terminal hyperlink metadata.

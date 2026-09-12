@@ -1,9 +1,15 @@
 //! Render persisted thread turns into history-cell building blocks.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use crate::app_server_approval_conversions::file_update_changes_to_display;
 use crate::app_server_session::AppServerSession;
 use crate::app_server_session::HistoryHydrationScope;
+use crate::exec_cell::CommandOutput;
+use crate::exec_cell::new_active_exec_command;
+use crate::exec_command::split_command_string;
+use crate::exec_command::strip_bash_lc_and_escape;
 use crate::git_action_directives::parse_assistant_markdown;
 use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::HistoryCell;
@@ -11,6 +17,9 @@ use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::PrefixedWrappedHistoryCell;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::UserHistoryCell;
+use crate::history_cell::new_patch_apply_failure;
+use crate::history_cell::new_patch_event;
+use crate::history_cell::new_unified_exec_interaction;
 use crate::history_cell::split_reasoning_summary_parts;
 use crate::inline_visualization::InlineVisualizationContext;
 use crate::legacy_core::config::Config;
@@ -22,7 +31,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::items::UserMessageItem;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use ratatui::style::Stylize as _;
-use ratatui::text::Line;
 
 pub(crate) type TranscriptCells = Vec<Arc<dyn HistoryCell>>;
 
@@ -184,6 +192,68 @@ pub(crate) fn thread_items_to_transcript_cells(
                     )));
                 }
             }
+            ThreadItem::CommandExecution {
+                id,
+                command,
+                source,
+                status,
+                command_actions,
+                aggregated_output,
+                exit_code,
+                duration_ms,
+                ..
+            } => {
+                if source
+                    == codex_app_server_protocol::CommandExecutionSource::UnifiedExecInteraction
+                {
+                    let command_display = strip_bash_lc_and_escape(&split_command_string(&command));
+                    cells.push(Arc::new(new_unified_exec_interaction(
+                        (!command_display.is_empty()).then_some(command_display),
+                        String::new(),
+                    )));
+                    continue;
+                }
+                let mut cell = new_active_exec_command(
+                    id.clone(),
+                    split_command_string(&command),
+                    command_actions
+                        .into_iter()
+                        .map(codex_app_server_protocol::CommandAction::into_core)
+                        .collect(),
+                    source,
+                    /*interaction_input*/ None,
+                    /*animations_enabled*/ false,
+                );
+                if status != codex_app_server_protocol::CommandExecutionStatus::InProgress {
+                    let exit_code =
+                        if status == codex_app_server_protocol::CommandExecutionStatus::Completed {
+                            exit_code.unwrap_or_default()
+                        } else {
+                            exit_code.filter(|code| *code != 0).unwrap_or(1)
+                        };
+                    let duration = Duration::from_millis(
+                        u64::try_from(duration_ms.unwrap_or_default().max(0)).unwrap_or_default(),
+                    );
+                    let completed = cell.complete_call(
+                        &id,
+                        CommandOutput::new(exit_code, aggregated_output.unwrap_or_default()),
+                        duration,
+                    );
+                    debug_assert!(completed, "projected exec cell should contain {id}");
+                }
+                cells.push(Arc::new(cell));
+            }
+            ThreadItem::FileChange {
+                changes, status, ..
+            } => {
+                cells.push(Arc::new(new_patch_event(
+                    file_update_changes_to_display(changes),
+                    cwd.as_path(),
+                )));
+                if status == codex_app_server_protocol::PatchApplyStatus::Failed {
+                    cells.push(Arc::new(new_patch_apply_failure(String::new())));
+                }
+            }
             other => {
                 if let Some(cell) = fallback_transcript_cell(&other) {
                     cells.push(Arc::new(cell));
@@ -206,43 +276,6 @@ fn fallback_transcript_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
                 .into()
             })
             .collect::<Vec<_>>(),
-        ThreadItem::CommandExecution {
-            command,
-            status,
-            aggregated_output,
-            exit_code,
-            ..
-        } => {
-            let mut lines: Vec<Line<'static>> =
-                vec![vec!["$ ".dim(), command.clone().into()].into()];
-            lines.push(
-                format!(
-                    "status: {status:?}{}",
-                    exit_code
-                        .map(|code| format!(" · exit {code}"))
-                        .unwrap_or_default()
-                )
-                .dim()
-                .into(),
-            );
-            if let Some(output) = aggregated_output.as_deref()
-                && !output.trim().is_empty()
-            {
-                lines.extend(
-                    output
-                        .lines()
-                        .map(|line| vec!["  ".dim(), line.trim_end().to_string().dim()].into()),
-                );
-            }
-            lines
-        }
-        ThreadItem::FileChange {
-            changes, status, ..
-        } => vec![
-            format!("file changes: {status:?} · {} changes", changes.len())
-                .dim()
-                .into(),
-        ],
         ThreadItem::McpToolCall {
             server,
             tool,
@@ -301,7 +334,9 @@ fn fallback_transcript_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
         ThreadItem::ContextCompaction { .. } => {
             vec!["context compacted".dim().into()]
         }
-        ThreadItem::UserMessage { .. }
+        ThreadItem::CommandExecution { .. }
+        | ThreadItem::FileChange { .. }
+        | ThreadItem::UserMessage { .. }
         | ThreadItem::AgentMessage { .. }
         | ThreadItem::FunctionCallOutput { .. }
         | ThreadItem::Plan { .. }
@@ -310,3 +345,7 @@ fn fallback_transcript_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
     };
     (!lines.is_empty()).then(|| PlainHistoryCell::new(lines))
 }
+
+#[cfg(test)]
+#[path = "thread_transcript_tests.rs"]
+mod tests;

@@ -18,7 +18,6 @@ use super::*;
 use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::ToolActivity;
 use crate::history_cell::UserHistoryCell;
-use crate::tui::MouseInteractionKind;
 use crate::tui::MouseScrollDirection;
 
 #[derive(Debug)]
@@ -100,6 +99,11 @@ struct ToolTestCell {
     activity: ToolActivity,
 }
 
+#[derive(Debug)]
+struct DetailCountingToolCell {
+    detail_calls: Arc<AtomicUsize>,
+}
+
 impl HistoryCell for ToolTestCell {
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         vec![self.display.into()]
@@ -115,6 +119,31 @@ impl HistoryCell for ToolTestCell {
 
     fn tool_activity(&self) -> Option<ToolActivity> {
         Some(self.activity)
+    }
+}
+
+impl HistoryCell for DetailCountingToolCell {
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        vec!["tool".into()]
+    }
+
+    fn raw_lines(&self) -> Vec<Line<'static>> {
+        vec!["tool".into()]
+    }
+
+    fn tool_activity(&self) -> Option<ToolActivity> {
+        Some(ToolActivity {
+            call_count: 1,
+            shell_commands: 1,
+            ..ToolActivity::default()
+        })
+    }
+
+    fn tool_group_detail_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
+        self.detail_calls.fetch_add(1, Ordering::Relaxed);
+        (0..40)
+            .map(|index| HyperlinkLine::from(format!("output line {index}")))
+            .collect()
     }
 }
 
@@ -250,30 +279,42 @@ fn adjacent_tools_collapse_then_expand_and_collapse_from_the_group_background() 
     );
 
     let mut collapsed = Buffer::empty(area);
-    viewport.render(area, &mut collapsed);
-    assert!(viewport.handle_mouse_interaction(
-        area,
-        Position::new(/*x*/ 4, /*y*/ 2),
-        MouseInteractionKind::Move,
-    ));
     let mut hovered = Buffer::empty(area);
     crate::terminal_palette::with_test_default_colors(
         crate::terminal_probe::DefaultColors {
             fg: (255, 255, 255),
             bg: (0, 0, 0),
         },
-        || viewport.render(area, &mut hovered),
+        || {
+            viewport.render(area, &mut collapsed);
+            assert!(viewport.handle_mouse_move(area, Position::new(/*x*/ 4, /*y*/ 2)));
+            viewport.render(area, &mut hovered);
+        },
+    );
+    assert!((area.x..area.right()).all(|x| hovered[(x, 2)].bg == Color::Reset));
+    assert_eq!(hovered[(0, 2)].fg, Color::Reset);
+    assert_eq!(
+        collapsed[(2, 2)].fg,
+        crate::terminal_palette::rgb_color((173, 173, 173)),
+    );
+    assert_eq!(
+        hovered[(2, 2)].fg,
+        crate::terminal_palette::rgb_color((219, 219, 219)),
     );
     assert!(
-        (area.x..area.right()).all(|x| hovered[(x, 2)].style().bg.is_some()),
-        "hover should tint the full summary row"
+        hovered[(7, 2)]
+            .style()
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    assert!(
+        hovered[(20, 2)]
+            .style()
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
     );
 
-    assert!(viewport.handle_mouse_interaction(
-        area,
-        Position::new(/*x*/ 4, /*y*/ 2),
-        MouseInteractionKind::LeftClick,
-    ));
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 2)));
     let mut expanded = Buffer::empty(area);
     crate::terminal_palette::with_test_default_colors(
         crate::terminal_probe::DefaultColors {
@@ -283,15 +324,13 @@ fn adjacent_tools_collapse_then_expand_and_collapse_from_the_group_background() 
         || viewport.render(area, &mut expanded),
     );
     assert!(
-        (area.x..area.right()).all(|x| expanded[(x, 4)].style().bg.is_some()),
-        "expanded group background should cover blank horizontal space"
+        [1, 2, 3, 4, 5]
+            .into_iter()
+            .all(|y| { (area.x..area.right()).all(|x| expanded[(x, y)].style().bg.is_some()) }),
+        "expanded group background should include top and bottom padding"
     );
 
-    assert!(viewport.handle_mouse_interaction(
-        area,
-        Position::new(/*x*/ 40, /*y*/ 4),
-        MouseInteractionKind::LeftClick,
-    ));
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 40, /*y*/ 5)));
     let mut collapsed_again = Buffer::empty(area);
     viewport.render(area, &mut collapsed_again);
 
@@ -311,7 +350,7 @@ fn adjacent_tools_collapse_then_expand_and_collapse_from_the_group_background() 
 collapsed:
 before
 
-• Read 2 files, ran 1 shell command
+  Read 2 files, ran 1 shell command
 
 after
 
@@ -325,17 +364,244 @@ read transcript detail
 
 shell transcript detail
 
-after
 
+after
 
 collapsed again:
 before
 
-• Read 2 files, ran 1 shell command
+  Read 2 files, ran 1 shell command
 
 after
 
 
+
+
+"###);
+}
+
+#[test]
+fn file_edits_split_adjacent_tool_groups_and_keep_native_rendering() {
+    let cwd = crate::test_support::test_path_buf("/tmp/project");
+    let patch = crate::history_cell::new_patch_event(
+        std::collections::HashMap::from([(
+            std::path::PathBuf::from("src/lib.rs"),
+            crate::diff_model::FileChange::Add {
+                content: "pub fn added() {}\n".to_string(),
+            },
+        )]),
+        &cwd,
+    );
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        tool_cell(
+            "read display",
+            "read transcript detail",
+            ToolActivity {
+                call_count: 1,
+                read_files: 1,
+                ..ToolActivity::default()
+            },
+        ),
+        Arc::new(patch),
+        tool_cell(
+            "shell display",
+            "shell transcript detail",
+            ToolActivity {
+                call_count: 1,
+                shell_commands: 1,
+                ..ToolActivity::default()
+            },
+        ),
+    ];
+    let mut viewport = viewport(cells);
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 44, /*height*/ 8,
+    );
+    let mut buffer = Buffer::empty(area);
+
+    viewport.render(area, &mut buffer);
+
+    let diff_background = buffer[(4, 3)].bg;
+    assert_ne!(diff_background, Color::Reset);
+    assert!(
+        (area.x..area.right()).all(|x| buffer[(x, 3)].bg == diff_background),
+        "native patch background should fill the viewport width"
+    );
+
+    assert_snapshot!(
+        buffer_text(&buffer, area)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        @r###"
+read display
+
+● Added src/lib.rs (+1 -0)
+    1 +pub fn added() {}
+
+shell display
+
+
+"###
+    );
+}
+
+#[test]
+fn large_file_edits_cache_fold_hover_expand_and_collapse() {
+    let cwd = crate::test_support::test_path_buf("/tmp/project");
+    let content = (1..=55)
+        .map(|line| format!("let value_{line:02} = {line};\n"))
+        .collect::<String>();
+    let patch = crate::history_cell::new_patch_event(
+        std::collections::HashMap::from([(
+            std::path::PathBuf::from("src/large.rs"),
+            crate::diff_model::FileChange::Add { content },
+        )]),
+        &cwd,
+    );
+    let first_layout = patch
+        .file_change_display_lines(/*width*/ 64)
+        .expect("patch display lines");
+    let cached_layout = patch
+        .file_change_display_lines(/*width*/ 64)
+        .expect("cached patch display lines");
+    assert!(Arc::ptr_eq(&first_layout.lines, &cached_layout.lines));
+
+    let mut viewport = viewport(vec![Arc::new(patch)]);
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 64, /*height*/ 6,
+    );
+    viewport.scroll_rows(MouseScrollDirection::Up, usize::MAX);
+    let render = |viewport: &mut ConversationViewport| {
+        let mut buffer = Buffer::empty(area);
+        crate::terminal_palette::with_test_default_colors(
+            crate::terminal_probe::DefaultColors {
+                fg: (255, 255, 255),
+                bg: (0, 0, 0),
+            },
+            || viewport.render(area, &mut buffer),
+        );
+        buffer
+    };
+
+    let collapsed_top = render(&mut viewport);
+    assert_eq!(
+        collapsed_top[(2, 0)].fg,
+        crate::terminal_palette::rgb_color((173, 173, 173)),
+    );
+    assert!(viewport.handle_mouse_move(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    let hovered_top = render(&mut viewport);
+    assert_eq!(
+        hovered_top[(2, 0)].fg,
+        crate::terminal_palette::rgb_color((219, 219, 219)),
+    );
+    assert!(!viewport.handle_left_click(area, Position::new(/*x*/ 12, /*y*/ 2)));
+
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    let expanded_top = render(&mut viewport);
+    viewport.scroll_to_bottom();
+    let expanded_tail = render(&mut viewport);
+    assert!(buffer_text(&expanded_tail, area).contains("Show less ↑"));
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 5)));
+    let collapsed_tail = render(&mut viewport);
+    assert!(buffer_text(&collapsed_tail, area).contains("Show more ↓"));
+
+    let frame = |buffer: &Buffer| {
+        buffer_text(buffer, area)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_snapshot!(format!(
+        "collapsed top:\n{}\nhovered top:\n{}\nexpanded top:\n{}\nexpanded tail:\n{}\ncollapsed tail:\n{}",
+        frame(&collapsed_top),
+        frame(&hovered_top),
+        frame(&expanded_top),
+        frame(&expanded_tail),
+        frame(&collapsed_tail),
+    ));
+}
+
+#[test]
+fn small_file_edits_remain_bright_and_non_interactive() {
+    let cwd = crate::test_support::test_path_buf("/tmp/project");
+    let content = (1..=48)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>();
+    let patch = crate::history_cell::new_patch_event(
+        std::collections::HashMap::from([(
+            std::path::PathBuf::from("src/small.txt"),
+            crate::diff_model::FileChange::Add { content },
+        )]),
+        &cwd,
+    );
+    let mut viewport = viewport(vec![Arc::new(patch)]);
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 64, /*height*/ 4,
+    );
+    viewport.scroll_rows(MouseScrollDirection::Up, usize::MAX);
+    let mut buffer = Buffer::empty(area);
+    viewport.render(area, &mut buffer);
+
+    assert_eq!(buffer[(2, 0)].fg, Color::Reset);
+    assert!(!viewport.handle_mouse_move(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    assert!(!viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    assert!(!buffer_text(&buffer, area).contains("Show more"));
+}
+
+#[test]
+fn background_terminal_waits_fold_with_adjacent_tools() {
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        Arc::new(crate::history_cell::new_unified_exec_interaction(
+            Some("worker command".to_string()),
+            String::new(),
+        )),
+        tool_cell(
+            "shell display",
+            "shell transcript detail",
+            ToolActivity {
+                call_count: 1,
+                shell_commands: 1,
+                ..ToolActivity::default()
+            },
+        ),
+    ];
+    let mut viewport = viewport(cells);
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 56, /*height*/ 6,
+    );
+    let mut collapsed = Buffer::empty(area);
+    viewport.render(area, &mut collapsed);
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    let mut expanded = Buffer::empty(area);
+    viewport.render(area, &mut expanded);
+
+    let trim_rows = |buffer: &Buffer| {
+        buffer_text(buffer, area)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_snapshot!(format!(
+        "collapsed:\n{}\nexpanded:\n{}",
+        trim_rows(&collapsed),
+        trim_rows(&expanded),
+    ), @r###"
+collapsed:
+  Waited for 1 background terminal, ran 1 shell command
+
+
+
+
+
+expanded:
+
+● Waited for background terminal · worker command
+
+shell transcript detail
 
 
 "###);
@@ -440,18 +706,50 @@ fn appending_and_backfilling_tools_rebuild_only_the_adjacent_group() {
 appended:
 before
 
-• Read 1 file, ran 1 shell command
+  Read 1 file, ran 1 shell command
 
 
 
 backfilled:
 before
 
-• Read 1 file, ran 1 shell command
+  Read 1 file, ran 1 shell command
 
 after
 
 "###);
+}
+
+#[test]
+fn expanded_tool_group_reuses_detail_layout_while_scrolling() {
+    let detail_calls = Arc::new(AtomicUsize::new(0));
+    let tools = (0..2)
+        .map(|_| {
+            Arc::new(DetailCountingToolCell {
+                detail_calls: Arc::clone(&detail_calls),
+            }) as Arc<dyn HistoryCell>
+        })
+        .collect();
+    let mut viewport = viewport(tools);
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 30, /*height*/ 5,
+    );
+
+    viewport.render(area, &mut Buffer::empty(area));
+    assert_eq!(detail_calls.load(Ordering::Relaxed), 0);
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 2, /*y*/ 0)));
+    viewport.render(area, &mut Buffer::empty(area));
+    for _ in 0..10 {
+        viewport.scroll_rows(MouseScrollDirection::Down, /*rows*/ 3);
+        viewport.render(area, &mut Buffer::empty(area));
+    }
+    assert_eq!(detail_calls.load(Ordering::Relaxed), 2);
+
+    let narrow = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 20, /*height*/ 5,
+    );
+    viewport.render(narrow, &mut Buffer::empty(narrow));
+    assert_eq!(detail_calls.load(Ordering::Relaxed), 4);
 }
 
 #[test]

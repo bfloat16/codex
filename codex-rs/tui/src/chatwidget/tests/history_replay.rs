@@ -12,6 +12,18 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn assistant_message_does_not_insert_an_empty_work_separator() {
+    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.transcript.needs_final_message_separator = true;
+    chat.transcript.had_work_activity = true;
+
+    chat.prepare_assistant_message();
+
+    assert!(drain_insert_history(&mut rx).is_empty());
+    assert!(!chat.transcript.needs_final_message_separator);
+}
+
+#[tokio::test]
 async fn replayed_manual_compact_renders_as_a_user_action_snapshot() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     let turn = AppServerTurn {
@@ -111,6 +123,54 @@ async fn resumed_initial_messages_render_history() {
         text_blob.contains("assistant reply"),
         "expected replayed agent message",
     );
+}
+
+#[tokio::test]
+async fn resumed_file_change_and_terminal_wait_render_native_history() {
+    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    let turn = AppServerTurn {
+        items: vec![
+            AppServerThreadItem::FileChange {
+                id: "exec-file-change".to_string(),
+                changes: vec![FileUpdateChange {
+                    path: "src/lib.rs".to_string(),
+                    kind: PatchChangeKind::Update { move_path: None },
+                    diff: "@@ -1 +1 @@\n-old\n+new\n".to_string(),
+                }],
+                status: AppServerPatchApplyStatus::Completed,
+            },
+            AppServerThreadItem::CommandExecution {
+                id: "wait-1".to_string(),
+                plugin_id: None,
+                script_path: None,
+                command: "cargo test -p codex-tui".to_string(),
+                cwd: chat.config.cwd.clone().into(),
+                process_id: Some("process-1".to_string()),
+                source: ExecCommandSource::UnifiedExecInteraction,
+                status: AppServerCommandExecutionStatus::Completed,
+                command_actions: Vec::new(),
+                aggregated_output: Some(String::new()),
+                exit_code: Some(0),
+                duration_ms: Some(25),
+            },
+        ],
+        ..app_server_turn(
+            "turn-1",
+            AppServerTurnStatus::Completed,
+            /*duration_ms*/ None,
+            /*error*/ None,
+        )
+    };
+
+    chat.replay_thread_turns(vec![turn], ReplayKind::ResumeInitialMessages);
+
+    let cells = drain_insert_history(&mut rx);
+    let rendered = cells
+        .iter()
+        .map(|cell| lines_to_single_string(cell))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_chatwidget_snapshot!("resumed_file_change_and_terminal_wait", rendered);
 }
 
 #[tokio::test]
@@ -1190,7 +1250,7 @@ async fn replayed_reasoning_item_preserves_summary_parts_and_hides_raw_reasoning
         }
         other => panic!("expected InsertHistoryCell, got {other:?}"),
     };
-    assert_eq!(rendered, "• done\n");
+    assert_eq!(rendered, "● done\n");
     assert!(!rendered.contains("Raw reasoning"));
 }
 
@@ -1525,7 +1585,7 @@ async fn live_reasoning_summary_drops_empty_parts_without_losing_content() {
         }
         other => panic!("expected InsertHistoryCell, got {other:?}"),
     };
-    assert_eq!(rendered, "• done\n");
+    assert_eq!(rendered, "● done\n");
 }
 
 #[tokio::test]

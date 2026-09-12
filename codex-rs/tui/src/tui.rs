@@ -568,7 +568,7 @@ pub enum TuiEvent {
     Paste(String),
     /// A vertical mouse-wheel event reported while an owned screen has mouse capture.
     MouseScroll(MouseScrollEvent),
-    /// Pointer motion or a primary-button press reported by an interactive owned screen.
+    /// Pointer motion or primary-button selection input from an interactive owned screen.
     MouseInteraction(MouseInteractionEvent),
     /// A terminal size notification and its reported dimensions.
     ///
@@ -605,7 +605,9 @@ pub struct MouseInteractionEvent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MouseInteractionKind {
     Move,
-    LeftClick,
+    LeftDown,
+    LeftDrag,
+    LeftUp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

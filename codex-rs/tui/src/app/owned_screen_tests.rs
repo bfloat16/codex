@@ -4,6 +4,8 @@ use crossterm::event::KeyModifiers;
 use insta::assert_snapshot;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::layout::Position;
+use ratatui::style::Color;
 use ratatui::text::Line;
 use std::time::Duration;
 use std::time::Instant;
@@ -12,6 +14,8 @@ use tokio::sync::broadcast::error::TryRecvError;
 use super::*;
 use crate::chatwidget::tests::helpers::normalized_backend_snapshot;
 use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
+use crate::tui::MouseInteractionEvent;
+use crate::tui::MouseInteractionKind;
 use crate::tui::MouseScrollDirection;
 use crate::tui::MouseScrollEvent;
 
@@ -98,6 +102,72 @@ async fn renders_committed_conversation_above_fixed_composer() {
 "                                                  "
 "  gpt-5.6-sol default · /tmp/project              "
 "###);
+
+    screen
+        .viewport
+        .replace_cells(vec![Arc::new(TestCell("A中B"))]);
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render wide selection source");
+    screen.handle_mouse_interaction(MouseInteractionEvent {
+        kind: MouseInteractionKind::LeftDown,
+        column: 2,
+        row: 0,
+    });
+    screen.handle_mouse_interaction(MouseInteractionEvent {
+        kind: MouseInteractionKind::LeftDrag,
+        column: 3,
+        row: 0,
+    });
+    let OwnedScreenMouseAction::Copy(copied) =
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftUp,
+            column: 3,
+            row: 0,
+        })
+    else {
+        panic!("expected copied wide selection");
+    };
+    assert_eq!(copied, "中B");
+}
+
+#[tokio::test]
+async fn patch_background_extends_past_the_reserved_wrap_width() {
+    let (mut chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
+    chat_widget.set_pet_image_support_for_tests(crate::pets::PetImageSupport::Supported(
+        crate::pets::ImageProtocol::Kitty,
+    ));
+    chat_widget.install_test_ambient_pet_for_tests(/*animations_enabled*/ false);
+    let mut screen = OwnedScreen::new(&chat_widget, crate::keymap::RuntimeKeymap::defaults().pager);
+    screen
+        .viewport
+        .push_cell(Arc::new(crate::history_cell::new_patch_event(
+            std::collections::HashMap::from([(
+                std::path::PathBuf::from("src/new.rs"),
+                crate::diff_model::FileChange::Add {
+                    content: "fn added() {}\n".to_string(),
+                },
+            )]),
+            std::path::Path::new("/tmp/project"),
+        )));
+    let width = 50;
+    assert!(chat_widget.history_wrap_width(width) < width);
+    let mut terminal =
+        Terminal::new(TestBackend::new(width, /*height*/ 8)).expect("create terminal");
+
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render patch with reserved columns");
+
+    let diff_background = terminal.backend().buffer()[Position::new(/*x*/ 4, /*y*/ 1)].bg;
+    assert_ne!(diff_background, Color::Reset);
+    assert!((0..width).all(|x| {
+        terminal.backend().buffer()[Position::new(x, /*y*/ 1)].bg == diff_background
+    }));
 }
 
 #[tokio::test]
@@ -168,8 +238,8 @@ async fn navigation_does_not_steal_printable_or_draft_input() {
 
     let cases = [
         (KeyCode::Char('k'), false),
-        (KeyCode::Up, true),
-        (KeyCode::Down, true),
+        (KeyCode::Up, false),
+        (KeyCode::Down, false),
         (KeyCode::Home, false),
         (KeyCode::End, false),
         (KeyCode::PageUp, true),
@@ -217,11 +287,6 @@ async fn mouse_wheel_scrolls_transcript_without_changing_draft() {
         column: 2,
         row: 2,
     }));
-    assert!(screen.handle_mouse_scroll(MouseScrollEvent {
-        direction: MouseScrollDirection::Up,
-        column: 2,
-        row: 2,
-    }));
     assert_eq!(screen.scroll_acceleration.multiplier_per_mille, PER_MILLE);
     terminal
         .draw(|frame| {
@@ -255,15 +320,217 @@ async fn mouse_wheel_scrolls_transcript_without_changing_draft() {
         .expect("render restored bottom");
     assert!(screen.viewport.is_following_bottom());
 
-    assert!(screen.handle_navigation_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE,)));
-    assert!(screen.handle_navigation_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE,)));
+    assert!(!screen.handle_navigation_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE,)));
+    assert!(!screen.handle_navigation_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE,)));
+}
+
+#[tokio::test]
+async fn copy_notice_stays_below_the_scroll_banner_and_above_the_composer() {
+    let (mut chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
+    chat_widget.apply_external_edit("draft sentinel".to_string());
+    let mut screen = OwnedScreen::new(&chat_widget, crate::keymap::RuntimeKeymap::defaults().pager);
+    for text in ["oldest", "older", "middle", "newer", "latest"] {
+        screen.viewport.push_cell(Arc::new(TestCell(text)));
+    }
+    let mut terminal =
+        Terminal::new(TestBackend::new(/*width*/ 50, /*height*/ 10)).expect("create terminal");
     terminal
         .draw(|frame| {
             screen.render(&chat_widget, frame.area(), frame.buffer_mut());
         })
-        .expect("render coalesced key scroll");
-    assert_eq!(
-        normalized_backend_snapshot(terminal.backend()),
-        single_frame_scroll,
+        .expect("render bottom");
+    assert!(screen.handle_mouse_scroll(MouseScrollEvent {
+        direction: MouseScrollDirection::Up,
+        column: 2,
+        row: 2,
+    }));
+    screen.show_copy_notice(/*char_count*/ 12);
+
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render scroll and copy hints");
+
+    assert_snapshot!(normalized_backend_snapshot(terminal.backend()), @r###"
+"                                                  "
+"older                                             "
+"                                                  "
+"middle                                            "
+"           ctrl + end jump to bottom ↓            "
+"                    copied 12 chars to clipboard  "
+"                                                  "
+"› draft sentinel                                  "
+"                                                  "
+"  gpt-5.6-sol default · /tmp/project              "
+"###);
+}
+
+#[tokio::test]
+async fn drag_selects_visible_text_and_copy_notice_renders_above_the_composer() {
+    let (mut chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
+    chat_widget.apply_external_edit("draft sentinel".to_string());
+    let mut screen = OwnedScreen::new(&chat_widget, crate::keymap::RuntimeKeymap::defaults().pager);
+    screen
+        .viewport
+        .push_cell(Arc::new(TestCell("alpha beta gamma")));
+    let mut terminal =
+        Terminal::new(TestBackend::new(/*width*/ 50, /*height*/ 10)).expect("create terminal");
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render selection source");
+
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftDown,
+            column: 0,
+            row: 0,
+        }),
+        OwnedScreenMouseAction::Redraw
+    ));
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftDrag,
+            column: 4,
+            row: 0,
+        }),
+        OwnedScreenMouseAction::Redraw
+    ));
+    let selected_background = crate::terminal_palette::with_test_default_colors(
+        crate::terminal_probe::DefaultColors {
+            fg: (255, 255, 255),
+            bg: (0, 0, 0),
+        },
+        || {
+            terminal
+                .draw(|frame| {
+                    screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+                })
+                .expect("render selection highlight");
+            selection::selection_background()
+        },
     );
+    assert_eq!(
+        selected_background,
+        crate::terminal_palette::rgb_color((38, 79, 120)),
+    );
+    assert!((0..=4).all(|column| {
+        terminal.backend().buffer()[Position::new(column, 0)].bg == selected_background
+    }));
+    let copied = screen.handle_mouse_interaction(MouseInteractionEvent {
+        kind: MouseInteractionKind::LeftUp,
+        column: 4,
+        row: 0,
+    });
+    let OwnedScreenMouseAction::Copy(copied) = copied else {
+        panic!("expected copied selection");
+    };
+    assert_eq!(copied, "alpha");
+
+    screen.show_copy_notice(copied.chars().count());
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render copy notice");
+    assert_eq!(
+        terminal.backend().buffer()[Position::new(/*x*/ 21, /*y*/ 5)].fg,
+        selected_background,
+    );
+    assert_snapshot!(normalized_backend_snapshot(terminal.backend()), @r###"
+"alpha beta gamma                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                     copied 5 chars to clipboard  "
+"                                                  "
+"› draft sentinel                                  "
+"                                                  "
+"  gpt-5.6-sol default · /tmp/project              "
+"###);
+
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftDown,
+            column: 2,
+            row: 7,
+        }),
+        OwnedScreenMouseAction::Redraw
+    ));
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftDrag,
+            column: 15,
+            row: 7,
+        }),
+        OwnedScreenMouseAction::Redraw
+    ));
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render composer selection");
+    assert!((2..=15).all(|column| {
+        terminal.backend().buffer()[Position::new(column, 7)].bg == selected_background
+    }));
+    let OwnedScreenMouseAction::Copy(copied) =
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftUp,
+            column: 15,
+            row: 7,
+        })
+    else {
+        panic!("expected copied composer selection");
+    };
+    assert_eq!(copied, "draft sentinel");
+}
+
+#[tokio::test]
+async fn selection_copies_wide_text_without_padding_spaces() {
+    let (chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
+    let mut screen = OwnedScreen::new(&chat_widget, crate::keymap::RuntimeKeymap::defaults().pager);
+    let text = "● Unicode 选择测试通过，第二轮 scoped Clippy 也完成。";
+    screen.viewport.push_cell(Arc::new(TestCell(text)));
+    let mut terminal =
+        Terminal::new(TestBackend::new(/*width*/ 60, /*height*/ 8)).expect("create terminal");
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render Unicode selection source");
+
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftDown,
+            column: 0,
+            row: 0,
+        }),
+        OwnedScreenMouseAction::Redraw
+    ));
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftDrag,
+            column: u16::try_from(unicode_width::UnicodeWidthStr::width(text))
+                .expect("selection width fits u16")
+                .saturating_sub(1),
+            row: 0,
+        }),
+        OwnedScreenMouseAction::Redraw
+    ));
+    let OwnedScreenMouseAction::Copy(copied) =
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftUp,
+            column: u16::try_from(unicode_width::UnicodeWidthStr::width(text))
+                .expect("selection width fits u16")
+                .saturating_sub(1),
+            row: 0,
+        })
+    else {
+        panic!("expected copied Unicode selection");
+    };
+
+    assert_eq!(copied, text);
 }

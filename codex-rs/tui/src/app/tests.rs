@@ -4008,7 +4008,7 @@ async fn inactive_thread_file_change_approval_recovers_buffered_changes() {
         other => panic!("expected patch preview history cell, saw {other:?}"),
     };
     let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
-    assert!(rendered.contains("• Added README.md (+1 -0)"));
+    assert!(rendered.contains("● Added README.md (+1 -0)"));
     assert!(rendered.contains("1 +hello"));
 }
 

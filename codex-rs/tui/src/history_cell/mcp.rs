@@ -316,7 +316,6 @@ impl HistoryCell for McpToolCallCell {
         Some(ToolActivity {
             call_count: 1,
             mcp_calls: 1,
-            has_failure: self.success() == Some(false),
             ..ToolActivity::default()
         })
     }

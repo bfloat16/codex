@@ -179,10 +179,11 @@ impl ChatWidget {
                 } else {
                     None
                 };
-                self.add_to_history(history_cell::FinalMessageSeparator::new(
-                    elapsed_seconds,
-                    runtime_metrics,
-                ));
+                if let Some(separator) =
+                    history_cell::FinalMessageSeparator::visible(elapsed_seconds, runtime_metrics)
+                {
+                    self.add_to_history(separator);
+                }
             }
             self.turn_runtime_metrics = RuntimeMetricsSummary::default();
             self.transcript.needs_final_message_separator = false;

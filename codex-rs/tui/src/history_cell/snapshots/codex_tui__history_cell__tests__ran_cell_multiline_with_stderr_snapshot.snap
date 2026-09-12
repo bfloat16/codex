@@ -1,8 +1,8 @@
 ---
-source: tui/src/history_cell.rs
+source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
-• Ran echo
+● Ran echo
   │ this_is_a_very_long_si
   │ ngle_token_that_will_w
   │ … +2 lines

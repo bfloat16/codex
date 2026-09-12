@@ -2,7 +2,7 @@
 source: tui/src/diff_render.rs
 expression: terminal.backend()
 ---
-"• Edited 6 files (+9 -9)                                                        "
+"● Edited 6 files (+9 -9)                                                        "
 "  └ assets/banner.txt (+3 -0)                                                   "
 "    1 +HEADER    VALUE                                                          "
 "    2 +rocket    🚀                                                             " Hidden by multi-width symbols: [(18, " ")]

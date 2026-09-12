@@ -3,7 +3,7 @@
 use super::*;
 
 #[derive(Debug)]
-/// A visual divider between turns, optionally showing how long the assistant "worked for".
+/// An optional transition label between turns showing work duration or runtime metrics.
 ///
 /// This separator is only emitted for turns that performed concrete work (e.g., running commands,
 /// applying patches, making MCP tool calls), so purely conversational turns do not show an empty
@@ -13,15 +13,19 @@ pub struct FinalMessageSeparator {
     runtime_metrics: Option<RuntimeMetricsSummary>,
 }
 impl FinalMessageSeparator {
-    /// Creates a separator; completed turns should pass protocol turn duration when available.
-    pub(crate) fn new(
+    /// Returns a visible separator; completed turns should pass protocol turn duration when
+    /// available. Empty transitions are omitted entirely so layout code cannot add spacing for
+    /// them.
+    pub(crate) fn visible(
         elapsed_seconds: Option<u64>,
         runtime_metrics: Option<RuntimeMetricsSummary>,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        let visible = elapsed_seconds.is_some_and(|seconds| seconds > 60)
+            || runtime_metrics.is_some_and(|summary| runtime_metrics_label(summary).is_some());
+        visible.then_some(Self {
             elapsed_seconds,
             runtime_metrics,
-        }
+        })
     }
 }
 impl HistoryCell for FinalMessageSeparator {
@@ -39,18 +43,12 @@ impl HistoryCell for FinalMessageSeparator {
         }
 
         if label_parts.is_empty() {
-            return vec![Line::from_iter(["─".repeat(width as usize).dim()])];
+            return Vec::new();
         }
 
-        let label = format!("─ {} ─", label_parts.join(" • "));
-        let (label, _suffix, label_width) = take_prefix_by_width(&label, width as usize);
-        vec![
-            Line::from_iter([
-                label,
-                "─".repeat((width as usize).saturating_sub(label_width)),
-            ])
-            .dim(),
-        ]
+        let label = label_parts.join(" • ");
+        let (label, _suffix, _label_width) = take_prefix_by_width(&label, width as usize);
+        vec![Line::from(label).dim()]
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {

@@ -342,7 +342,7 @@ impl ReasoningSummaryCell {
         adaptive_wrap_lines(
             &summary_lines,
             RtOptions::new(width as usize)
-                .initial_indent("• ".dim().into())
+                .initial_indent("● ".dim().bold().into())
                 .subsequent_indent("  ".into()),
         )
     }
@@ -402,7 +402,7 @@ impl HistoryCell for AgentMessageCell {
         let mut wrapped = Vec::new();
         for (index, line) in self.lines.iter().enumerate() {
             let initial_indent = if index == 0 && self.is_first_line {
-                "• ".dim().into()
+                "● ".dim().bold().into()
             } else {
                 "  ".into()
             };
@@ -516,7 +516,7 @@ impl HistoryCell for AgentMarkdownCell {
             else {
                 return prefix_hyperlink_lines(
                     vec![HyperlinkLine::new(Line::default())],
-                    "• ".dim(),
+                    "● ".dim().bold(),
                     "  ".into(),
                 );
             };
@@ -531,7 +531,7 @@ impl HistoryCell for AgentMarkdownCell {
             );
             normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
                 lines,
-                "• ".dim(),
+                "● ".dim().bold(),
                 "  ".into(),
             ))
         };
@@ -591,7 +591,7 @@ impl HistoryCell for StreamingAgentTailCell {
         normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
             self.lines.clone(),
             if self.is_first_line {
-                "• ".dim()
+                "● ".dim().bold()
             } else {
                 "  ".into()
             },

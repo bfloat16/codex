@@ -782,7 +782,7 @@ async fn exec_history_shows_unified_exec_startup_commands() {
     assert_eq!(cells.len(), 1, "expected finalized exec cell to flush");
     let blob = lines_to_single_string(&cells[0]);
     assert!(
-        blob.contains("• Ran echo unified exec startup"),
+        blob.contains("● Ran echo unified exec startup"),
         "expected startup command to render: {blob:?}"
     );
 }
@@ -801,7 +801,7 @@ async fn exec_history_shows_unified_exec_tool_calls() {
     end_exec(&mut chat, begin, "", "", /*exit_code*/ 0);
 
     let blob = active_blob(&chat);
-    assert_eq!(blob, "• Explored\n  └ List ls\n");
+    assert_eq!(blob, "● Explored\n  └ List ls\n");
 }
 
 #[tokio::test]
@@ -1622,7 +1622,13 @@ async fn interrupt_preserves_unified_exec_wait_streak_snapshot() {
 
     handle_turn_interrupted(&mut chat, "turn-1");
 
-    end_exec(&mut chat, begin, "", "", /*exit_code*/ 0);
+    end_exec(
+        &mut chat,
+        begin,
+        "late completion output\n",
+        "",
+        /*exit_code*/ 0,
+    );
     let cells = drain_insert_history(&mut rx);
     let combined = cells
         .iter()
@@ -1702,7 +1708,7 @@ async fn apply_patch_events_emit_history_cells() {
     assert!(!cells.is_empty(), "expected apply block cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     insta::assert_snapshot!(blob, @"
-    • Added foo.txt (+16 -0)
+    ● Added foo.txt (+16 -0)
          1 +line 1
          2 +line 2
          3 +line 3

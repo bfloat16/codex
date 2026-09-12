@@ -142,6 +142,7 @@ impl ChatWidget {
             return;
         };
         if is_unified_exec_source(*source) {
+            let render_after_interrupt = self.interrupted_unified_exec_calls.remove(id);
             if let Some(process_id) = process_id.as_deref()
                 && self
                     .unified_exec_wait_streak
@@ -151,7 +152,7 @@ impl ChatWidget {
                 self.flush_unified_exec_wait_streak();
             }
             self.track_unified_exec_process_end(id, process_id.as_deref());
-            if !self.bottom_pane.is_task_running() {
+            if !self.bottom_pane.is_task_running() && !render_after_interrupt {
                 return;
             }
         }

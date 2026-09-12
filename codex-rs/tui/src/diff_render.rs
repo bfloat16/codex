@@ -424,7 +424,7 @@ fn render_changes_block(rows: Vec<Row<'_>>, wrap_cols: usize, cwd: &Path) -> Vec
     let total_removed: usize = rows.iter().map(|r| r.removed).sum();
     let file_count = rows.len();
     let noun = if file_count == 1 { "file" } else { "files" };
-    let mut header_spans: Vec<RtSpan<'static>> = vec!["• ".dim()];
+    let mut header_spans: Vec<RtSpan<'static>> = vec!["● ".dim().bold()];
     if let [row] = &rows[..] {
         let verb = match row.change {
             FileChange::Add { .. } => "Added",

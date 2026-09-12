@@ -14,9 +14,11 @@ impl ChatWidget {
         // If the previous turn inserted non-stream history (exec output, patch status, MCP
         // calls), render a separator before starting the next streamed assistant message.
         if self.transcript.needs_final_message_separator && self.transcript.had_work_activity {
-            self.add_to_history(history_cell::FinalMessageSeparator::new(
+            if let Some(separator) = history_cell::FinalMessageSeparator::visible(
                 /*elapsed_seconds*/ None, /*runtime_metrics*/ None,
-            ));
+            ) {
+                self.add_to_history(separator);
+            }
             self.transcript.needs_final_message_separator = false;
         } else if self.transcript.needs_final_message_separator {
             // Reset the flag even if we don't show separator (no work was done)
@@ -186,6 +188,24 @@ impl ChatWidget {
                 status: codex_app_server_protocol::CommandExecutionStatus::InProgress,
                 ..
             } => self.on_command_execution_started(item),
+            ThreadItem::CommandExecution {
+                command,
+                source: ExecCommandSource::UnifiedExecInteraction,
+                status:
+                    codex_app_server_protocol::CommandExecutionStatus::Completed
+                    | codex_app_server_protocol::CommandExecutionStatus::Failed
+                    | codex_app_server_protocol::CommandExecutionStatus::Declined,
+                ..
+            } if from_replay => {
+                self.flush_answer_stream_with_separator();
+                self.flush_active_cell();
+                let command_display = strip_bash_lc_and_escape(&split_command_string(&command));
+                self.add_to_history(history_cell::new_unified_exec_interaction(
+                    (!command_display.is_empty()).then_some(command_display),
+                    String::new(),
+                ));
+                self.transcript.had_work_activity = true;
+            }
             item @ ThreadItem::CommandExecution {
                 source: ExecCommandSource::Agent | ExecCommandSource::UnifiedExecStartup,
                 status:
@@ -194,6 +214,15 @@ impl ChatWidget {
                 ..
             } if from_replay => self.handle_command_execution_completed_now(item),
             item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_completed(item),
+            ThreadItem::FileChange {
+                changes, status, ..
+            } if from_replay => {
+                self.on_patch_apply_begin(file_update_changes_to_display(changes));
+                if status == codex_app_server_protocol::PatchApplyStatus::Failed {
+                    self.add_to_history(history_cell::new_patch_apply_failure(String::new()));
+                }
+                self.transcript.had_work_activity = true;
+            }
             ThreadItem::FileChange {
                 status: codex_app_server_protocol::PatchApplyStatus::InProgress,
                 ..

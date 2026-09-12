@@ -105,7 +105,7 @@ fn finalized_assistant_file_citation_renders_as_local_path_snapshot() {
 
     let rendered = ratatui::text::Text::from(cell.display_lines(/*width*/ 80));
 
-    insta::assert_snapshot!(rendered, @"• Generated Quarterly Report.xlsx.");
+    insta::assert_snapshot!(rendered, @"● Generated Quarterly Report.xlsx.");
 }
 
 #[test]

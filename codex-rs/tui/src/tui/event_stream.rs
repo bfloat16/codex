@@ -323,14 +323,28 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
                         Some(TuiEvent::MouseInteraction(MouseInteractionEvent {
-                            kind: MouseInteractionKind::LeftClick,
+                            kind: MouseInteractionKind::LeftDown,
+                            column: mouse_event.column,
+                            row: mouse_event.row,
+                        }))
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) => {
+                        Some(TuiEvent::MouseInteraction(MouseInteractionEvent {
+                            kind: MouseInteractionKind::LeftDrag,
+                            column: mouse_event.column,
+                            row: mouse_event.row,
+                        }))
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        Some(TuiEvent::MouseInteraction(MouseInteractionEvent {
+                            kind: MouseInteractionKind::LeftUp,
                             column: mouse_event.column,
                             row: mouse_event.row,
                         }))
                     }
                     MouseEventKind::Down(MouseButton::Right | MouseButton::Middle)
-                    | MouseEventKind::Up(_)
-                    | MouseEventKind::Drag(_)
+                    | MouseEventKind::Up(MouseButton::Right | MouseButton::Middle)
+                    | MouseEventKind::Drag(MouseButton::Right | MouseButton::Middle)
                     | MouseEventKind::ScrollLeft
                     | MouseEventKind::ScrollRight => None,
                 }
@@ -679,7 +693,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn pointer_motion_and_left_click_map_to_interactions() {
+    async fn pointer_motion_and_left_drag_map_to_interactions() {
         let (broker, handle, _draw_tx, draw_rx, terminal_focused) = setup();
         let mut stream = make_stream(broker, draw_rx, terminal_focused);
 
@@ -692,6 +706,8 @@ mod tests {
         for kind in [
             MouseEventKind::Moved,
             MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
         ] {
             handle.send(Ok(Event::Mouse(MouseEvent {
                 kind,
@@ -712,7 +728,23 @@ mod tests {
         assert!(matches!(
             stream.next().await,
             Some(TuiEvent::MouseInteraction(MouseInteractionEvent {
-                kind: MouseInteractionKind::LeftClick,
+                kind: MouseInteractionKind::LeftDown,
+                column: 5,
+                row: 6,
+            }))
+        ));
+        assert!(matches!(
+            stream.next().await,
+            Some(TuiEvent::MouseInteraction(MouseInteractionEvent {
+                kind: MouseInteractionKind::LeftDrag,
+                column: 5,
+                row: 6,
+            }))
+        ));
+        assert!(matches!(
+            stream.next().await,
+            Some(TuiEvent::MouseInteraction(MouseInteractionEvent {
+                kind: MouseInteractionKind::LeftUp,
                 column: 5,
                 row: 6,
             }))

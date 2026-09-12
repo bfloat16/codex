@@ -431,6 +431,12 @@ impl ChatWidget {
         });
     }
 
+    pub(crate) fn copy_owned_screen_selection(&mut self, text: &str) -> Result<(), String> {
+        let lease = crate::clipboard_copy::copy_to_clipboard(text, CopyFormat::PlainText)?;
+        self.clipboard_lease = lease;
+        Ok(())
+    }
+
     pub(super) fn copy_selection_with(
         &mut self,
         text: &str,

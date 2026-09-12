@@ -13,6 +13,7 @@ use crate::motion::activity_indicator;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::line_utils::prefix_lines;
 use crate::render::line_utils::push_owned_lines;
+use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::ui_consts::TRANSCRIPT_HINT;
 use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_line;
@@ -257,10 +258,6 @@ impl HistoryCell for ExecCell {
         let mut read_paths = HashSet::new();
         for call in &self.calls {
             activity.call_count = activity.call_count.saturating_add(1);
-            activity.has_failure |= call
-                .output
-                .as_ref()
-                .is_some_and(|output| output.exit_code != 0);
 
             if call.parsed.is_empty()
                 || call
@@ -290,6 +287,10 @@ impl HistoryCell for ExecCell {
         activity.read_files = read_paths.len();
         Some(activity)
     }
+
+    fn tool_group_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.display_hyperlink_lines(width)
+    }
 }
 
 impl ExecCell {
@@ -307,7 +308,7 @@ impl ExecCell {
             if self.is_active() {
                 activity_marker(self.active_start_time(), self.animations_enabled())
             } else {
-                "•".dim()
+                "●".bold()
             },
             " ".into(),
             if self.is_active() {
@@ -407,8 +408,8 @@ impl ExecCell {
             .duration
             .and_then(|_| call.output.as_ref().map(|o| o.exit_code == 0));
         let bullet = match success {
-            Some(true) => "•".green().bold(),
-            Some(false) => "•".red().bold(),
+            Some(true) => "●".green().bold(),
+            Some(false) => "●".red().bold(),
             None => activity_marker(call.start_time, self.animations_enabled()),
         };
         let is_interaction = call.is_unified_exec_interaction();
@@ -1113,6 +1114,89 @@ mod tests {
                 }),
             ],
         );
+    }
+
+    #[test]
+    fn tool_group_details_use_native_exec_style_and_hide_read_contents() {
+        let mut read = new_active_exec_command(
+            "read-call".to_string(),
+            vec![
+                "powershell".into(),
+                "-Command".into(),
+                "Get-Content H settingsSlice.ts | Select-Object -Skip 147 -First 113".into(),
+            ],
+            vec![ParsedCommand::Read {
+                cmd: "Get-Content settingsSlice.ts | Select-Object -Skip 147 -First 113"
+                    .to_string(),
+                name: "settingsSlice.ts".to_string(),
+                path: std::path::PathBuf::from(
+                    "H:/Tools/claude-code-history-viewer/src/store/slices/settingsSlice.ts",
+                ),
+            }],
+            ExecCommandSource::Agent,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        );
+        assert!(read.complete_call(
+            "read-call",
+            CommandOutput::new(/*exit_code*/ 0, "source line\n".repeat(113)),
+            std::time::Duration::from_millis(/*millis*/ 10),
+        ));
+
+        let mut bash = new_active_exec_command(
+            "bash-call".to_string(),
+            vec![
+                "bash".into(),
+                "-lc".into(),
+                "echo '=== tsc ===' && echo '=== lint ==='".into(),
+            ],
+            Vec::new(),
+            ExecCommandSource::Agent,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        );
+        assert!(bash.complete_call(
+            "bash-call",
+            CommandOutput::new(
+                /*exit_code*/ 0,
+                "=== tsc ===\n=== lint ===\n".to_string()
+            ),
+            std::time::Duration::from_millis(/*millis*/ 20),
+        ));
+
+        let read_lines =
+            crate::terminal_hyperlinks::visible_lines(read.tool_group_detail_lines(/*width*/ 120));
+        let bash_lines =
+            crate::terminal_hyperlinks::visible_lines(bash.tool_group_detail_lines(/*width*/ 120));
+        assert!(
+            read_lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        assert_eq!(bash_lines[0].spans[0].style.fg, Some(Color::Green));
+        assert!(
+            bash_lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+
+        let rendered = read_lines
+            .iter()
+            .chain(&bash_lines)
+            .map(render_line_text)
+            .join("\n");
+        assert!(!rendered.contains("source line"));
+        assert!(!rendered.contains('✓'));
+        assert!(!rendered.contains('✗'));
+        insta::assert_snapshot!(rendered, @r###"
+● Explored
+  └ Read settingsSlice.ts
+● Ran echo '=== tsc ===' && echo '=== lint ==='
+  └ === tsc ===
+    === lint ===
+"###);
     }
 
     #[test]

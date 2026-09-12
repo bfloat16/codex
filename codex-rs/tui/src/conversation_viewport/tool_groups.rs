@@ -1,10 +1,13 @@
 //! Collapsible adjacent-tool projection for the owned full-screen transcript.
 
+use std::cell::RefCell;
 use std::ops::Range;
 use std::sync::Arc;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::Clear;
@@ -18,8 +21,14 @@ use crate::render::renderable::Renderable;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::HyperlinkParagraph;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
+use crate::terminal_hyperlinks::remap_wrapped_line;
+use crate::wrapping::RtOptions;
+use crate::wrapping::adaptive_wrap_lines;
+use crate::wrapping::word_wrap_line;
 
 const MIN_GROUPED_TOOL_CALLS: usize = 2;
+const SUMMARY_TEXT_ALPHA: f32 = 0.68;
+const HOVERED_SUMMARY_TEXT_ALPHA: f32 = 0.86;
 
 impl ConversationViewport {
     pub(super) fn render_cell_range(&self, range: Range<usize>) -> Vec<Box<dyn Renderable>> {
@@ -29,6 +38,8 @@ impl ConversationViewport {
             range,
             self.hovered_tool_group,
             self.expanded_tool_group,
+            self.hovered_file_change,
+            self.expanded_file_change,
         )
     }
 
@@ -38,6 +49,8 @@ impl ConversationViewport {
         range: Range<usize>,
         hovered_tool_group: Option<usize>,
         expanded_tool_group: Option<usize>,
+        hovered_file_change: Option<usize>,
+        expanded_file_change: Option<usize>,
     ) -> Vec<Box<dyn Renderable>> {
         let mut renderables = Vec::with_capacity(range.len());
         let mut index = range.start;
@@ -61,6 +74,7 @@ impl ConversationViewport {
                         hovered: hovered_tool_group == Some(start),
                         expanded: expanded_tool_group == Some(start),
                         top_padding: Self::tool_group_top_padding(cells, start),
+                        layout: RefCell::new(None),
                     }) as Box<dyn Renderable>);
                     renderables.extend(
                         std::iter::repeat_with(|| Box::new(()) as Box<dyn Renderable>)
@@ -73,6 +87,8 @@ impl ConversationViewport {
                         cell.clone(),
                         render_mode,
                         /*has_prior_cells*/ cell_index > 0,
+                        /*hovered_file_change*/ hovered_file_change == Some(cell_index),
+                        /*expanded_file_change*/ expanded_file_change == Some(cell_index),
                     ));
                 }
                 continue;
@@ -82,6 +98,8 @@ impl ConversationViewport {
                 cells[index].clone(),
                 render_mode,
                 /*has_prior_cells*/ index > 0,
+                /*hovered_file_change*/ hovered_file_change == Some(index),
+                /*expanded_file_change*/ expanded_file_change == Some(index),
             ));
             index += 1;
         }
@@ -168,19 +186,18 @@ pub(super) struct ToolActivityGroupRenderable {
     hovered: bool,
     expanded: bool,
     top_padding: u16,
+    layout: RefCell<Option<ToolGroupLayout>>,
+}
+
+struct ToolGroupLayout {
+    width: u16,
+    lines: Vec<HyperlinkLine>,
 }
 
 impl ToolActivityGroupRenderable {
     fn summary_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let mut parts = Vec::new();
+        let mut spans = Vec::new();
         for (count, initial_verb, verb, singular, plural) in [
-            (
-                self.activity.edited_files,
-                "Edited",
-                "edited",
-                "file",
-                "files",
-            ),
             (
                 self.activity.searches,
                 "Searched for",
@@ -204,6 +221,13 @@ impl ToolActivityGroupRenderable {
                 "MCP tools",
             ),
             (
+                self.activity.background_terminal_waits,
+                "Waited for",
+                "waited for",
+                "background terminal",
+                "background terminals",
+            ),
+            (
                 self.activity.shell_commands,
                 "Ran",
                 "ran",
@@ -212,24 +236,34 @@ impl ToolActivityGroupRenderable {
             ),
         ] {
             if count > 0 {
-                let verb = if parts.is_empty() { initial_verb } else { verb };
+                if !spans.is_empty() {
+                    spans.push(", ".into());
+                }
+                let verb = if spans.is_empty() { initial_verb } else { verb };
                 let noun = if count == 1 { singular } else { plural };
-                parts.push(format!("{verb} {count} {noun}"));
+                spans.extend([
+                    format!("{verb} ").into(),
+                    count.to_string().bold(),
+                    format!(" {noun}").into(),
+                ]);
             }
         }
-        let marker = if self.activity.has_failure {
-            "✗ ".red()
-        } else {
-            "• ".dim()
-        };
-        let line: Line<'static> = vec![marker, parts.join(", ").dim()].into();
-        crate::wrapping::word_wrap_line(&line, usize::from(width.max(1)))
-            .into_iter()
-            .map(|line| crate::render::line_utils::line_to_static(&line))
-            .collect()
+        let style = summary_text_style(self.hovered);
+        let line = Line::from(
+            spans
+                .into_iter()
+                .map(|span| span.patch_style(style))
+                .collect::<Vec<_>>(),
+        );
+        adaptive_wrap_lines(
+            [line],
+            RtOptions::new(usize::from(width.max(1)))
+                .initial_indent("  ".into())
+                .subsequent_indent("  ".into()),
+        )
     }
 
-    fn content_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+    fn unwrapped_content_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         if !self.expanded {
             return plain_hyperlink_lines(self.summary_lines(width));
         }
@@ -238,9 +272,32 @@ impl ToolActivityGroupRenderable {
             if index > 0 && !cell.is_stream_continuation() {
                 lines.push(HyperlinkLine::from(""));
             }
-            lines.extend(cell.transcript_hyperlink_lines(width));
+            lines.extend(cell.tool_group_detail_lines(width));
         }
         lines
+    }
+
+    fn update_layout(&self, width: u16) {
+        if self
+            .layout
+            .borrow()
+            .as_ref()
+            .is_some_and(|layout| layout.width == width)
+        {
+            return;
+        }
+        let lines = self
+            .unwrapped_content_lines(width)
+            .into_iter()
+            .flat_map(|line| {
+                let wrapped = word_wrap_line(&line.line, usize::from(width.max(1)))
+                    .into_iter()
+                    .map(|line| crate::render::line_utils::line_to_static(&line))
+                    .collect();
+                remap_wrapped_line(&line, wrapped)
+            })
+            .collect();
+        *self.layout.borrow_mut() = Some(ToolGroupLayout { width, lines });
     }
 }
 
@@ -250,40 +307,69 @@ impl Renderable for ToolActivityGroupRenderable {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let style = if self.expanded {
-            crate::style::user_message_style()
-        } else {
-            Default::default()
-        };
-        self.top_padding.saturating_add(
-            HyperlinkParagraph::new(&self.content_lines(width), style)
-                .line_count(width)
-                .try_into()
-                .unwrap_or(/*default*/ 0),
-        )
+        self.update_layout(width);
+        let line_count = self
+            .layout
+            .borrow()
+            .as_ref()
+            .map_or(/*default*/ 0, |layout| layout.lines.len());
+        let top_padding = if self.expanded { 1 } else { self.top_padding };
+        top_padding
+            .saturating_add(u16::try_from(line_count).unwrap_or(/*default*/ u16::MAX))
+            .saturating_add(u16::from(self.expanded))
     }
 
     fn render_scrolled(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) -> bool {
         Clear.render(area, buf);
+        if self.expanded {
+            buf.set_style(area, crate::style::user_message_style());
+        }
         if scroll_offset >= self.desired_height(area.width) {
             return true;
         }
-        let visible_padding = self.top_padding.saturating_sub(scroll_offset);
-        let content_scroll = scroll_offset.saturating_sub(self.top_padding);
+        let top_padding = if self.expanded { 1 } else { self.top_padding };
+        let visible_padding = top_padding.saturating_sub(scroll_offset);
+        let content_scroll = scroll_offset.saturating_sub(top_padding);
         let content_area = Rect::new(
             area.x,
             area.y.saturating_add(visible_padding),
             area.width,
             area.height.saturating_sub(visible_padding),
         );
-        let style = if self.expanded || self.hovered {
+        self.update_layout(area.width);
+        let style = if self.expanded {
             crate::style::user_message_style()
         } else {
             Default::default()
         };
-        HyperlinkParagraph::new(&self.content_lines(area.width), style)
-            .scroll(content_scroll)
-            .render(content_area, buf);
+        let layout = self.layout.borrow();
+        let lines = layout
+            .as_ref()
+            .map(|layout| layout.lines.as_slice())
+            .unwrap_or_default();
+        let start = usize::from(content_scroll).min(lines.len());
+        let end = start
+            .saturating_add(usize::from(content_area.height))
+            .min(lines.len());
+        HyperlinkParagraph::new(&lines[start..end], style).render(content_area, buf);
         true
+    }
+}
+
+pub(super) fn summary_text_style(hovered: bool) -> Style {
+    let alpha = if hovered {
+        HOVERED_SUMMARY_TEXT_ALPHA
+    } else {
+        SUMMARY_TEXT_ALPHA
+    };
+    let color = crate::terminal_palette::default_fg()
+        .zip(crate::terminal_palette::default_bg())
+        .map(|(foreground, background)| {
+            crate::terminal_palette::best_color(crate::color::blend(foreground, background, alpha))
+        });
+    match color {
+        Some(color) if color != Color::Reset => Style::default().fg(color),
+        _ if hovered => Style::default(),
+        _ => Style::default().dim(),
     }
 }

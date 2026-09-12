@@ -24,9 +24,9 @@ use crate::render::renderable::InsetRenderable;
 use crate::render::renderable::Renderable;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::HyperlinkParagraph;
-use crate::tui::MouseInteractionKind;
 use crate::tui::MouseScrollDirection;
 
+mod file_changes;
 mod tool_groups;
 
 pub(crate) struct ConversationViewport {
@@ -36,6 +36,8 @@ pub(crate) struct ConversationViewport {
     live_tail_key: Option<LiveTailKey>,
     hovered_tool_group: Option<usize>,
     expanded_tool_group: Option<usize>,
+    hovered_file_change: Option<usize>,
+    expanded_file_change: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,6 +59,8 @@ impl ConversationViewport {
             render_mode,
             /*hovered_tool_group*/ None,
             /*expanded_tool_group*/ None,
+            /*hovered_file_change*/ None,
+            /*expanded_file_change*/ None,
         );
         Self {
             content: PagerContent::new(renderables, keymap),
@@ -65,6 +69,8 @@ impl ConversationViewport {
             live_tail_key: None,
             hovered_tool_group: None,
             expanded_tool_group: None,
+            hovered_file_change: None,
+            expanded_file_change: None,
         }
     }
 
@@ -84,39 +90,49 @@ impl ConversationViewport {
         self.content.scroll_to_bottom();
     }
 
-    pub(crate) fn handle_mouse_interaction(
-        &mut self,
-        area: Rect,
-        position: Position,
-        kind: MouseInteractionKind,
-    ) -> bool {
+    pub(crate) fn handle_mouse_move(&mut self, area: Rect, position: Position) -> bool {
         if self.render_mode != HistoryRenderMode::Rich {
-            return self.set_hovered_tool_group(/*next*/ None, area.width);
+            let group_changed = self.set_hovered_tool_group(/*next*/ None, area.width);
+            let file_change_changed = self.set_hovered_file_change(/*next*/ None, area.width);
+            return group_changed || file_change_changed;
         }
-        let hit = self
-            .content
-            .renderable_at_position(area, position)
-            .and_then(|(index, row)| {
-                let range = self.tool_group_at(index)?;
-                let top_padding = Self::tool_group_top_padding(&self.cells, range.start);
-                (row >= top_padding).then_some(range.start)
-            });
+        let tool_group_hit = self
+            .tool_group_hit(area, position)
+            .filter(|start| Some(*start) != self.expanded_tool_group);
+        let file_change_hit = if tool_group_hit.is_none() {
+            self.file_change_hit(area, position)
+        } else {
+            None
+        };
+        let group_changed = self.set_hovered_tool_group(tool_group_hit, area.width);
+        let file_change_changed = self.set_hovered_file_change(file_change_hit, area.width);
+        group_changed || file_change_changed
+    }
 
-        match kind {
-            MouseInteractionKind::Move => self.set_hovered_tool_group(hit, area.width),
-            MouseInteractionKind::LeftClick => {
-                let Some(group_start) = hit else {
-                    return false;
-                };
-                let previous = self.expanded_tool_group;
-                self.expanded_tool_group = (previous != Some(group_start)).then_some(group_start);
-                self.refresh_tool_groups(
-                    [previous, Some(group_start)].into_iter().flatten(),
-                    area.width,
-                );
-                true
-            }
+    pub(crate) fn handle_left_click(&mut self, area: Rect, position: Position) -> bool {
+        if let Some(group_start) = self.tool_group_hit(area, position) {
+            let previous = self.expanded_tool_group;
+            let previous_hover = self.hovered_tool_group.take();
+            self.expanded_tool_group = (previous != Some(group_start)).then_some(group_start);
+            self.refresh_tool_groups(
+                [previous, previous_hover, Some(group_start)]
+                    .into_iter()
+                    .flatten(),
+                area.width,
+            );
+            return true;
         }
+        self.toggle_file_change_at(area, position)
+    }
+
+    fn tool_group_hit(&mut self, area: Rect, position: Position) -> Option<usize> {
+        let (index, row) = self.content.renderable_at_position(area, position)?;
+        let range = self.tool_group_at(index)?;
+        if self.expanded_tool_group == Some(range.start) {
+            return Some(range.start);
+        }
+        let top_padding = Self::tool_group_top_padding(&self.cells, range.start);
+        (row >= top_padding).then_some(range.start)
     }
 
     pub(crate) fn push_cell(&mut self, cell: Arc<dyn HistoryCell>) {
@@ -158,12 +174,16 @@ impl ConversationViewport {
         self.live_tail_key = None;
         self.hovered_tool_group = None;
         self.expanded_tool_group = None;
+        self.hovered_file_change = None;
+        self.expanded_file_change = None;
         self.cells = cells;
         self.content.replace(Self::render_cells(
             &self.cells,
             self.render_mode,
             self.hovered_tool_group,
             self.expanded_tool_group,
+            self.hovered_file_change,
+            self.expanded_file_change,
         ));
         if follow_bottom {
             self.content.scroll_to_bottom();
@@ -198,8 +218,10 @@ impl ConversationViewport {
             old_rebuild_end = 1;
         }
         self.shift_tool_group_state(index, inserted_count);
+        self.shift_file_change_state(index, inserted_count);
         self.cells.splice(index..index, cells);
         self.validate_tool_group_state();
+        self.validate_file_change_state();
         let new_rebuild_end = old_rebuild_end.saturating_add(inserted_count);
         let renderables = self.render_cell_range(rebuild_start..new_rebuild_end);
         self.content.splice_above_viewport(
@@ -235,12 +257,16 @@ impl ConversationViewport {
         self.live_tail_key = None;
         self.hovered_tool_group = None;
         self.expanded_tool_group = None;
+        self.hovered_file_change = None;
+        self.expanded_file_change = None;
         self.render_mode = render_mode;
         self.content.replace(Self::render_cells(
             &self.cells,
             self.render_mode,
             self.hovered_tool_group,
             self.expanded_tool_group,
+            self.hovered_file_change,
+            self.expanded_file_change,
         ));
         if follow_bottom {
             self.content.scroll_to_bottom();
@@ -295,6 +321,8 @@ impl ConversationViewport {
         render_mode: HistoryRenderMode,
         hovered_tool_group: Option<usize>,
         expanded_tool_group: Option<usize>,
+        hovered_file_change: Option<usize>,
+        expanded_file_change: Option<usize>,
     ) -> Vec<Box<dyn Renderable>> {
         Self::render_cell_range_from(
             cells,
@@ -302,6 +330,8 @@ impl ConversationViewport {
             0..cells.len(),
             hovered_tool_group,
             expanded_tool_group,
+            hovered_file_change,
+            expanded_file_change,
         )
     }
 
@@ -309,12 +339,16 @@ impl ConversationViewport {
         cell: Arc<dyn HistoryCell>,
         render_mode: HistoryRenderMode,
         has_prior_cells: bool,
+        hovered_file_change: bool,
+        expanded_file_change: bool,
     ) -> Box<dyn Renderable> {
         let is_stream_continuation = cell.is_stream_continuation();
         let renderable: Box<dyn Renderable> = Box::new(ConversationCellRenderable {
             cell,
             render_mode,
             cached_height: Cell::new(None),
+            hovered_file_change,
+            expanded_file_change,
         });
         if has_prior_cells && !is_stream_continuation {
             Self::with_leading_spacing(renderable)
@@ -354,10 +388,15 @@ struct ConversationCellRenderable {
     cell: Arc<dyn HistoryCell>,
     render_mode: HistoryRenderMode,
     cached_height: Cell<Option<(u16, u16)>>,
+    hovered_file_change: bool,
+    expanded_file_change: bool,
 }
 
 impl Renderable for ConversationCellRenderable {
     fn render(&self, area: Rect, buf: &mut Buffer) {
+        if self.render_file_change(area, buf, /*scroll_offset*/ 0) {
+            return;
+        }
         let hyperlink_lines = self
             .cell
             .display_hyperlink_lines_for_mode(area.width, self.render_mode);
@@ -369,6 +408,9 @@ impl Renderable for ConversationCellRenderable {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
+        if let Some(height) = self.file_change_desired_height(width) {
+            return height;
+        }
         if let Some((cached_width, height)) = self.cached_height.get()
             && cached_width == width
         {
@@ -380,6 +422,9 @@ impl Renderable for ConversationCellRenderable {
     }
 
     fn render_scrolled(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) -> bool {
+        if self.render_file_change(area, buf, scroll_offset) {
+            return true;
+        }
         let hyperlink_lines = self
             .cell
             .display_hyperlink_lines_for_mode(area.width, self.render_mode);
