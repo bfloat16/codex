@@ -244,7 +244,7 @@ impl StatusIndicator<'_> {
             motion_mode,
             ReducedMotionIndicator::Hidden,
         ) {
-            spans.push(indicator);
+            spans.push(Span::styled("●", indicator.style));
             spans.push(" ".into());
         }
         spans.extend(shimmer_text(&row.header, motion_mode));
@@ -419,7 +419,9 @@ mod tests {
                     .render(frame.area(), frame.buffer_mut())
             })
             .expect("draw");
-        insta::assert_snapshot!(terminal.backend(), @"Working (0s • esc to interrupt • ↑ 2.00 KiB ↓ 1.00 MiB)                         ");
+        insta::assert_snapshot!(terminal.backend(), @r###"
+"Working (0s • esc to interrupt • ↑ 2.000 KiB ↓ 1.000 MiB)                       "
+"###);
     }
 
     #[test]

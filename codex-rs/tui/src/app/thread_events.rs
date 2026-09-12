@@ -147,6 +147,19 @@ impl ThreadEventStore {
         self.pending_interrupt_turn_id = None;
     }
 
+    pub(super) fn truncate_before_turn(&mut self, before_turn_id: &str) -> bool {
+        let Some(index) = self.turns.iter().position(|turn| turn.id == before_turn_id) else {
+            return false;
+        };
+        self.turns.truncate(index);
+        self.buffer.clear();
+        self.pending_interactive_replay = PendingInteractiveReplayState::default();
+        self.active_turn_id = None;
+        self.latest_turn_id = self.turns.last().map(|turn| turn.id.clone());
+        self.pending_interrupt_turn_id = None;
+        true
+    }
+
     pub(super) fn push_notification(&mut self, notification: ServerNotification) {
         self.push_notification_inner(Cow::Owned(notification));
     }
@@ -826,5 +839,52 @@ mod tests {
             serde_json::to_value(actual).expect("MCP notification should serialize"),
             serde_json::to_value(notification).expect("MCP notification should serialize"),
         );
+    }
+
+    #[test]
+    fn thread_event_store_truncates_before_reverted_turn() {
+        let mut store = ThreadEventStore::new(/*capacity*/ 8);
+        store.set_turns(vec![
+            Turn {
+                id: "turn-1".to_string(),
+                items: Vec::new(),
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                status: TurnStatus::Completed,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            },
+            Turn {
+                id: "turn-compact".to_string(),
+                items: Vec::new(),
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                status: TurnStatus::Failed,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            },
+        ]);
+        store.active_turn_id = Some("turn-compact".to_string());
+        store.pending_interrupt_turn_id = Some("turn-compact".to_string());
+
+        assert!(store.truncate_before_turn("turn-compact"));
+        assert_eq!(
+            store.turns,
+            vec![Turn {
+                id: "turn-1".to_string(),
+                items: Vec::new(),
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                status: TurnStatus::Completed,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            }]
+        );
+        assert_eq!(store.latest_turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(store.active_turn_id, None);
+        assert_eq!(store.pending_interrupt_turn_id, None);
     }
 }

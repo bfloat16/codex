@@ -18,6 +18,7 @@ use crate::external_agent_config_migration::flow::ExternalAgentConfigMigrationFl
 use crate::pager_overlay::TranscriptHistoryState;
 use crate::session_resume::cwds_differ;
 use codex_app_server_protocol::ThreadGoalStatus;
+use codex_app_server_protocol::ThreadHistoryMode;
 #[cfg(target_os = "windows")]
 use codex_config::types::WindowsSandboxModeToml;
 
@@ -80,22 +81,27 @@ impl App {
                     let user_total = crate::app_backtrack::user_count(&self.transcript_cells);
                     match app_server
                         .truncate_thread_before_turn(
-                            &self.config,
-                            &self.local_settings,
                             thread_id,
-                            turn_id,
+                            turn_id.clone(),
                             /*legacy_num_turns*/ 1,
                         )
                         .await
                     {
                         Ok(thread) => {
                             if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-                                channel
-                                    .store
-                                    .lock()
-                                    .await
-                                    .apply_thread_history_replacement(&thread);
+                                let mut store = channel.store.lock().await;
+                                if thread.history_mode == ThreadHistoryMode::Paginated {
+                                    if store.truncate_before_turn(&turn_id) {
+                                        app_server.mark_thread_history_complete(thread_id);
+                                    } else {
+                                        store.apply_thread_history_replacement(&thread);
+                                    }
+                                } else {
+                                    store.apply_thread_history_replacement(&thread);
+                                }
                             }
+                            self.scrollback_has_older_history =
+                                app_server.has_older_history(thread_id);
                             if let Some(nth_user_message) = user_total.checked_sub(1) {
                                 self.handle_backtrack_rollback_succeeded(nth_user_message);
                             }
@@ -679,8 +685,6 @@ impl App {
                 if restore_conversation {
                     match app_server
                         .truncate_thread_before_turn(
-                            &self.config,
-                            &self.local_settings,
                             thread_id,
                             target.before_turn_id.clone(),
                             target.legacy_num_turns,
@@ -689,12 +693,19 @@ impl App {
                     {
                         Ok(thread) => {
                             if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-                                channel
-                                    .store
-                                    .lock()
-                                    .await
-                                    .apply_thread_history_replacement(&thread);
+                                let mut store = channel.store.lock().await;
+                                if thread.history_mode == ThreadHistoryMode::Paginated {
+                                    if store.truncate_before_turn(&target.before_turn_id) {
+                                        app_server.mark_thread_history_complete(thread_id);
+                                    } else {
+                                        store.apply_thread_history_replacement(&thread);
+                                    }
+                                } else {
+                                    store.apply_thread_history_replacement(&thread);
+                                }
                             }
+                            self.scrollback_has_older_history =
+                                app_server.has_older_history(thread_id);
                             if let Err(err) = app_server
                                 .thread_file_change_discard(
                                     thread_id,

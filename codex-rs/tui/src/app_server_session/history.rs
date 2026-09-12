@@ -70,6 +70,32 @@ pub(crate) struct ThreadHistoryPagination {
 }
 
 impl AppServerSession {
+    pub(crate) fn reset_thread_history_pagination(
+        &mut self,
+        thread_id: ThreadId,
+        history_mode: ThreadHistoryMode,
+        next_turn_cursor: Option<String>,
+        next_item_cursor: Option<String>,
+    ) {
+        self.history_pagination.insert(
+            thread_id,
+            ThreadHistoryPagination {
+                history_mode,
+                next_turn_cursor,
+                next_item_cursor,
+                ..ThreadHistoryPagination::default()
+            },
+        );
+    }
+
+    pub(crate) fn mark_thread_history_complete(&mut self, thread_id: ThreadId) {
+        if let Some(state) = self.history_pagination.get_mut(&thread_id) {
+            state.next_turn_cursor = None;
+            state.next_item_cursor = None;
+            state.loading_older = false;
+        }
+    }
+
     pub(crate) fn has_older_history(&self, thread_id: ThreadId) -> bool {
         self.history_pagination
             .get(&thread_id)

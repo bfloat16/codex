@@ -2890,7 +2890,7 @@ mod tests {
         pane.render(area, &mut buf);
 
         let bufs = snapshot_buffer(&buf);
-        assert!(bufs.contains("• Working"), "expected Working header");
+        assert!(bufs.contains("● Working"), "expected Working header");
 
         pane.reset_status_timer(Duration::from_secs(/*secs*/ 42));
         pane.hide_status_indicator();

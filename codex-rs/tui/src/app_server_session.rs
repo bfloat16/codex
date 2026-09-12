@@ -1634,8 +1634,6 @@ impl AppServerSession {
 
     pub(crate) async fn truncate_thread_before_turn(
         &mut self,
-        config: &Config,
-        local_settings: &crate::local_settings::LocalSettings,
         thread_id: ThreadId,
         before_turn_id: String,
         legacy_num_turns: u32,
@@ -1656,7 +1654,7 @@ impl AppServerSession {
             ThreadHistoryMode::Paginated => {
                 let request_id = self.next_request_id();
                 let ThreadRevertResponse {
-                    mut thread,
+                    thread,
                     turns_backwards_cursor,
                     items_backwards_cursor,
                 } = self
@@ -1670,15 +1668,12 @@ impl AppServerSession {
                     })
                     .await
                     .wrap_err("thread/revert failed in TUI")?;
-                self.hydrate_initial_thread_history(
-                    &mut thread,
+                self.reset_thread_history_pagination(
+                    thread_id,
+                    thread.history_mode,
                     turns_backwards_cursor,
                     items_backwards_cursor,
-                    Some(config),
-                    Some(local_settings),
-                    HistoryHydrationScope::Initial,
-                )
-                .await?;
+                );
                 Ok(thread)
             }
             ThreadHistoryMode::Legacy => {
