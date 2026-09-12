@@ -55,6 +55,7 @@ use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::parallel::ToolExecutionTracker;
+use crate::tools::parallel::ToolSerializationGuard;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolSuggestCandidates;
 use crate::tools::router::ToolSuggestPresentation;
@@ -334,7 +335,7 @@ pub(crate) async fn run_turn(
         TurnDiffTracker::with_environment_display_roots(display_roots),
     ));
     let tool_execution_gate = Arc::new(tokio::sync::RwLock::new(()));
-    let tool_execution_tracker = Arc::new(ToolExecutionTracker::default());
+    let tool_execution_tracker = sess.services.code_mode_service.tool_execution_tracker();
 
     // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
     // one instance across retries within this turn.
@@ -430,15 +431,6 @@ pub(crate) async fn run_turn(
             sess.record_reasoning_effort_override(step_context.as_ref())
                 .await;
 
-            // Construct the input that we will send to the model.
-            let sampling_request_input: Vec<ResponseItem> = async {
-                sess.clone_history()
-                    .await
-                    .for_prompt(&step_context.settings.model_info.input_modalities)
-            }
-            .instrument(trace_span!("run_turn.prepare_sampling_request_input"))
-            .await;
-
             let responses_metadata = sess
                 .responses_metadata(turn_context.as_ref(), CodexResponsesRequestKind::Turn)
                 .await;
@@ -451,7 +443,6 @@ pub(crate) async fn run_turn(
                 Arc::clone(&tool_execution_tracker),
                 &mut client_session,
                 &responses_metadata,
-                sampling_request_input,
                 cancellation_token.child_token(),
             )
             .await
@@ -1444,7 +1435,6 @@ async fn run_sampling_request(
     tool_execution_tracker: Arc<ToolExecutionTracker>,
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
-    input: Vec<ResponseItem>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
     let turn_context = Arc::clone(&step_context.turn);
@@ -1461,11 +1451,9 @@ async fn run_sampling_request(
         &sess,
         Arc::clone(&step_context),
         Arc::clone(&turn_diff_tracker),
-        tool_execution_tracker,
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
     let mut retry_state = ResponsesStreamRetryState::default();
-    let mut initial_input = Some(input);
     let mut original_input = None;
     let mut executed_tool_calls_by_output = HashMap::new();
     loop {
@@ -1473,13 +1461,17 @@ async fn run_sampling_request(
         turn_context
             .extension_data
             .remove::<codex_api::ResponseId>();
-        let prompt_input = if let Some(input) = initial_input.take() {
-            input
-        } else {
+        // Hold the exclusive barrier from the history snapshot through request startup. Tool
+        // calls hold shared permits for their complete lifetime, so this waits for every result
+        // and prevents a new call from crossing the serialization boundary.
+        let serialization_guard = tool_runtime.block_tools_for_serialization().await;
+        let prompt_input = async {
             sess.clone_history()
                 .await
                 .for_prompt(&step_context.settings.model_info.input_modalities)
-        };
+        }
+        .instrument(trace_span!("run_turn.prepare_sampling_request_input"))
+        .await;
         let mut prompt_input = prompt_input;
         if let Some(executed_tool_calls) = sess.services.executed_tool_calls.as_ref()
             && executed_tool_calls
@@ -1501,6 +1493,7 @@ async fn run_sampling_request(
             responses_metadata,
             Arc::clone(&turn_diff_tracker),
             &prompt,
+            serialization_guard,
             cancellation_token.child_token(),
         )
         .await
@@ -2304,6 +2297,7 @@ async fn try_run_sampling_request(
     responses_metadata: &CodexResponsesMetadata,
     turn_diff_tracker: SharedTurnDiffTracker,
     prompt: &Prompt,
+    serialization_guard: ToolSerializationGuard,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
     let turn_context = Arc::clone(&step_context.turn);
@@ -2326,7 +2320,6 @@ async fn try_run_sampling_request(
         .features
         .enabled(Feature::ConcurrentReasoningSummaries)
         && turn_context.provider.info().is_openai();
-    tool_runtime.wait_for_all_tools().await;
     sess.send_event(
         &turn_context,
         EventMsg::ModelRequestProgress(ModelRequestProgressEvent {
@@ -2350,6 +2343,7 @@ async fn try_run_sampling_request(
         .instrument(trace_span!("stream_request"))
         .or_cancel(&cancellation_token)
         .await??;
+    drop(serialization_guard);
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
     let mut sent_bytes = 0_u64;
     let mut needs_follow_up = false;

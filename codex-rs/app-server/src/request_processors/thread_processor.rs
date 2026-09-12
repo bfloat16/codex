@@ -2254,7 +2254,7 @@ impl ThreadRequestProcessor {
             ..
         } = self
             .thread_manager
-            .resume_thread_with_history(
+            .reload_thread_with_history(
                 config,
                 thread_history,
                 self.auth_manager.clone(),

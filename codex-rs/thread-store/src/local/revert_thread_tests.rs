@@ -95,6 +95,16 @@ async fn revert_keeps_thread_id_and_rollout_path_across_repeated_reverts() {
     assert_eq!(reverted_meta.id, thread_id);
     assert_eq!(reverted_meta.memory_mode, None);
     assert_eq!(turn_ids(&store, thread_id).await, vec!["turn-1"]);
+    let projection = super::super::thread_history::projection_state(&store, thread_id)
+        .await
+        .expect("read truncated projection")
+        .expect("truncated projection should remain materialized");
+    assert_eq!(
+        projection.next_byte_offset,
+        std::fs::metadata(&original_path)
+            .expect("read reverted rollout metadata")
+            .len()
+    );
 
     store
         .revert_thread(RevertThreadParams {

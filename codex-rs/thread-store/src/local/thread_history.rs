@@ -294,6 +294,109 @@ pub(super) async fn reset_projection(
         .map_err(thread_history_delete_error)
 }
 
+/// Drops the suffix of an already materialized rollout without reparsing its retained prefix.
+///
+/// Returns `false` when an older row was updated by the removed suffix. That uncommon shape needs
+/// a full projection rebuild because SQLite stores only the latest snapshot of each row.
+pub(super) async fn truncate_projection(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    next_byte_offset: u64,
+    next_ordinal: i64,
+) -> ThreadStoreResult<bool> {
+    let db_path = store.config.sqlite.thread_history_db_path();
+    if !tokio::fs::try_exists(db_path.as_path())
+        .await
+        .map_err(thread_history_delete_error)?
+    {
+        return Ok(false);
+    }
+
+    let pool = store.thread_history_db().await?;
+    let mut transaction = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(thread_history_delete_error)?;
+    let thread_id = thread_id.to_string();
+    let has_cross_boundary_updates = sqlx::query_scalar::<_, bool>(
+        r#"
+SELECT EXISTS (
+    SELECT 1
+    FROM thread_turns
+    WHERE thread_id = ?
+      AND rollout_ordinal < ?
+      AND rollout_end_ordinal >= ?
+    UNION ALL
+    SELECT 1
+    FROM thread_items
+    WHERE thread_id = ?
+      AND rollout_ordinal < ?
+      AND updated_at_ordinal >= ?
+)
+        "#,
+    )
+    .bind(thread_id.as_str())
+    .bind(next_ordinal)
+    .bind(next_ordinal)
+    .bind(thread_id.as_str())
+    .bind(next_ordinal)
+    .bind(next_ordinal)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(thread_history_delete_error)?;
+    if has_cross_boundary_updates {
+        transaction
+            .rollback()
+            .await
+            .map_err(thread_history_delete_error)?;
+        return Ok(false);
+    }
+
+    sqlx::query("DELETE FROM thread_realtime_items WHERE thread_id = ? AND rollout_ordinal >= ?")
+        .bind(thread_id.as_str())
+        .bind(next_ordinal)
+        .execute(&mut *transaction)
+        .await
+        .map_err(thread_history_delete_error)?;
+    sqlx::query("DELETE FROM thread_items WHERE thread_id = ? AND rollout_ordinal >= ?")
+        .bind(thread_id.as_str())
+        .bind(next_ordinal)
+        .execute(&mut *transaction)
+        .await
+        .map_err(thread_history_delete_error)?;
+    sqlx::query("DELETE FROM thread_turns WHERE thread_id = ? AND rollout_ordinal >= ?")
+        .bind(thread_id.as_str())
+        .bind(next_ordinal)
+        .execute(&mut *transaction)
+        .await
+        .map_err(thread_history_delete_error)?;
+    let updated = sqlx::query(
+        r#"
+UPDATE thread_history_projection_state
+SET next_rollout_byte_offset = ?, next_rollout_ordinal = ?
+WHERE thread_id = ?
+        "#,
+    )
+    .bind(sqlite_integer(next_byte_offset, "rollout byte offset")?)
+    .bind(next_ordinal)
+    .bind(thread_id.as_str())
+    .execute(&mut *transaction)
+    .await
+    .map_err(thread_history_delete_error)?;
+    if updated.rows_affected() == 0 {
+        transaction
+            .rollback()
+            .await
+            .map_err(thread_history_delete_error)?;
+        return Ok(false);
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(thread_history_delete_error)?;
+    Ok(true)
+}
+
 async fn apply_change_set(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     thread_id: &str,

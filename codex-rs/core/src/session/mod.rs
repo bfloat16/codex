@@ -1442,12 +1442,18 @@ impl Session {
                     .apply_rollout_reconstruction(&turn_context, &rollout_items)
                     .await;
 
-                // If resuming, warn when the last recorded model differs from the current one.
+                // Internal runtime reloads (for example, thread/revert) are not user resumes and
+                // must not repeat a warning that was already evaluated when the session opened.
                 let curr: &str = turn_context.model_info().slug.as_str();
-                if let Some(prev) = previous_turn_settings
-                    .as_ref()
-                    .map(|settings| settings.model.as_str())
-                    .filter(|model| *model != curr)
+                if self
+                    .services
+                    .thread_extension_data
+                    .get::<crate::thread_manager::SuppressResumeModelWarning>()
+                    .is_none()
+                    && let Some(prev) = previous_turn_settings
+                        .as_ref()
+                        .map(|settings| settings.model.as_str())
+                        .filter(|model| *model != curr)
                 {
                     warn!("resuming session with different model: previous={prev}, current={curr}");
                     self.send_event(

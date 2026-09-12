@@ -51,6 +51,77 @@ use tokio::time::timeout;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+#[tokio::test]
+async fn thread_revert_does_not_emit_resume_model_warning() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    let config = load_default_config_for_test(&codex_home).await;
+    let current_model =
+        codex_core::test_support::construct_model_info_offline("current-model", &config);
+    let previous_model =
+        codex_core::test_support::construct_model_info_offline("previous-model", &config);
+    write_models_cache_with_models(codex_home.path(), vec![current_model, previous_model])?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build()
+        .await?;
+    initialize_experimental(&mut mcp).await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("current-model".to_string()),
+            history_mode: Some(ThreadHistoryMode::Paginated),
+            ..Default::default()
+        })
+        .await?;
+    mcp.start_turn_and_wait_for_completion(TurnStartParams {
+        thread_id: thread.id.clone(),
+        input: vec![UserInput::Text {
+            text: "retained turn".to_string(),
+            text_elements: Vec::new(),
+        }],
+        collaboration_mode: Some(CollaborationMode {
+            mode: ModeKind::Default,
+            settings: Settings {
+                model: "previous-model".to_string(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        }),
+        ..Default::default()
+    })
+    .await?;
+    let removed = mcp
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "/compact".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    mcp.clear_message_buffer();
+
+    let _: ThreadRevertResponse = mcp
+        .request(|request_id| ClientRequest::ThreadRevert {
+            request_id,
+            params: ThreadRevertParams {
+                thread_id: thread.id,
+                before_turn_id: removed.turn.id,
+            },
+        })
+        .await?;
+
+    assert!(
+        !mcp.pending_notification_methods()
+            .iter()
+            .any(|method| method == "warning"),
+        "internal thread reload must not be presented as a user resume"
+    );
+    Ok(())
+}
+
 #[test_case::test_case(false; "live_reload")]
 #[test_case::test_case(true; "cold_resume")]
 #[tokio::test]

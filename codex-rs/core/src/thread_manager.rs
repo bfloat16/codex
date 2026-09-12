@@ -245,6 +245,14 @@ pub struct StartThreadOptions {
     pub reserved_thread_id: Option<ThreadId>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ResumeStartup {
+    User,
+    InternalReload,
+}
+
+pub(crate) struct SuppressResumeModelWarning;
+
 impl StartThreadOptions {
     pub fn new(config: Config) -> Self {
         Self {
@@ -1134,6 +1142,49 @@ impl ThreadManager {
         parent_trace: Option<W3cTraceContext>,
         client_mcp_extensions: ClientMcpExtensions,
     ) -> CodexResult<NewThread> {
+        self.resume_thread_with_history_for_startup(
+            config,
+            initial_history,
+            auth_manager,
+            parent_trace,
+            client_mcp_extensions,
+            ResumeStartup::User,
+        )
+        .await
+    }
+
+    /// Rebuilds a loaded thread after an internal storage mutation.
+    ///
+    /// Unlike a user-requested resume, this does not repeat warnings that describe the session as
+    /// newly resumed. The reconstructed history and all other startup behavior remain unchanged.
+    pub async fn reload_thread_with_history(
+        &self,
+        config: Config,
+        initial_history: InitialHistory,
+        auth_manager: Arc<AuthManager>,
+        parent_trace: Option<W3cTraceContext>,
+        client_mcp_extensions: ClientMcpExtensions,
+    ) -> CodexResult<NewThread> {
+        self.resume_thread_with_history_for_startup(
+            config,
+            initial_history,
+            auth_manager,
+            parent_trace,
+            client_mcp_extensions,
+            ResumeStartup::InternalReload,
+        )
+        .await
+    }
+
+    async fn resume_thread_with_history_for_startup(
+        &self,
+        config: Config,
+        initial_history: InitialHistory,
+        auth_manager: Arc<AuthManager>,
+        parent_trace: Option<W3cTraceContext>,
+        client_mcp_extensions: ClientMcpExtensions,
+        startup: ResumeStartup,
+    ) -> CodexResult<NewThread> {
         let agent_control = self.agent_control_for_config(&config);
         let (session_source, thread_source) = initial_history
             .get_resumed_session_sources()
@@ -1146,7 +1197,7 @@ impl ThreadManager {
                 .restore_v2_agent_metadata(&config, resumed.conversation_id)
                 .await;
         }
-        let options = StartThreadOptions {
+        let mut options = StartThreadOptions {
             initial_history,
             session_source: Some(session_source),
             thread_source,
@@ -1154,6 +1205,11 @@ impl ThreadManager {
             client_mcp_extensions,
             ..StartThreadOptions::new(config)
         };
+        if startup == ResumeStartup::InternalReload {
+            options
+                .thread_extension_init
+                .insert(SuppressResumeModelWarning);
+        }
         Box::pin(self.state.spawn_thread(ThreadSpawnRequest::new(
             options,
             auth_manager,

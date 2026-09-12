@@ -103,7 +103,7 @@ pub(super) async fn revert(
         .map_err(|err| ThreadStoreError::Internal {
             message: format!("failed to materialize rollout for revert: {err}"),
         })?;
-    thread_history::reset_projection(store, current_rollout.rollout_id).await?;
+    let mut projection_truncated = false;
     if target.rollout_id == current_rollout.rollout_id {
         if should_update_multi_agent_version {
             let mut retained_bytes = tokio::fs::read(source_path.as_path())
@@ -133,6 +133,13 @@ pub(super) async fn revert(
                 .await
                 .map_err(thread_store_io_error)?;
         } else {
+            projection_truncated = thread_history::truncate_projection(
+                store,
+                current_rollout.rollout_id,
+                truncate_at,
+                target.rollout_ordinal,
+            )
+            .await?;
             let file = tokio::fs::OpenOptions::new()
                 .write(true)
                 .open(source_path.as_path())
@@ -174,12 +181,15 @@ pub(super) async fn revert(
             .await
             .map_err(thread_store_io_error)?;
     }
-    super::thread_history_materialization::materialize_to_sqlite(
-        store,
-        current_rollout.rollout_id,
-        source_path.as_path(),
-    )
-    .await?;
+    if !projection_truncated {
+        thread_history::reset_projection(store, current_rollout.rollout_id).await?;
+        super::thread_history_materialization::materialize_to_sqlite(
+            store,
+            current_rollout.rollout_id,
+            source_path.as_path(),
+        )
+        .await?;
+    }
 
     if expected_sqlite_path != source_path {
         let replaced = state_db
