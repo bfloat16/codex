@@ -605,6 +605,7 @@ impl ThreadHistoryBuilder {
             codex_protocol::items::TurnItem::HookPrompt(_)
             | codex_protocol::items::TurnItem::FunctionCallOutput(_)
             | codex_protocol::items::TurnItem::CommandExecution(_)
+            | codex_protocol::items::TurnItem::FileChange(_)
             | codex_protocol::items::TurnItem::DynamicToolCall(_)
             | codex_protocol::items::TurnItem::CollabAgentToolCall(_)
             | codex_protocol::items::TurnItem::SubAgentActivity(_)
@@ -617,7 +618,6 @@ impl ThreadHistoryBuilder {
             | codex_protocol::items::TurnItem::WebSearch(_)
             | codex_protocol::items::TurnItem::ImageView(_)
             | codex_protocol::items::TurnItem::ImageGeneration(_)
-            | codex_protocol::items::TurnItem::FileChange(_)
             | codex_protocol::items::TurnItem::McpToolCall(_)
             | codex_protocol::items::TurnItem::ContextCompaction(_) => false,
         };
@@ -1669,6 +1669,7 @@ mod tests {
     use codex_protocol::items::CommandExecutionStatus as CoreCommandExecutionStatus;
     use codex_protocol::items::EnteredReviewModeItem as CoreEnteredReviewModeItem;
     use codex_protocol::items::ExitedReviewModeItem as CoreExitedReviewModeItem;
+    use codex_protocol::items::FileChangeItem as CoreFileChangeItem;
     use codex_protocol::items::HookPromptFragment as CoreHookPromptFragment;
     use codex_protocol::items::SubAgentActivityItem as CoreSubAgentActivityItem;
     use codex_protocol::items::TurnItem as CoreTurnItem;
@@ -1971,6 +1972,75 @@ mod tests {
                     review: REVIEW_FALLBACK_MESSAGE.into(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn canonical_file_change_completion_reconstructs_without_legacy_patch_events() {
+        let file_change = CoreTurnItem::FileChange(CoreFileChangeItem {
+            id: "exec-file-change".into(),
+            changes: [(
+                std::path::PathBuf::from("src/lib.rs"),
+                codex_protocol::protocol::FileChange::Update {
+                    unified_diff: "@@ -1 +1 @@\n-old\n+new\n".into(),
+                    move_path: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            status: Some(CorePatchApplyStatus::Completed),
+            auto_approved: None,
+            stdout: None,
+            stderr: None,
+        });
+        let items = vec![
+            RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: "turn-custom-exec".into(),
+                trace_id: None,
+                started_at: None,
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            })),
+            RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+                thread_id: ThreadId::new(),
+                turn_id: "turn-custom-exec".into(),
+                item: file_change,
+                started_at_ms: Some(10),
+                completed_at_ms: 20,
+            })),
+            RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                turn_id: "turn-custom-exec".into(),
+                started_at: None,
+                last_agent_message: None,
+                error: None,
+                completed_at: None,
+                duration_ms: None,
+                time_to_first_token_ms: None,
+            })),
+        ];
+
+        let turns = build_turns_from_rollout_items(&items);
+
+        assert_eq!(
+            turns,
+            vec![Turn {
+                id: "turn-custom-exec".into(),
+                items: vec![ThreadItem::FileChange {
+                    id: "exec-file-change".into(),
+                    changes: vec![FileUpdateChange {
+                        path: "src/lib.rs".into(),
+                        kind: PatchChangeKind::Update { move_path: None },
+                        diff: "@@ -1 +1 @@\n-old\n+new\n".into(),
+                    }],
+                    status: PatchApplyStatus::Completed,
+                }],
+                items_view: TurnItemsView::Full,
+                status: TurnStatus::Completed,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            }]
         );
     }
 
