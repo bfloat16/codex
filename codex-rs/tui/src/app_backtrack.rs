@@ -509,8 +509,9 @@ impl App {
 /// bindings. Counting from the end keeps the selection stable when the TUI has loaded only a suffix
 /// of the persisted history or has inserted a newer session header.
 ///
-/// A turn can contain multiple user messages when it was steered. Only its initial prompt can be
-/// reopened independently because app-server cannot roll back in the middle of a turn.
+/// A turn can contain multiple user messages when it was steered. Selecting a steer rolls back the
+/// containing turn, since app-server cannot roll back in the middle of a turn, and restores the
+/// selected prompt in the composer for editing.
 pub(crate) fn backtrack_rollback_target(
     turns: &[Turn],
     newer_user_messages: usize,
@@ -523,7 +524,6 @@ pub(crate) fn backtrack_rollback_target(
             .checked_sub(/*rhs*/ 1)
             .and_then(|index| turns.get(index))
             .is_some_and(|previous| is_hidden_nested_review_turn(previous, turn));
-        let mut user_messages_in_turn = 0_usize;
         for item in &turn.items {
             let content = match item {
                 ThreadItem::EnteredReviewMode { .. } => {
@@ -537,8 +537,6 @@ pub(crate) fn backtrack_rollback_target(
                 ThreadItem::UserMessage { content, .. } => content,
                 _ => continue,
             };
-            let is_steer = user_messages_in_turn > 0;
-            user_messages_in_turn = user_messages_in_turn.saturating_add(/*rhs*/ 1);
             if review_mode {
                 continue;
             }
@@ -554,12 +552,11 @@ pub(crate) fn backtrack_rollback_target(
             {
                 continue;
             }
-            visible_user_messages.push((turn_index, is_steer, content));
+            visible_user_messages.push((turn_index, content));
         }
     }
 
-    let Some(&(turn_index, is_steer, content)) =
-        visible_user_messages.iter().rev().nth(newer_user_messages)
+    let Some(&(turn_index, content)) = visible_user_messages.iter().rev().nth(newer_user_messages)
     else {
         bail!("the selected prompt was not found in the persisted thread");
     };
@@ -572,9 +569,6 @@ pub(crate) fn backtrack_rollback_target(
         || !selected_local_images.eq(display.local_images.iter())
     {
         bail!("the selected transcript prompt no longer matches the persisted thread");
-    }
-    if is_steer {
-        bail!("the selected prompt is a steer and cannot be rolled back independently");
     }
     if matches!(turn.status, TurnStatus::InProgress) {
         bail!("the selected prompt belongs to a turn that is still in progress");
@@ -840,23 +834,24 @@ mod tests {
     }
 
     #[test]
-    fn backtrack_rollback_target_rejects_mid_turn_steers() {
+    fn backtrack_rollback_target_resolves_mid_turn_steers_at_turn_boundary() {
         let turns = vec![turn(
             "turn-1",
             TurnStatus::Completed,
             /*user_messages*/ 2,
         )];
 
-        let error = backtrack_rollback_target(
-            &turns,
-            /*newer_user_messages*/ 0,
-            &mut prompt("turn-1-prompt-1"),
-        )
-        .expect_err("a steer cannot be rolled back independently");
-
         assert_eq!(
-            error.to_string(),
-            "the selected prompt is a steer and cannot be rolled back independently"
+            backtrack_rollback_target(
+                &turns,
+                /*newer_user_messages*/ 0,
+                &mut prompt("turn-1-prompt-1"),
+            )
+            .expect("a steer should roll back at its containing turn boundary"),
+            BacktrackRollbackTarget {
+                before_turn_id: "turn-1".to_string(),
+                legacy_num_turns: 2,
+            }
         );
     }
 
