@@ -31,6 +31,10 @@ impl ChatWidget {
         };
         let (_command, parsed_cmd) = command_execution_command_and_parsed(command, command_actions);
         self.flush_answer_stream_with_separator();
+        if *source == ExecCommandSource::Agent && self.bottom_pane.is_task_running() {
+            self.bottom_pane.ensure_status_indicator();
+            self.begin_waiting(format!("command:{id}"));
+        }
         if is_unified_exec_source(*source) {
             if *source == ExecCommandSource::UnifiedExecStartup {
                 self.track_unified_exec_process_begin(id, process_id.as_deref(), command);
@@ -141,6 +145,7 @@ impl ChatWidget {
         else {
             return;
         };
+        self.finish_waiting(&format!("command:{id}"));
         if is_unified_exec_source(*source) {
             let render_after_interrupt = self.interrupted_unified_exec_calls.remove(id);
             if let Some(process_id) = process_id.as_deref()

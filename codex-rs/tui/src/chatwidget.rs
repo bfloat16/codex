@@ -666,6 +666,8 @@ pub(crate) struct ChatWidget {
     newly_installed_marketplace_tab_id: Option<String>,
     // Queue of interruptive UI events deferred during an active write cycle
     interrupts: InterruptManager,
+    /// Identifiers for tool calls and interactive requests currently blocking progress.
+    waiting_items: HashSet<String>,
     // Accumulates the current reasoning block text to extract a header
     reasoning_buffer: String,
     // Caches the first completed bold header so later deltas do not rescan the whole block.
@@ -1031,6 +1033,23 @@ impl ChatWidget {
             ResolvedAppServerRequest::UserInput { .. }
             | ResolvedAppServerRequest::McpElicitation { .. } => None,
         };
+        match request {
+            ResolvedAppServerRequest::ExecApproval { id, .. } => {
+                self.finish_waiting_request("exec", id);
+            }
+            ResolvedAppServerRequest::FileChangeApproval { id, .. } => {
+                self.finish_waiting_request("patch", id);
+            }
+            ResolvedAppServerRequest::PermissionsApproval { id, .. } => {
+                self.finish_waiting_request("permissions", id);
+            }
+            ResolvedAppServerRequest::UserInput { call_id } => {
+                self.finish_waiting_request("user-input", call_id);
+            }
+            ResolvedAppServerRequest::McpElicitation { request_id, .. } => {
+                self.finish_waiting_request("mcp-elicitation", &request_id.to_string());
+            }
+        }
         let removed_deferred = request_thread_id.is_none_or(|request_thread_id| {
             self.thread_id
                 .is_some_and(|thread_id| thread_id.to_string() == request_thread_id)

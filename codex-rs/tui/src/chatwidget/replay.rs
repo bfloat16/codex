@@ -119,6 +119,9 @@ impl ChatWidget {
     ) {
         let from_replay = render_source.is_replay();
         let replay_kind = render_source.replay_kind();
+        if let ThreadItem::FileChange { id, .. } = &item {
+            self.finish_waiting(&format!("patch:{id}"));
+        }
         match item {
             ThreadItem::UserMessage {
                 content, client_id, ..
@@ -308,7 +311,7 @@ impl ChatWidget {
             }),
             item @ ThreadItem::SubAgentActivity { .. } => self.on_sub_agent_activity(item),
             ThreadItem::DynamicToolCall { .. } => {}
-            ThreadItem::Sleep(_) => {}
+            ThreadItem::Sleep(item) => self.finish_waiting(&format!("sleep:{}", item.id)),
         }
 
         if matches!(replay_kind, Some(ReplayKind::ThreadSnapshot)) && turn_id.is_empty() {

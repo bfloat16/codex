@@ -178,6 +178,7 @@ pub(super) struct StatusState {
     pub(super) active_compaction: Option<CompactionStatusKind>,
     pub(super) pre_compaction_status: Option<StatusIndicatorState>,
     pub(super) pending_guardian_review_status: PendingGuardianReviewStatus,
+    waiting_status: Option<StatusIndicatorState>,
     pub(super) terminal_title_status_kind: TerminalTitleStatusKind,
     pub(super) retry_status_header: Option<String>,
     pub(super) pending_status_indicator_restore: bool,
@@ -193,6 +194,7 @@ impl Default for StatusState {
             active_compaction: None,
             pre_compaction_status: None,
             pending_guardian_review_status: PendingGuardianReviewStatus::default(),
+            waiting_status: None,
             terminal_title_status_kind: TerminalTitleStatusKind::Working,
             retry_status_header: None,
             pending_status_indicator_restore: false,
@@ -204,7 +206,29 @@ impl Default for StatusState {
 
 impl StatusState {
     pub(super) fn set_status(&mut self, status: StatusIndicatorState) {
-        self.current_status = status;
+        if self.waiting_status.is_some() && status.header != "Waiting" {
+            self.waiting_status = Some(status);
+        } else if self.waiting_status.is_none() {
+            self.current_status = status;
+        }
+    }
+
+    pub(super) fn begin_waiting(&mut self) -> StatusIndicatorState {
+        if self.waiting_status.is_none() {
+            self.waiting_status = Some(self.current_status.clone());
+        }
+        self.current_status = StatusIndicatorState {
+            header: String::from("Waiting"),
+            details: None,
+            details_max_lines: STATUS_DETAILS_DEFAULT_MAX_LINES,
+        };
+        self.current_status.clone()
+    }
+
+    pub(super) fn finish_waiting(&mut self) -> Option<StatusIndicatorState> {
+        let previous = self.waiting_status.take()?;
+        self.current_status = previous.clone();
+        Some(previous)
     }
 
     pub(super) fn begin_compaction(&mut self, kind: CompactionStatusKind) {
@@ -277,5 +301,28 @@ mod tests {
             Some("Thinking".to_string())
         );
         assert_eq!(state.take_retry_status_header(), None);
+    }
+
+    #[test]
+    fn waiting_status_restores_updates_after_all_waiters_finish() {
+        let mut state = StatusState::default();
+        state.current_status.header = "Thinking".to_string();
+
+        assert_eq!(state.begin_waiting().header, "Waiting");
+        state.set_status(StatusIndicatorState {
+            header: "Checking files".to_string(),
+            details: None,
+            details_max_lines: 1,
+        });
+        assert_eq!(state.current_status.header, "Waiting");
+        assert_eq!(
+            state.finish_waiting(),
+            Some(StatusIndicatorState {
+                header: "Checking files".to_string(),
+                details: None,
+                details_max_lines: 1,
+            })
+        );
+        assert_eq!(state.current_status.header, "Checking files");
     }
 }

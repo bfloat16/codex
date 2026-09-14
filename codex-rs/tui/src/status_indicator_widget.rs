@@ -12,6 +12,7 @@ use std::time::Instant;
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
@@ -237,6 +238,7 @@ impl StatusIndicator<'_> {
         );
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
         let motion_mode = MotionMode::from_animations_enabled(row.animations_enabled);
+        let waiting = row.header == "Waiting";
 
         let mut spans = Vec::with_capacity(9);
         if let Some(indicator) = activity_indicator(
@@ -244,10 +246,20 @@ impl StatusIndicator<'_> {
             motion_mode,
             ReducedMotionIndicator::Hidden,
         ) {
-            spans.push(Span::styled("●", indicator.style));
+            let indicator = Span::styled("●", indicator.style);
+            spans.push(if waiting {
+                waiting_span(indicator)
+            } else {
+                indicator
+            });
             spans.push(" ".into());
         }
-        spans.extend(shimmer_text(&row.header, motion_mode));
+        let header_spans = shimmer_text(&row.header, motion_mode);
+        if waiting {
+            spans.extend(header_spans.into_iter().map(waiting_span));
+        } else {
+            spans.extend(header_spans);
+        }
         if !spans.is_empty() {
             spans.push(" ".into());
         }
@@ -311,6 +323,11 @@ impl StatusIndicator<'_> {
         lines.extend(row.wrapped_details_lines(width));
         lines
     }
+}
+
+fn waiting_span(mut span: Span<'static>) -> Span<'static> {
+    span.style = span.style.fg(Color::Yellow);
+    span
 }
 
 impl Renderable for StatusIndicator<'_> {
@@ -494,6 +511,34 @@ mod tests {
             .collect::<String>();
 
         assert!(line.starts_with("Working (0s • esc to interrupt)"));
+    }
+
+    #[test]
+    fn renders_waiting_header_in_yellow() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut widget = StatusIndicatorWidget::new(
+            tx,
+            crate::tui::FrameRequester::test_dummy(),
+            /*animations_enabled*/ false,
+        );
+        widget.update_header("Waiting".to_string());
+        let mut timer = StatusTimer::default();
+        timer.pause_at(timer.last_resume_at);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 1)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                widget
+                    .with_timer(&timer)
+                    .render(frame.area(), frame.buffer_mut())
+            })
+            .expect("draw");
+
+        insta::assert_snapshot!(terminal.backend());
+        let cell = &terminal.backend().buffer()[(0, 0)];
+        assert_eq!(cell.symbol(), "W");
+        assert_eq!(cell.fg, ratatui::style::Color::Yellow);
     }
 
     #[test]

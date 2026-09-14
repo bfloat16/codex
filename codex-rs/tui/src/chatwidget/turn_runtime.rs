@@ -74,6 +74,7 @@ impl ChatWidget {
     // Raw reasoning uses the same flow as summarized reasoning
 
     pub(super) fn on_task_started(&mut self) {
+        self.clear_waiting();
         self.clear_context_compaction();
         self.output_free_interrupt_turn_id = None;
         self.input_queue.user_turn_pending_start = false;
@@ -194,6 +195,7 @@ impl ChatWidget {
         }
         // Mark task stopped and request redraw now that all content is in history.
         self.clear_context_compaction();
+        self.clear_waiting();
         self.status_state.pending_status_indicator_restore = false;
         self.finish_compaction_status();
         self.input_queue.user_turn_pending_start = false;
@@ -333,6 +335,7 @@ impl ChatWidget {
     /// and should continue to drive the bottom-pane running indicator while it is in progress.
     pub(super) fn finalize_turn(&mut self) {
         self.clear_context_compaction();
+        self.clear_waiting();
         self.clear_safety_buffering();
         // Drop preview-only stream tail content on any termination path before
         // failed-cell finalization, so transient tail cells are never persisted.

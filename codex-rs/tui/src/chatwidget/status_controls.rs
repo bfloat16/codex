@@ -24,7 +24,7 @@ impl ChatWidget {
         if self
             .status_state
             .active_compaction
-            .is_some_and(|kind| header != kind.header())
+            .is_some_and(|kind| header != kind.header() && header != "Waiting")
         {
             return false;
         }
@@ -76,6 +76,56 @@ impl ChatWidget {
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         )
+    }
+
+    pub(super) fn begin_waiting(&mut self, item_id: impl Into<String>) {
+        if !self.waiting_items.insert(item_id.into()) || self.waiting_items.len() != 1 {
+            return;
+        }
+        let status = self.status_state.begin_waiting();
+        self.set_status(
+            status.header,
+            status.details,
+            StatusDetailsCapitalization::Preserve,
+            status.details_max_lines,
+        );
+    }
+
+    pub(super) fn begin_waiting_request(&mut self, kind: &str, request_id: &str) {
+        self.begin_waiting(format!("request:{kind}:{request_id}"));
+    }
+
+    pub(super) fn finish_waiting_request(&mut self, kind: &str, request_id: &str) {
+        let item_id = format!("request:{kind}:{request_id}");
+        self.finish_waiting(&item_id);
+    }
+
+    pub(super) fn finish_waiting(&mut self, item_id: &str) {
+        if !self.waiting_items.remove(item_id) || !self.waiting_items.is_empty() {
+            return;
+        }
+        let Some(status) = self.status_state.finish_waiting() else {
+            return;
+        };
+        self.set_status(
+            status.header,
+            status.details,
+            StatusDetailsCapitalization::Preserve,
+            status.details_max_lines,
+        );
+    }
+
+    pub(super) fn clear_waiting(&mut self) {
+        self.waiting_items.clear();
+        let Some(status) = self.status_state.finish_waiting() else {
+            return;
+        };
+        self.set_status(
+            status.header,
+            status.details,
+            StatusDetailsCapitalization::Preserve,
+            status.details_max_lines,
+        );
     }
 
     pub(super) fn start_compaction_status(&mut self) {

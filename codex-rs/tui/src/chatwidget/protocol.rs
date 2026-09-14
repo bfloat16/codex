@@ -422,8 +422,12 @@ impl ChatWidget {
                 self.on_context_compaction_started(id, elapsed);
             }
             item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_started(item),
-            ThreadItem::FileChange { id: _, changes, .. } => {
+            ThreadItem::FileChange { id, changes, .. } => {
                 self.on_patch_apply_begin(file_update_changes_to_display(changes));
+                if replay_kind.is_none() && self.bottom_pane.is_task_running() {
+                    self.bottom_pane.ensure_status_indicator();
+                    self.begin_waiting(format!("patch:{id}"));
+                }
             }
             item @ ThreadItem::McpToolCall { .. } => self.on_mcp_tool_call_started(item),
             ThreadItem::WebSearch(item) => {
@@ -431,6 +435,12 @@ impl ChatWidget {
             }
             ThreadItem::ImageGeneration(_) => {
                 self.on_image_generation_begin();
+            }
+            ThreadItem::Sleep(item)
+                if replay_kind.is_none() && self.bottom_pane.is_task_running() =>
+            {
+                self.bottom_pane.ensure_status_indicator();
+                self.begin_waiting(format!("sleep:{}", item.id));
             }
             ThreadItem::CollabAgentToolCall {
                 id,

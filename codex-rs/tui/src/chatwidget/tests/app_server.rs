@@ -951,6 +951,7 @@ async fn live_app_server_sub_agent_activity_renders_once() {
 #[tokio::test]
 async fn live_app_server_collab_wait_items_render_history() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
     let sender_thread_id =
         ThreadId::from_string("019cff70-2599-75e2-af72-b90000000001").expect("valid thread id");
     let receiver_thread_id =
@@ -990,6 +991,12 @@ async fn live_app_server_collab_wait_items_render_history() {
         }),
         /*replay_kind*/ None,
     );
+    assert_eq!(
+        chat.bottom_pane
+            .status_widget()
+            .map(crate::status_indicator_widget::StatusIndicatorWidget::header),
+        Some("Waiting")
+    );
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
@@ -1027,6 +1034,12 @@ async fn live_app_server_collab_wait_items_render_history() {
             },
         }),
         /*replay_kind*/ None,
+    );
+    assert_eq!(
+        chat.bottom_pane
+            .status_widget()
+            .map(crate::status_indicator_widget::StatusIndicatorWidget::header),
+        Some("Working")
     );
 
     let combined = drain_insert_history(&mut rx)

@@ -197,6 +197,7 @@ impl ChatWidget {
             plugins_active_tab_id: None,
             newly_installed_marketplace_tab_id: None,
             interrupts: InterruptManager::new(),
+            waiting_items: HashSet::new(),
             reasoning_buffer: String::new(),
             reasoning_header: None,
             reasoning_summary_parts: Vec::new(),
