@@ -95,6 +95,63 @@ impl ScreenTextSelection {
         }
     }
 
+    /// Select the word under a double-click, matching terminal selection semantics.
+    pub(super) fn select_word(&mut self, area: Rect, position: Position) -> Option<String> {
+        let point = local_point(area, position)?;
+        let row = self.snapshot.rows.get(usize::from(point.row))?;
+        let range = row.column_ranges.get(usize::from(point.column))?;
+        if range.start == range.end {
+            return None;
+        }
+        let ch = row.text[range.clone()].chars().next()?;
+        let class = selection_class(ch);
+        let column = usize::from(point.column);
+        let mut start = column;
+        while start > 0 {
+            let Some(previous) = row.column_ranges.get(start - 1) else {
+                break;
+            };
+            if previous.start == previous.end {
+                break;
+            }
+            let Some(previous_char) = row.text[previous.clone()].chars().next() else {
+                break;
+            };
+            if selection_class(previous_char) != class {
+                break;
+            }
+            start -= 1;
+        }
+        let mut end = column;
+        while end + 1 < row.column_ranges.len() {
+            let Some(next) = row.column_ranges.get(end + 1) else {
+                break;
+            };
+            if next.start == next.end {
+                break;
+            }
+            let Some(next_char) = row.text[next.clone()].chars().next() else {
+                break;
+            };
+            if selection_class(next_char) != class {
+                break;
+            }
+            end += 1;
+        }
+        self.anchor = Some(SelectionPoint {
+            row: point.row,
+            column: u16::try_from(start).unwrap_or(u16::MAX),
+        });
+        self.head = Some(SelectionPoint {
+            row: point.row,
+            column: u16::try_from(end).unwrap_or(u16::MAX),
+        });
+        self.pointer_down = false;
+        self.dragged = true;
+        self.completed = true;
+        self.selected_text()
+    }
+
     pub(super) fn clear(&mut self) {
         self.anchor = None;
         self.head = None;
@@ -175,6 +232,23 @@ impl ScreenTextSelection {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SelectionClass {
+    Whitespace,
+    Word,
+    Other,
+}
+
+fn selection_class(ch: char) -> SelectionClass {
+    if ch.is_whitespace() {
+        SelectionClass::Whitespace
+    } else if ch.is_alphanumeric() || "_/.-+~\\".contains(ch) {
+        SelectionClass::Word
+    } else {
+        SelectionClass::Other
+    }
+}
+
 impl ScreenSnapshot {
     fn capture(area: Rect, buffer: &Buffer) -> Self {
         let rows = (area.y..area.bottom())
@@ -242,3 +316,7 @@ pub(super) fn selection_background() -> Color {
         color => color,
     }
 }
+
+#[cfg(test)]
+#[path = "selection_tests.rs"]
+mod tests;

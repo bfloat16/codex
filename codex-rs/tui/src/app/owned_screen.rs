@@ -46,7 +46,14 @@ pub(super) struct OwnedScreen {
     last_selection_area: Rect,
     scroll_acceleration: ScrollAcceleration,
     selection: ScreenTextSelection,
+    last_click: Option<LastClick>,
     copy_notice: Option<CopyNotice>,
+}
+
+struct LastClick {
+    position: Position,
+    at: Instant,
+    count: u8,
 }
 
 struct CopyNotice {
@@ -78,6 +85,7 @@ impl OwnedScreen {
             last_selection_area: Rect::default(),
             scroll_acceleration: ScrollAcceleration::default(),
             selection: ScreenTextSelection::default(),
+            last_click: None,
             copy_notice: None,
         }
     }
@@ -164,6 +172,7 @@ impl OwnedScreen {
             return false;
         }
         self.selection.clear();
+        self.last_click = None;
         self.scroll(event.direction);
         true
     }
@@ -199,11 +208,37 @@ impl OwnedScreen {
                 match self.selection.left_up(self.last_selection_area, position) {
                     SelectionRelease::Ignored => OwnedScreenMouseAction::Ignored,
                     SelectionRelease::Click(position) => {
+                        let now = Instant::now();
+                        let click_count = self
+                            .last_click
+                            .as_ref()
+                            .filter(|last| {
+                                last.position == position
+                                    && now.saturating_duration_since(last.at)
+                                        <= Duration::from_millis(500)
+                            })
+                            .map_or(1, |last| last.count.saturating_add(1));
+                        self.last_click = Some(LastClick {
+                            position,
+                            at: now,
+                            count: click_count,
+                        });
+                        if click_count >= 2
+                            && let Some(text) = self
+                                .selection
+                                .select_word(self.last_selection_area, position)
+                        {
+                            self.last_click = None;
+                            return OwnedScreenMouseAction::Copy(text);
+                        }
                         self.viewport
                             .handle_left_click(self.last_conversation_area, position);
                         OwnedScreenMouseAction::Redraw
                     }
-                    SelectionRelease::Copy(text) => OwnedScreenMouseAction::Copy(text),
+                    SelectionRelease::Copy(text) => {
+                        self.last_click = None;
+                        OwnedScreenMouseAction::Copy(text)
+                    }
                     SelectionRelease::Redraw => OwnedScreenMouseAction::Redraw,
                 }
             }

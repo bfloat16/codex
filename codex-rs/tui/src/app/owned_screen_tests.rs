@@ -134,6 +134,43 @@ async fn renders_committed_conversation_above_fixed_composer() {
 }
 
 #[tokio::test]
+async fn double_click_selects_and_copies_a_word() {
+    let (chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
+    let mut screen = OwnedScreen::new(&chat_widget, crate::keymap::RuntimeKeymap::defaults().pager);
+    screen
+        .viewport
+        .push_cell(Arc::new(TestCell("run foo_bar --flag now")));
+    let mut terminal =
+        Terminal::new(TestBackend::new(/*width*/ 40, /*height*/ 8)).expect("create terminal");
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render double-click source");
+
+    for click in 0..2 {
+        assert!(matches!(
+            screen.handle_mouse_interaction(MouseInteractionEvent {
+                kind: MouseInteractionKind::LeftDown,
+                column: 7,
+                row: 0,
+            }),
+            OwnedScreenMouseAction::Redraw
+        ));
+        let action = screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftUp,
+            column: 7,
+            row: 0,
+        });
+        if click == 0 {
+            assert!(matches!(action, OwnedScreenMouseAction::Redraw));
+        } else {
+            assert!(matches!(action, OwnedScreenMouseAction::Copy(text) if text == "foo_bar"));
+        }
+    }
+}
+
+#[tokio::test]
 async fn patch_background_extends_past_the_reserved_wrap_width() {
     let (mut chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
     chat_widget.set_pet_image_support_for_tests(crate::pets::PetImageSupport::Supported(
