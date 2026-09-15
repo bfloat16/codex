@@ -159,7 +159,7 @@ impl App {
             profile_id,
             approval_policy,
             approvals_reviewer,
-            display_label,
+            ..
         } = selection;
         let selected_config = match self
             .rebuild_config_for_permission_profile(profile_id.as_str())
@@ -260,12 +260,6 @@ impl App {
                 /*collaboration_mode*/ None,
                 /*personality*/ None,
             )));
-        self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-            history_cell::new_info_event(
-                format!("Permissions updated to {display_label}"),
-                /*hint*/ None,
-            ),
-        )));
         true
     }
 
@@ -616,7 +610,6 @@ impl App {
         let mut permission_profile_override = None;
         let mut active_permission_profile_override = None;
         let mut feature_updates_to_apply = Vec::with_capacity(updates.len());
-        let mut permissions_history_label: Option<&'static str> = None;
         let mut config_edits = Vec::new();
 
         for (feature, enabled) in updates {
@@ -636,7 +629,6 @@ impl App {
             }
             let effective_enabled = feature_config.features.enabled(feature);
             if feature == Feature::GuardianApproval {
-                let previous_approvals_reviewer = feature_config.approvals_reviewer;
                 if effective_enabled {
                     // Persist the reviewer setting so future sessions keep the
                     // experiment's matching `/permissions` mode until the user
@@ -646,17 +638,11 @@ impl App {
                         "approvals_reviewer",
                         serde_json::json!(auto_review_preset.approvals_reviewer.to_string()),
                     ));
-                    if previous_approvals_reviewer != auto_review_preset.approvals_reviewer {
-                        permissions_history_label = Some("Approve for me");
-                    }
                 } else if !effective_enabled {
                     feature_edits.push(crate::config_update::clear_config_value(
                         "approvals_reviewer",
                     ));
                     feature_config.approvals_reviewer = ApprovalsReviewer::User;
-                    if previous_approvals_reviewer != ApprovalsReviewer::User {
-                        permissions_history_label = Some("Ask for approval");
-                    }
                 }
                 approvals_reviewer_override = Some(feature_config.approvals_reviewer);
             }
@@ -839,13 +825,6 @@ impl App {
 
         if windows_sandbox_changed {
             self.propagate_windows_sandbox_turn_context();
-        }
-
-        if let Some(label) = permissions_history_label {
-            self.chat_widget.add_info_message(
-                format!("Permissions updated to {label}"),
-                /*hint*/ None,
-            );
         }
     }
 

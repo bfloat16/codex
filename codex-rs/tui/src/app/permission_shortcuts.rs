@@ -2,6 +2,7 @@
 
 use super::*;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
+use codex_utils_approval_presets::builtin_approval_presets;
 
 impl App {
     pub(super) async fn apply_permission_shortcut(
@@ -18,6 +19,26 @@ impl App {
             return;
         }
         if self.reject_pending_permission_change() {
+            self.chat_widget.complete_permission_shortcut(thread_id);
+            return;
+        }
+        if selection.profile_id
+            == builtin_approval_presets()
+                .iter()
+                .find(|preset| preset.id == "full-access")
+                .map(|preset| preset.active_permission_profile.id.clone())
+                .unwrap_or_default()
+        {
+            if let Some(preset) = builtin_approval_presets()
+                .into_iter()
+                .find(|preset| preset.id == "full-access")
+            {
+                self.chat_widget.open_full_access_confirmation(
+                    preset,
+                    /*return_to_permissions*/ false,
+                    Some(selection),
+                );
+            }
             self.chat_widget.complete_permission_shortcut(thread_id);
             return;
         }
@@ -58,7 +79,6 @@ impl App {
             self.runtime_approval_policy_override = selection.approval_policy.map(RuntimeApprovalPolicyOverride::Explicit);
             self.runtime_permission_profile_override = Some(RuntimePermissionProfileOverride::from_config(&config));
             self.sync_active_thread_permission_settings_to_cached_session().await;
-            self.insert_history_cell(tui, Box::new(history_cell::new_info_event(format!("Permissions updated to {}", selection.display_label), /*hint*/ None)));
             Ok(())
         }.await;
         self.chat_widget.complete_permission_shortcut(thread_id);

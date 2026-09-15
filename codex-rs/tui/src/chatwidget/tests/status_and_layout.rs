@@ -2937,13 +2937,17 @@ async fn status_line_hostname_renders_current_machine_hostname() {
 async fn status_line_context_used_renders_tokens_and_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
-    chat.local_settings.tui.status_line = Some(vec!["context-used".to_string()]);
+    chat.config.model_context_window = Some(1_000_000);
+    chat.local_settings.tui.status_line = Some(vec![
+        "context-used".to_string(),
+        "context-window-size".to_string(),
+    ]);
 
     chat.refresh_status_line();
 
     assert_eq!(
         status_line_text(&chat),
-        Some("Context 0 (0%) used".to_string())
+        Some("Read Only        · Context 0 / 1000k (0%)".to_string())
     );
     assert!(
         drain_insert_history(&mut rx).is_empty(),
@@ -2955,7 +2959,7 @@ async fn status_line_context_used_renders_tokens_and_percent() {
 async fn status_line_context_usage_footer_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.show_welcome_banner = false;
-    chat.config.tui_status_line = Some(vec![
+    chat.local_settings.tui.status_line = Some(vec![
         "context-used".to_string(),
         "context-window-size".to_string(),
     ]);
@@ -2990,7 +2994,7 @@ async fn status_line_context_remaining_renders_labeled_percent() {
 
     assert_eq!(
         status_line_text(&chat),
-        Some("Context 100% left".to_string())
+        Some("Read Only        · Context 100% left".to_string())
     );
     assert!(
         drain_insert_history(&mut rx).is_empty(),
@@ -3008,7 +3012,7 @@ async fn status_line_legacy_context_usage_renders_tokens_and_percent() {
 
     assert_eq!(
         status_line_text(&chat),
-        Some("Context 0 (0%) used".to_string())
+        Some("Read Only        · Context 0 (0%) used".to_string())
     );
     assert!(
         drain_insert_history(&mut rx).is_empty(),

@@ -24,6 +24,8 @@ use codex_utils_sandbox_summary::summarize_permission_profile;
 
 use super::status_state::TerminalTitleStatusKind;
 
+const PERMISSION_STATUS_WIDTH: usize = 16;
+
 /// Items shown in the terminal title when the user has not configured a
 /// custom selection. Unnamed threads omit the name until generation starts.
 pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 3] =
@@ -201,17 +203,32 @@ impl ChatWidget {
     }
 
     fn refresh_status_line_from_selections(&mut self, selections: &StatusSurfaceSelections) {
-        let enabled = !selections.status_line_items.is_empty();
+        let enabled = true;
         self.bottom_pane.set_status_line_enabled(enabled);
-        if !enabled {
-            self.set_status_line(/*status_line*/ None);
-            self.set_status_line_hyperlink(/*url*/ None);
-            return;
-        }
 
-        let mut segments = Vec::new();
+        let show_context_window = selections
+            .status_line_items
+            .contains(&StatusLineItem::ContextUsed)
+            && selections
+                .status_line_items
+                .contains(&StatusLineItem::ContextWindowSize);
+        let mut segments = vec![(
+            StatusLineItem::Permissions,
+            self.status_line_value_for_item(StatusLineItem::Permissions)
+                .unwrap_or_default(),
+        )];
         for item in &selections.status_line_items {
-            if let Some(value) = self.status_line_value_for_item(*item) {
+            if *item == StatusLineItem::Permissions
+                || (show_context_window && *item == StatusLineItem::ContextWindowSize)
+            {
+                continue;
+            }
+            let value = if show_context_window && *item == StatusLineItem::ContextUsed {
+                self.status_line_context_used_with_window()
+            } else {
+                self.status_line_value_for_item(*item)
+            };
+            if let Some(value) = value {
                 segments.push((*item, value));
             }
         }
@@ -730,7 +747,7 @@ impl ChatWidget {
                     }
                 }),
             StatusLineItem::Status => Some(self.run_state_status_text()),
-            StatusLineItem::Permissions => Some(permissions_display(&self.config)),
+            StatusLineItem::Permissions => Some(self.permission_status_display()),
             StatusLineItem::ApprovalMode => Some(approval_mode_display(&self.config)),
             StatusLineItem::UsedTokens => {
                 let usage = self.status_line_total_usage();
@@ -826,6 +843,34 @@ impl ChatWidget {
             StatusLineItem::WorkspaceHeadline => self.status_line_workspace_headline.clone(),
             StatusLineItem::TaskProgress => self.terminal_title_task_progress(),
         }
+    }
+
+    fn status_line_context_used_with_window(&mut self) -> Option<String> {
+        let used = self.status_line_context_used_percent()?;
+        let tokens = self
+            .token_info
+            .as_ref()
+            .map(|info| info.last_token_usage.tokens_in_context_window())
+            .unwrap_or_default();
+        let window = self.status_line_context_window_size()?;
+        Some(format!(
+            "Context {} / {} ({used}%)",
+            format_tokens_in_thousands(tokens),
+            format_tokens_in_thousands(window).to_ascii_lowercase(),
+        ))
+    }
+
+    fn permission_status_display(&self) -> String {
+        let label = if self.active_mode_kind() == ModeKind::Plan {
+            "Plan".to_string()
+        } else {
+            permissions_display(&self.config)
+        };
+        let label = label
+            .chars()
+            .take(PERMISSION_STATUS_WIDTH)
+            .collect::<String>();
+        format!("{label:<width$}", width = PERMISSION_STATUS_WIDTH)
     }
 
     fn status_line_pull_request_url(&self) -> Option<String> {

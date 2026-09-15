@@ -4,7 +4,10 @@ use super::*;
 
 impl ChatWidget {
     pub(super) fn handle_permission_shortcut(&mut self, key_event: KeyEvent) -> bool {
-        let forward = if self.chat_keymap.next_permission_mode.is_pressed(key_event) {
+        let backtab = matches!(key_event.code, KeyCode::BackTab)
+            && key_event.kind == KeyEventKind::Press
+            && !self.collaboration_modes_enabled();
+        let forward = if self.chat_keymap.next_permission_mode.is_pressed(key_event) || backtab {
             true
         } else if self
             .chat_keymap
@@ -34,7 +37,7 @@ impl ChatWidget {
         let active_profile = self.config.permissions.active_permission_profile();
         let mut choices = Vec::new();
         for preset in builtin_approval_presets() {
-            if !matches!(preset.id, "read-only" | "auto") {
+            if !matches!(preset.id, "read-only" | "auto" | "full-access") {
                 continue;
             }
             for reviewer in [ApprovalsReviewer::User, ApprovalsReviewer::AutoReview] {

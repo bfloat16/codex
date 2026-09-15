@@ -3185,17 +3185,7 @@ default_permissions = "locked-down"
             personality: None,
         }
     );
-    let cell = match app_event_rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        other => panic!("expected InsertHistoryCell event, got {other:?}"),
-    };
-    let rendered = cell
-        .display_lines(/*width*/ 120)
-        .into_iter()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(rendered.contains("Permissions updated to locked-down"));
+    assert!(app_event_rx.try_recv().is_err());
     Ok(())
 }
 
@@ -3279,17 +3269,7 @@ async fn update_feature_flags_enabling_guardian_selects_auto_review() -> Result<
             personality: None,
         })
     );
-    let cell = match app_event_rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        other => panic!("expected InsertHistoryCell event, got {other:?}"),
-    };
-    let rendered = cell
-        .display_lines(/*width*/ 120)
-        .into_iter()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(rendered.contains("Permissions updated to Approve for me"));
+    assert!(app_event_rx.try_recv().is_err());
 
     let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
     assert!(config.contains("guardian_approval = true"));
@@ -3374,17 +3354,7 @@ async fn update_feature_flags_disabling_guardian_clears_review_policy_and_restor
             personality: None,
         })
     );
-    let cell = match app_event_rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        other => panic!("expected InsertHistoryCell event, got {other:?}"),
-    };
-    let rendered = cell
-        .display_lines(/*width*/ 120)
-        .into_iter()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(rendered.contains("Permissions updated to Ask for approval"));
+    assert!(app_event_rx.try_recv().is_err());
 
     let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
     assert!(!config.contains("guardian_approval = true"));

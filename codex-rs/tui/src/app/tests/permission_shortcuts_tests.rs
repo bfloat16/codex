@@ -124,11 +124,10 @@ async fn permission_shortcut_confirms_without_persisting() -> Result<()> {
     app.apply_permission_shortcut(&mut app_server, &mut tui, thread_id, read_only_selection())
         .await;
 
-    let cell = app.transcript_cells.last().expect("confirmed notice");
-    insta::assert_snapshot!(
-        lines_to_single_string(&cell.display_lines(/*width*/ 80)),
-        @"• Permissions updated to Read Only"
-    );
+    assert!(app.transcript_cells.iter().all(|cell| {
+        !lines_to_single_string(&cell.display_lines(/*width*/ 80))
+            .contains("Permissions updated to")
+    }));
 
     let settings = next_thread_settings_updated(&mut app_server, thread_id)
         .await

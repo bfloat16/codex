@@ -986,15 +986,9 @@ async fn permissions_selection_emits_history_cell_when_selection_changes() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     let cells = drain_insert_history(&mut rx);
-    assert_eq!(
-        cells.len(),
-        1,
-        "expected one permissions selection history cell"
-    );
-    let rendered = lines_to_single_string(&cells[0]);
     assert!(
-        rendered.contains("Permissions updated to"),
-        "expected permissions selection history message, got: {rendered}"
+        cells.is_empty(),
+        "permission selection should not add a history message"
     );
 }
 
@@ -1099,15 +1093,9 @@ async fn permissions_selection_emits_history_cell_when_current_is_selected() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     let cells = drain_insert_history(&mut rx);
-    assert_eq!(
-        cells.len(),
-        1,
-        "expected history cell even when selecting current permissions"
-    );
-    let rendered = lines_to_single_string(&cells[0]);
     assert!(
-        rendered.contains("Permissions updated to"),
-        "expected permissions update history message, got: {rendered}"
+        cells.is_empty(),
+        "permission selection should not add a history message"
     );
 }
 
@@ -1426,16 +1414,7 @@ async fn permissions_full_access_history_cell_emitted_only_after_confirmation() 
     let cells_after_confirmation = drain_insert_history(&mut rx);
     let total_history_cells = cells_before_confirmation.len() + cells_after_confirmation.len();
     assert_eq!(
-        total_history_cells, 1,
-        "expected one full access history cell total"
-    );
-    let rendered = if !cells_before_confirmation.is_empty() {
-        lines_to_single_string(&cells_before_confirmation[0])
-    } else {
-        lines_to_single_string(&cells_after_confirmation[0])
-    };
-    assert!(
-        rendered.contains("Permissions updated to Full Access"),
-        "expected full access update history message, got: {rendered}"
+        total_history_cells, 0,
+        "full access confirmation should not add a history message"
     );
 }

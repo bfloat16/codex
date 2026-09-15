@@ -88,7 +88,6 @@ impl ChatWidget {
                 .or_else(|| guardian_disabled_reason(false));
             let default_actions = self.permission_mode_actions(
                 &preset,
-                base_name.clone(),
                 ApprovalsReviewer::User,
                 /*profile_selection*/ None,
                 /*return_to_permissions*/ !include_read_only,
@@ -128,7 +127,6 @@ impl ChatWidget {
                                     .auto_review_required_for_model(self.current_model()))),
                         actions: self.permission_mode_actions(
                             &preset,
-                            APPROVE_FOR_ME_LABEL.to_string(),
                             ApprovalsReviewer::AutoReview,
                             /*profile_selection*/ None,
                             /*return_to_permissions*/ !include_read_only,
@@ -259,7 +257,6 @@ impl ChatWidget {
         approval: AskForApproval,
         permission_profile: PermissionProfile,
         active_permission_profile: ActivePermissionProfile,
-        label: String,
         approvals_reviewer: ApprovalsReviewer,
     ) -> Vec<SelectionAction> {
         vec![Box::new(move |tx| {
@@ -282,12 +279,6 @@ impl ChatWidget {
                 active_permission_profile.clone(),
             ));
             tx.send(AppEvent::UpdateApprovalsReviewer(approvals_reviewer));
-            tx.send(AppEvent::InsertHistoryCell(Box::new(
-                history_cell::new_info_event(
-                    format!("Permissions updated to {label}"),
-                    /*hint*/ None,
-                ),
-            )));
         })]
     }
 
@@ -302,7 +293,6 @@ impl ChatWidget {
     pub(super) fn permission_mode_actions(
         &self,
         preset: &ApprovalPreset,
-        label: String,
         approvals_reviewer: ApprovalsReviewer,
         profile_selection: Option<PermissionProfileSelection>,
         return_to_permissions: bool,
@@ -314,7 +304,6 @@ impl ChatWidget {
                         AskForApproval::from(preset.approval),
                         preset.permission_profile.clone(),
                         preset.active_permission_profile.clone(),
-                        label.clone(),
                         approvals_reviewer,
                     )
                 },
@@ -420,7 +409,6 @@ impl ChatWidget {
         return_to_permissions: bool,
         profile_selection: Option<PermissionProfileSelection>,
     ) {
-        let selected_name = preset.label.to_string();
         let approval = AskForApproval::from(preset.approval);
         let is_cyber_model = self.model_catalog.try_list_models().is_ok_and(|models| {
             models.iter().any(|model| {
@@ -468,7 +456,6 @@ impl ChatWidget {
                     approval,
                     preset.permission_profile,
                     preset.active_permission_profile,
-                    selected_name,
                     ApprovalsReviewer::User,
                 )
             },

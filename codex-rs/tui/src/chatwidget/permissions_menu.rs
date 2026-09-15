@@ -213,7 +213,6 @@ impl ChatWidget {
                 && current_reviewer == approvals_reviewer,
             actions: self.permission_mode_actions(
                 preset,
-                label.to_string(),
                 approvals_reviewer,
                 Some(selection),
                 /*return_to_permissions*/ true,
