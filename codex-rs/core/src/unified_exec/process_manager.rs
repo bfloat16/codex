@@ -43,6 +43,8 @@ use crate::tools::runtimes::unified_exec::UnifiedExecRuntime;
 use crate::tools::sandboxing::SandboxAttempt;
 use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
+use crate::unified_exec::BACKGROUND_TERMINAL_POLL_STEP_MS;
+use crate::unified_exec::DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS;
 use crate::unified_exec::ExecCommandRequest;
 use crate::unified_exec::MAX_UNIFIED_EXEC_PROCESSES;
 use crate::unified_exec::MAX_YIELD_TIME_MS;
@@ -59,6 +61,7 @@ use crate::unified_exec::async_watcher::emit_exec_end_for_unified_exec;
 use crate::unified_exec::async_watcher::emit_failed_exec_end_for_unified_exec;
 use crate::unified_exec::async_watcher::spawn_exit_watcher;
 use crate::unified_exec::async_watcher::start_streaming_output;
+use crate::unified_exec::background_poll_yield_time_ms;
 use crate::unified_exec::clamp_yield_time;
 use crate::unified_exec::generate_chunk_id;
 use crate::unified_exec::head_tail_buffer::HeadTailBuffer;
@@ -488,6 +491,7 @@ impl UnifiedExecProcessManager {
             }
             entry
         };
+        self.background_poll_counts.lock().await.remove(&process_id);
         if let Some(entry) = removed {
             unregister_network_approval_for_entry(&entry).await;
         }
@@ -927,6 +931,27 @@ impl UnifiedExecProcessManager {
         } = self
             .prepare_process_handles(process_id, &locked_process)
             .await?;
+        let wait_event_sent = if request.input.is_empty() {
+            if let Some(WriteStdinInteractionEvent { session, turn }) =
+                request.interaction_event.as_ref()
+            {
+                session
+                    .send_event(
+                        turn.as_ref(),
+                        EventMsg::TerminalInteraction(TerminalInteractionEvent {
+                            call_id: call_id.clone(),
+                            process_id: process_id.to_string(),
+                            stdin: String::new(),
+                        }),
+                    )
+                    .await;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         let mut status_after_write = None;
 
         if !request.input.is_empty() {
@@ -1056,6 +1081,7 @@ impl UnifiedExecProcessManager {
 
         let should_emit_interaction = !request.input.is_empty() || response.process_id.is_some();
         if should_emit_interaction
+            && !(request.input.is_empty() && wait_event_sent)
             && let Some(WriteStdinInteractionEvent { session, turn }) = request.interaction_event
         {
             let interaction = TerminalInteractionEvent {
@@ -1105,6 +1131,40 @@ impl UnifiedExecProcessManager {
         }
 
         Ok(response)
+    }
+
+    pub(crate) async fn next_write_stdin_yield_time_ms(
+        &self,
+        process_id: i32,
+        input: &str,
+        requested_yield_time_ms: u64,
+    ) -> Result<u64, UnifiedExecError> {
+        let process_exists = self
+            .process_store
+            .lock()
+            .await
+            .processes
+            .contains_key(&process_id);
+        if !process_exists {
+            return Err(UnifiedExecError::UnknownProcessId { process_id });
+        }
+
+        let mut counts = self.background_poll_counts.lock().await;
+        if !input.is_empty() {
+            counts.remove(&process_id);
+            return Ok(requested_yield_time_ms);
+        }
+
+        let count = counts
+            .entry(process_id)
+            .and_modify(|count| *count = count.saturating_add(1))
+            .or_insert(1);
+        Ok(background_poll_yield_time_ms(
+            *count,
+            self.max_write_stdin_yield_time_ms
+                .max(BACKGROUND_TERMINAL_POLL_STEP_MS)
+                .min(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS),
+        ))
     }
 
     async fn refresh_process_state(&self, process_id: i32) -> ProcessStatus {

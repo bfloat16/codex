@@ -74,6 +74,7 @@ pub(crate) const MIN_YIELD_TIME_MS: u64 = 250;
 pub(crate) const WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS: u64 = 10_000;
 // Minimum yield time for an empty `write_stdin`.
 pub(crate) const MIN_EMPTY_YIELD_TIME_MS: u64 = 5_000;
+pub(crate) const BACKGROUND_TERMINAL_POLL_STEP_MS: u64 = 30_000;
 pub(crate) const MAX_YIELD_TIME_MS: u64 = 30_000;
 pub(crate) const DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS: u64 = 300_000;
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: usize = 10_000;
@@ -161,6 +162,7 @@ impl ProcessStore {
 
 pub(crate) struct UnifiedExecProcessManager {
     process_store: Mutex<ProcessStore>,
+    background_poll_counts: Mutex<HashMap<i32, u32>>,
     max_write_stdin_yield_time_ms: u64,
 }
 
@@ -168,6 +170,7 @@ impl UnifiedExecProcessManager {
     pub(crate) fn new(max_write_stdin_yield_time_ms: u64) -> Self {
         Self {
             process_store: Mutex::new(ProcessStore::default()),
+            background_poll_counts: Mutex::new(HashMap::new()),
             max_write_stdin_yield_time_ms: max_write_stdin_yield_time_ms
                 .max(MIN_EMPTY_YIELD_TIME_MS),
         }
@@ -215,6 +218,12 @@ pub(crate) fn clamp_yield_time(yield_time_ms: u64) -> u64 {
         yield_time_ms
     };
     yield_time_ms.clamp(MIN_YIELD_TIME_MS, MAX_YIELD_TIME_MS)
+}
+
+fn background_poll_yield_time_ms(consecutive_polls: u32, max_yield_time_ms: u64) -> u64 {
+    BACKGROUND_TERMINAL_POLL_STEP_MS
+        .saturating_mul(u64::from(consecutive_polls.max(1)))
+        .min(max_yield_time_ms)
 }
 
 pub(crate) fn resolve_max_tokens(max_tokens: Option<usize>) -> usize {

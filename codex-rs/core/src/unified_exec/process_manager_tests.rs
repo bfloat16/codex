@@ -37,6 +37,31 @@ fn unified_exec_env_overrides_existing_values() {
     assert_eq!(env.get("PATH"), Some(&"/usr/bin".to_string()));
 }
 
+#[test]
+fn background_terminal_poll_timeout_grows_in_thirty_second_steps() {
+    assert_eq!(
+        background_poll_yield_time_ms(
+            /*consecutive_polls*/ 1,
+            DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
+        ),
+        30_000
+    );
+    assert_eq!(
+        background_poll_yield_time_ms(
+            /*consecutive_polls*/ 2,
+            DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
+        ),
+        60_000
+    );
+    assert_eq!(
+        background_poll_yield_time_ms(
+            /*consecutive_polls*/ 20,
+            DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
+        ),
+        DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS
+    );
+}
+
 #[tokio::test]
 async fn deterministic_process_ids_are_not_reused_after_release() {
     let manager = UnifiedExecProcessManager::default();
