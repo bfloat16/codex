@@ -26,7 +26,7 @@ use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_lines;
 use crate::wrapping::word_wrap_line;
 
-const MIN_GROUPED_TOOL_CALLS: usize = 2;
+const MIN_GROUPED_TOOL_CALLS: usize = 1;
 const SUMMARY_TEXT_ALPHA: f32 = 0.68;
 const HOVERED_SUMMARY_TEXT_ALPHA: f32 = 0.86;
 

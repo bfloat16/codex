@@ -381,7 +381,7 @@ after
 }
 
 #[test]
-fn file_edits_split_adjacent_tool_groups_and_keep_native_rendering() {
+fn single_tools_and_file_edits_are_collapsed_by_default() {
     let cwd = crate::test_support::test_path_buf("/tmp/project");
     let patch = crate::history_cell::new_patch_event(
         std::collections::HashMap::from([(
@@ -421,13 +421,6 @@ fn file_edits_split_adjacent_tool_groups_and_keep_native_rendering() {
 
     viewport.render(area, &mut buffer);
 
-    let diff_background = buffer[(4, 3)].bg;
-    assert_ne!(diff_background, Color::Reset);
-    assert!(
-        (area.x..area.right()).all(|x| buffer[(x, 3)].bg == diff_background),
-        "native patch background should fill the viewport width"
-    );
-
     assert_snapshot!(
         buffer_text(&buffer, area)
             .lines()
@@ -435,12 +428,11 @@ fn file_edits_split_adjacent_tool_groups_and_keep_native_rendering() {
             .collect::<Vec<_>>()
             .join("\n"),
         @r###"
-read display
+  Read 1 file
 
 ● Added src/lib.rs (+1 -0)
-    1 +pub fn added() {}
 
-shell display
+  Ran 1 shell command
 
 
 "###
@@ -490,12 +482,16 @@ fn large_file_edits_cache_fold_hover_expand_and_collapse() {
         collapsed_top[(2, 0)].fg,
         crate::terminal_palette::rgb_color((173, 173, 173)),
     );
+    assert_eq!(collapsed_top[(22, 0)].fg, Color::Green);
+    assert_eq!(collapsed_top[(26, 0)].fg, Color::Red);
     assert!(viewport.handle_mouse_move(area, Position::new(/*x*/ 4, /*y*/ 0)));
     let hovered_top = render(&mut viewport);
     assert_eq!(
         hovered_top[(2, 0)].fg,
         crate::terminal_palette::rgb_color((219, 219, 219)),
     );
+    assert_eq!(hovered_top[(22, 0)].fg, Color::Green);
+    assert_eq!(hovered_top[(26, 0)].fg, Color::Red);
     assert!(!viewport.handle_left_click(area, Position::new(/*x*/ 12, /*y*/ 2)));
 
     assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
@@ -505,7 +501,7 @@ fn large_file_edits_cache_fold_hover_expand_and_collapse() {
     assert!(buffer_text(&expanded_tail, area).contains("Show less ↑"));
     assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 5)));
     let collapsed_tail = render(&mut viewport);
-    assert!(buffer_text(&collapsed_tail, area).contains("Show more ↓"));
+    assert!(!buffer_text(&collapsed_tail, area).contains("Show more"));
 
     let frame = |buffer: &Buffer| {
         buffer_text(buffer, area)
@@ -525,7 +521,7 @@ fn large_file_edits_cache_fold_hover_expand_and_collapse() {
 }
 
 #[test]
-fn small_file_edits_remain_bright_and_non_interactive() {
+fn small_file_edits_are_collapsed_and_interactive() {
     let cwd = crate::test_support::test_path_buf("/tmp/project");
     let content = (1..=48)
         .map(|line| format!("line {line}\n"))
@@ -542,13 +538,16 @@ fn small_file_edits_remain_bright_and_non_interactive() {
         /*x*/ 0, /*y*/ 0, /*width*/ 64, /*height*/ 4,
     );
     viewport.scroll_rows(MouseScrollDirection::Up, usize::MAX);
-    let mut buffer = Buffer::empty(area);
-    viewport.render(area, &mut buffer);
+    let mut collapsed = Buffer::empty(area);
+    viewport.render(area, &mut collapsed);
 
-    assert_eq!(buffer[(2, 0)].fg, Color::Reset);
-    assert!(!viewport.handle_mouse_move(area, Position::new(/*x*/ 4, /*y*/ 0)));
-    assert!(!viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
-    assert!(!buffer_text(&buffer, area).contains("Show more"));
+    assert!(!buffer_text(&collapsed, area).contains("line 1"));
+    assert!(!buffer_text(&collapsed, area).contains("Show more"));
+    assert!(viewport.handle_mouse_move(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    let mut expanded = Buffer::empty(area);
+    viewport.render(area, &mut expanded);
+    assert!(buffer_text(&expanded, area).contains("line 1"));
 }
 
 #[test]

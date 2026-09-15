@@ -14,8 +14,6 @@ use crate::history_cell::HistoryRenderMode;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::HyperlinkParagraph;
 
-const FILE_CHANGE_PREVIEW_ROWS: usize = 50;
-
 impl ConversationViewport {
     pub(super) fn file_change_hit(&mut self, area: Rect, position: Position) -> Option<usize> {
         let (index, row) = self.content.renderable_at_position(area, position)?;
@@ -25,16 +23,14 @@ impl ConversationViewport {
             return None;
         }
         let lines = cell.file_change_display_lines(area.width)?;
-        if lines.lines.len() <= FILE_CHANGE_PREVIEW_ROWS {
+        if lines.lines.len() <= lines.heading_rows {
             return None;
         }
         let content_row = usize::from(row.saturating_sub(top_padding));
-        let footer_row = if self.expanded_file_change == Some(index) {
-            lines.lines.len()
-        } else {
-            FILE_CHANGE_PREVIEW_ROWS
-        };
-        (content_row < lines.heading_rows || content_row == footer_row).then_some(index)
+        let footer_row = lines.lines.len();
+        (content_row < lines.heading_rows
+            || (self.expanded_file_change == Some(index) && content_row == footer_row))
+            .then_some(index)
     }
 
     pub(super) fn toggle_file_change_at(&mut self, area: Rect, position: Position) -> bool {
@@ -109,6 +105,7 @@ impl ConversationCellRenderable {
         Some(
             u16::try_from(visible_file_change_rows(
                 lines.lines.len(),
+                lines.heading_rows,
                 self.expanded_file_change,
             ))
             .unwrap_or(u16::MAX),
@@ -124,13 +121,14 @@ impl ConversationCellRenderable {
         let Some(lines) = self.file_change_lines(area.width) else {
             return false;
         };
-        let collapsible = lines.lines.len() > FILE_CHANGE_PREVIEW_ROWS;
+        let collapsible = lines.lines.len() > lines.heading_rows;
         let content_rows = if collapsible && !self.expanded_file_change {
-            FILE_CHANGE_PREVIEW_ROWS
+            lines.heading_rows
         } else {
             lines.lines.len()
         };
-        let total_rows = content_rows.saturating_add(usize::from(collapsible));
+        let total_rows =
+            content_rows.saturating_add(usize::from(collapsible && self.expanded_file_change));
         let start = usize::from(scroll_offset).min(total_rows);
         let end = start
             .saturating_add(usize::from(area.height))
@@ -143,24 +141,30 @@ impl ConversationCellRenderable {
                 if row < lines.heading_rows
                     && let Some(style) = interaction_style
                 {
+                    let line_style = if line.line.style.fg.is_none() {
+                        line.line.style.patch(style)
+                    } else {
+                        line.line.style
+                    };
                     line.line = Line::from(
                         line.line
                             .spans
                             .into_iter()
-                            .map(|span| span.patch_style(style))
+                            .map(|span| {
+                                if span.style.fg.is_some() {
+                                    span
+                                } else {
+                                    span.patch_style(style)
+                                }
+                            })
                             .collect::<Vec<_>>(),
                     )
-                    .style(line.line.style.patch(style));
+                    .style(line_style);
                 }
                 visible.push(line);
-            } else {
-                let label = if self.expanded_file_change {
-                    "  Show less ↑"
-                } else {
-                    "  Show more ↓"
-                };
+            } else if self.expanded_file_change {
                 visible.push(HyperlinkLine::from(
-                    Line::from(label).style(interaction_style.unwrap_or_default()),
+                    Line::from("  Show less ↑").style(interaction_style.unwrap_or_default()),
                 ));
             }
         }
@@ -176,13 +180,10 @@ impl ConversationCellRenderable {
     }
 }
 
-fn visible_file_change_rows(line_count: usize, expanded: bool) -> usize {
-    if line_count <= FILE_CHANGE_PREVIEW_ROWS {
-        return line_count;
-    }
+fn visible_file_change_rows(line_count: usize, heading_rows: usize, expanded: bool) -> usize {
     if expanded {
         line_count.saturating_add(1)
     } else {
-        FILE_CHANGE_PREVIEW_ROWS.saturating_add(1)
+        heading_rows
     }
 }

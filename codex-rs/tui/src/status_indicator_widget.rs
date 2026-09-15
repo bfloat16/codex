@@ -238,7 +238,7 @@ impl StatusIndicator<'_> {
         );
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
         let motion_mode = MotionMode::from_animations_enabled(row.animations_enabled);
-        let waiting = row.header == "Waiting";
+        let waiting = row.header == "Waiting" || row.header.starts_with("Waiting ");
 
         let mut spans = Vec::with_capacity(9);
         if let Some(indicator) = activity_indicator(
