@@ -43,7 +43,7 @@ use crate::tools::runtimes::unified_exec::UnifiedExecRuntime;
 use crate::tools::sandboxing::SandboxAttempt;
 use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
-use crate::unified_exec::BACKGROUND_TERMINAL_POLL_STEP_MS;
+use crate::unified_exec::BACKGROUND_TERMINAL_WAIT_TIME_MS;
 use crate::unified_exec::DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS;
 use crate::unified_exec::ExecCommandRequest;
 use crate::unified_exec::MAX_UNIFIED_EXEC_PROCESSES;
@@ -1162,7 +1162,7 @@ impl UnifiedExecProcessManager {
         Ok(background_poll_yield_time_ms(
             *count,
             self.max_write_stdin_yield_time_ms
-                .max(BACKGROUND_TERMINAL_POLL_STEP_MS)
+                .max(BACKGROUND_TERMINAL_WAIT_TIME_MS)
                 .min(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS),
         ))
     }
