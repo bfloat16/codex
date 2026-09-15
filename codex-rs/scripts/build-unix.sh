@@ -171,10 +171,8 @@ export STABLE_GIT_COMMIT
 primary_binaries=(
   codex
   codex-code-mode-host
-  codex-responses-api-proxy
 )
 app_server_binaries=(
-  codex-app-server
   codex-code-mode-host
 )
 case "$bundle" in
@@ -182,8 +180,6 @@ case "$bundle" in
     binaries=(
       codex
       codex-code-mode-host
-      codex-responses-api-proxy
-      codex-app-server
     )
     ;;
   primary)

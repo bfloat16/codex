@@ -113,17 +113,15 @@ if ($Target -notin $supportedTargets) {
 }
 
 $releaseBundles = [ordered]@{
-    primary = @(
+    primary      = @(
         'codex',
-        'codex-code-mode-host',
-        'codex-responses-api-proxy'
+        'codex-code-mode-host'
     )
-    helpers = @(
+    helpers      = @(
         'codex-windows-sandbox-setup',
         'codex-command-runner'
     )
     'app-server' = @(
-        'codex-app-server',
         'codex-code-mode-host'
     )
 }
