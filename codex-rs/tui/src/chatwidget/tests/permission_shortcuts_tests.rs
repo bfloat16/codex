@@ -131,3 +131,24 @@ async fn permission_shortcuts_respect_managed_mode_requirements() {
         assert!(rx.try_recv().is_err(), "must not submit a forbidden mode");
     }
 }
+
+#[tokio::test]
+async fn shift_tab_cycles_to_plan_without_changing_model() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.config
+        .permissions
+        .set_permission_profile(PermissionProfile::Disabled)
+        .expect("set full-access profile");
+    chat.config.approvals_reviewer = User;
+    let model = chat.current_model().to_string();
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
+
+    assert_eq!(chat.active_mode_kind(), ModeKind::Plan);
+    assert_eq!(chat.current_model(), model);
+    assert!(
+        rx.try_recv().is_ok(),
+        "mode switch should submit a thread op"
+    );
+}

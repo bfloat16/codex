@@ -4,9 +4,11 @@ use super::*;
 
 impl ChatWidget {
     pub(super) fn handle_permission_shortcut(&mut self, key_event: KeyEvent) -> bool {
-        let backtab = matches!(key_event.code, KeyCode::BackTab)
-            && key_event.kind == KeyEventKind::Press
-            && !self.collaboration_modes_enabled();
+        let backtab =
+            matches!(key_event.code, KeyCode::BackTab) && key_event.kind == KeyEventKind::Press;
+        if backtab && self.collaboration_modes_enabled() {
+            return self.handle_collaboration_mode_shift_tab();
+        }
         let forward = if self.chat_keymap.next_permission_mode.is_pressed(key_event) || backtab {
             true
         } else if self
@@ -32,6 +34,36 @@ impl ChatWidget {
             return true;
         };
 
+        let mut choices = self.permission_shortcut_choices();
+        if !forward {
+            choices.reverse();
+        }
+        let start = choices
+            .iter()
+            .position(|(current, _)| *current)
+            .map_or(0, |index| index + 1);
+        if let Some((_, selection)) = choices
+            .iter()
+            .cycle()
+            .skip(start)
+            .take(choices.len())
+            .find(|(current, _)| !current)
+        {
+            self.permission_shortcut_pending = true;
+            self.app_event_tx.send(AppEvent::ApplyPermissionShortcut {
+                thread_id,
+                selection: selection.clone(),
+            });
+        } else {
+            self.add_info_message(
+                "No other permission modes are available.".to_string(),
+                /*hint*/ None,
+            );
+        }
+        true
+    }
+
+    fn permission_shortcut_choices(&self) -> Vec<(bool, PermissionProfileSelection)> {
         let current_approval =
             AskForApproval::from(self.config.permissions.approval_policy.value());
         let active_profile = self.config.permissions.active_permission_profile();
@@ -58,7 +90,6 @@ impl ChatWidget {
                 {
                     continue;
                 }
-                // These modes still need the explicit Windows setup/warning flow.
                 #[cfg(target_os = "windows")]
                 if preset.id == "auto"
                     && reviewer == ApprovalsReviewer::User
@@ -97,32 +128,54 @@ impl ChatWidget {
                 ));
             }
         }
-        if !forward {
-            choices.reverse();
-        }
-        let start = choices
-            .iter()
-            .position(|(current, _)| *current)
-            .map_or(0, |index| index + 1);
-        if let Some((_, selection)) = choices
-            .iter()
-            .cycle()
-            .skip(start)
-            .take(choices.len())
-            .find(|(current, _)| !current)
+        choices
+    }
+
+    fn handle_collaboration_mode_shift_tab(&mut self) -> bool {
+        if !self.bottom_pane.no_modal_or_popup_active()
+            || self.bottom_pane.is_task_running()
+            || self.permission_shortcut_pending
         {
-            self.permission_shortcut_pending = true;
-            self.app_event_tx.send(AppEvent::ApplyPermissionShortcut {
-                thread_id,
-                selection: selection.clone(),
-            });
+            return false;
+        }
+        if self.blocks_direct_input {
+            self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());
+            return true;
+        }
+        if self.thread_id.is_none() {
+            self.cycle_collaboration_mode_preserving_model();
+            return true;
+        }
+        let choices = self.permission_shortcut_choices();
+        if self.active_mode_kind() == ModeKind::Plan {
+            self.cycle_collaboration_mode_preserving_model();
+            if let Some((_, selection)) = choices.first() {
+                self.queue_permission_shortcut(selection.clone());
+            }
+            return true;
+        }
+        let current = choices.iter().position(|(current, _)| *current);
+        let Some(current) = current else {
+            self.cycle_collaboration_mode_preserving_model();
+            return true;
+        };
+        if let Some((_, selection)) = choices.get(current + 1) {
+            self.queue_permission_shortcut(selection.clone());
         } else {
-            self.add_info_message(
-                "No other permission modes are available.".to_string(),
-                /*hint*/ None,
-            );
+            self.cycle_collaboration_mode_preserving_model();
         }
         true
+    }
+
+    fn queue_permission_shortcut(&mut self, selection: PermissionProfileSelection) {
+        let Some(thread_id) = self.thread_id else {
+            return;
+        };
+        self.permission_shortcut_pending = true;
+        self.app_event_tx.send(AppEvent::ApplyPermissionShortcut {
+            thread_id,
+            selection,
+        });
     }
 
     pub(crate) fn complete_permission_shortcut(&mut self, thread_id: ThreadId) {

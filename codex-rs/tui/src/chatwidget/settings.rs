@@ -671,6 +671,25 @@ impl ChatWidget {
         }
     }
 
+    pub(super) fn cycle_collaboration_mode_preserving_model(&mut self) {
+        let current_model = self.current_model().to_string();
+        let Some(next_mask) = collaboration_modes::next_mask(
+            self.model_catalog.as_ref(),
+            self.active_collaboration_mask.as_ref(),
+        ) else {
+            return;
+        };
+        let next_mode = next_mask.mode;
+        self.set_collaboration_mask_from_user_action(CollaborationModeMask {
+            model: Some(current_model),
+            ..next_mask
+        });
+        debug_assert_eq!(
+            self.active_mode_kind(),
+            next_mode.unwrap_or(ModeKind::Default)
+        );
+    }
+
     pub(crate) fn set_collaboration_mask_from_user_action(&mut self, mask: CollaborationModeMask) {
         self.set_collaboration_mask(mask);
         self.submit_collaboration_mode_settings_update();
@@ -684,9 +703,6 @@ impl ChatWidget {
         if !self.collaboration_modes_enabled() {
             return;
         }
-        let previous_mode = self.active_mode_kind();
-        let previous_model = self.current_model().to_string();
-        let previous_effort = self.effective_reasoning_effort();
         if mask.mode == Some(ModeKind::Plan)
             && let Some(effort) = self.config.plan_mode_reasoning_effort.clone()
         {
@@ -695,26 +711,6 @@ impl ChatWidget {
         self.active_collaboration_mask = Some(mask);
         self.update_collaboration_mode_indicator();
         self.refresh_model_dependent_surfaces();
-        let next_mode = self.active_mode_kind();
-        let next_model = self.current_model();
-        let next_effort = self.effective_reasoning_effort();
-        if previous_mode != next_mode
-            && (previous_model != next_model || previous_effort != next_effort)
-        {
-            let mut message = format!("Model changed to {next_model}");
-            if !next_model.starts_with("codex-auto-") {
-                let reasoning_label = match next_effort.as_ref() {
-                    None | Some(ReasoningEffortConfig::None) => "default",
-                    Some(effort) => effort.as_str(),
-                };
-                message.push(' ');
-                message.push_str(reasoning_label);
-            }
-            message.push_str(" for ");
-            message.push_str(next_mode.display_name());
-            message.push_str(" mode.");
-            self.add_info_message(message, /*hint*/ None);
-        }
         self.request_redraw();
     }
 

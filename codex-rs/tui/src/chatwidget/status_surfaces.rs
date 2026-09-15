@@ -870,7 +870,7 @@ impl ChatWidget {
             .chars()
             .take(PERMISSION_STATUS_WIDTH)
             .collect::<String>();
-        format!("{label:<width$}", width = PERMISSION_STATUS_WIDTH)
+        format!("{label:<PERMISSION_STATUS_WIDTH$}")
     }
 
     fn status_line_pull_request_url(&self) -> Option<String> {

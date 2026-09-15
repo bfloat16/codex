@@ -1901,11 +1901,6 @@ impl App {
                     tracing::error!(error = %error, "failed to persist conversation model");
                     self.chat_widget
                         .add_error_message(format!("Failed to save default model: {error}"));
-                } else {
-                    self.chat_widget.add_info_message(
-                        format!("Model changed to {model} {effort} for this conversation"),
-                        /*hint*/ None,
-                    );
                 }
             }
             AppEvent::OpenPlanReasoningScopePrompt { model, effort } => {
@@ -2432,12 +2427,6 @@ impl App {
                             .map(std::string::ToString::to_string)
                             .unwrap_or_else(|| "default".to_string());
                         tracing::info!("Selected model: {model}, Selected effort: {effort_label}");
-                        let mut message = format!("Model changed to {model}");
-                        if let Some(label) = Self::reasoning_label_for(&model, effort.as_ref()) {
-                            message.push(' ');
-                            message.push_str(&label);
-                        }
-                        self.chat_widget.add_info_message(message, /*hint*/ None);
                     }
                     Err(err) => {
                         let error = format_config_error(&err);

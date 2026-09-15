@@ -1393,46 +1393,26 @@ async fn collab_mode_shift_tab_cycles_only_when_idle() {
 }
 
 #[tokio::test]
-async fn mode_switch_surfaces_model_change_notification_when_effective_model_changes() {
+async fn mode_switch_does_not_emit_model_change_notification() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
-    let default_model = chat.current_model().to_string();
-
     let mut plan_mask =
         collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
             .expect("expected plan collaboration mode");
     plan_mask.model = Some("gpt-5.4-mini".to_string());
     chat.set_collaboration_mask(plan_mask);
 
-    let plan_messages = drain_insert_history(&mut rx)
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        plan_messages.contains("Model changed to gpt-5.4-mini medium for Plan mode."),
-        "expected Plan-mode model switch notice, got: {plan_messages:?}"
-    );
+    assert!(drain_insert_history(&mut rx).is_empty());
 
     let default_mask = collaboration_modes::default_mask(chat.model_catalog.as_ref())
         .expect("expected default collaboration mode");
     chat.set_collaboration_mask(default_mask);
 
-    let default_messages = drain_insert_history(&mut rx)
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let expected_default_message =
-        format!("Model changed to {default_model} default for Default mode.");
-    assert!(
-        default_messages.contains(&expected_default_message),
-        "expected Default-mode model switch notice, got: {default_messages:?}"
-    );
+    assert!(drain_insert_history(&mut rx).is_empty());
 }
 
 #[tokio::test]
-async fn mode_switch_surfaces_reasoning_change_notification_when_model_stays_same() {
+async fn mode_switch_does_not_emit_reasoning_change_notification() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
@@ -1441,15 +1421,7 @@ async fn mode_switch_surfaces_reasoning_change_notification_when_model_stays_sam
         .expect("expected plan collaboration mode");
     chat.set_collaboration_mask(plan_mask);
 
-    let plan_messages = drain_insert_history(&mut rx)
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        plan_messages.contains("Model changed to gpt-5.2 medium for Plan mode."),
-        "expected reasoning-change notice in Plan mode, got: {plan_messages:?}"
-    );
+    assert!(drain_insert_history(&mut rx).is_empty());
 }
 
 #[tokio::test]
