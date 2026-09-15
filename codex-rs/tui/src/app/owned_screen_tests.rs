@@ -168,6 +168,17 @@ async fn double_click_selects_and_copies_a_word() {
             assert!(matches!(action, OwnedScreenMouseAction::Copy(text) if text == "foo_bar"));
         }
     }
+
+    screen.show_copy_notice(/*char_count*/ 7);
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render persistent double-click selection");
+    let selected_background = selection::selection_background();
+    assert!((4..=10).all(|column| {
+        terminal.backend().buffer()[Position::new(column, 0)].bg == selected_background
+    }));
 }
 
 #[tokio::test]
@@ -395,8 +406,8 @@ async fn copy_notice_stays_below_the_scroll_banner_and_above_the_composer() {
 "                                                  "
 "middle                                            "
 "           ctrl + end jump to bottom ↓            "
-"                    copied 12 chars to clipboard  "
 "                                                  "
+"                    copied 12 chars to clipboard  "
 "› draft sentinel                                  "
 "                                                  "
 "  gpt-5.6-sol default · /tmp/project              "
@@ -473,7 +484,7 @@ async fn drag_selects_visible_text_and_copy_notice_renders_above_the_composer() 
         })
         .expect("render copy notice");
     assert_eq!(
-        terminal.backend().buffer()[Position::new(/*x*/ 21, /*y*/ 5)].fg,
+        terminal.backend().buffer()[Position::new(/*x*/ 21, /*y*/ 6)].fg,
         selected_background,
     );
     assert_snapshot!(normalized_backend_snapshot(terminal.backend()), @r###"
@@ -482,8 +493,8 @@ async fn drag_selects_visible_text_and_copy_notice_renders_above_the_composer() 
 "                                                  "
 "                                                  "
 "                                                  "
-"                     copied 5 chars to clipboard  "
 "                                                  "
+"                     copied 5 chars to clipboard  "
 "› draft sentinel                                  "
 "                                                  "
 "  gpt-5.6-sol default · /tmp/project              "

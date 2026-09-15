@@ -129,11 +129,13 @@ impl OwnedScreen {
             Self::render_jump_to_bottom_hint(conversation_area, buffer);
         }
         bottom_pane.render(bottom_area, buffer);
+        let cursor = bottom_pane.cursor_pos(bottom_area);
+        let cursor_y = cursor.map(|(_, y)| y);
         self.selection.capture_and_render(area, buffer);
-        self.render_copy_notice(bottom_area, buffer);
+        self.render_copy_notice(bottom_area, cursor_y, buffer);
 
         RenderedOwnedScreen {
-            cursor: bottom_pane.cursor_pos(bottom_area),
+            cursor,
             cursor_style: bottom_pane.cursor_style(bottom_area),
         }
     }
@@ -266,7 +268,7 @@ impl OwnedScreen {
             .checked_duration_since(Instant::now())
     }
 
-    fn render_copy_notice(&mut self, area: Rect, buffer: &mut Buffer) {
+    fn render_copy_notice(&mut self, area: Rect, cursor_y: Option<u16>, buffer: &mut Buffer) {
         let Some(notice) = &self.copy_notice else {
             return;
         };
@@ -277,7 +279,10 @@ impl OwnedScreen {
         if area.is_empty() {
             return;
         }
-        let notice_area = Rect::new(area.x, area.y, area.width.saturating_sub(/*rhs*/ 2), 1);
+        let notice_y = cursor_y
+            .map(|y| y.saturating_sub(1).max(area.y))
+            .unwrap_or(area.y);
+        let notice_area = Rect::new(area.x, notice_y, area.width.saturating_sub(/*rhs*/ 2), 1);
         Paragraph::new(format!("copied {} chars to clipboard", notice.char_count))
             .fg(selection::selection_background())
             .alignment(Alignment::Right)

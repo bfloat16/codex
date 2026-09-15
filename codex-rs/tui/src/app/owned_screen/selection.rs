@@ -36,6 +36,7 @@ pub(super) struct ScreenTextSelection {
     pointer_down: bool,
     dragged: bool,
     completed: bool,
+    completed_text: Option<String>,
     snapshot: ScreenSnapshot,
 }
 
@@ -56,6 +57,7 @@ impl ScreenTextSelection {
         self.pointer_down = true;
         self.dragged = false;
         self.completed = false;
+        self.completed_text = None;
         true
     }
 
@@ -84,6 +86,7 @@ impl ScreenTextSelection {
             && let Some(text) = self.selected_text()
         {
             self.completed = true;
+            self.completed_text = Some(text.clone());
             return SelectionRelease::Copy(text);
         }
 
@@ -149,7 +152,9 @@ impl ScreenTextSelection {
         self.pointer_down = false;
         self.dragged = true;
         self.completed = true;
-        self.selected_text()
+        let text = self.selected_text();
+        self.completed_text = text.clone();
+        text
     }
 
     pub(super) fn clear(&mut self) {
@@ -158,14 +163,18 @@ impl ScreenTextSelection {
         self.pointer_down = false;
         self.dragged = false;
         self.completed = false;
+        self.completed_text = None;
     }
 
     pub(super) fn capture_and_render(&mut self, area: Rect, buffer: &mut Buffer) {
         let snapshot = ScreenSnapshot::capture(area, buffer);
-        if self.completed && !self.pointer_down && self.snapshot != snapshot {
+        self.snapshot = snapshot;
+        if self.completed
+            && !self.pointer_down
+            && self.completed_text.as_deref() != self.selected_text().as_deref()
+        {
             self.clear();
         }
-        self.snapshot = snapshot;
         if !self.dragged && !self.completed {
             return;
         }
