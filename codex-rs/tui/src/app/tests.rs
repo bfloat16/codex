@@ -36,8 +36,6 @@ mod model_catalog;
 mod model_defaults;
 #[path = "tests/patch_approval_tests.rs"]
 mod patch_approval_tests;
-#[path = "tests/permission_shortcuts_tests.rs"]
-mod permission_shortcuts_tests;
 mod plugin_catalog;
 mod rate_limits;
 #[path = "tests/recap_generation_tests.rs"]

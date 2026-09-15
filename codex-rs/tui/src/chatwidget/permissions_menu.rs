@@ -4,10 +4,6 @@ use super::*;
 use crate::permission_discovery::PermissionDiscovery;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 
-pub(crate) fn auto_review_available(config: &Config) -> bool {
-    cyber_model_approval_reviewer(config) == Some(ApprovalsReviewer::AutoReview)
-}
-
 pub(crate) fn cyber_model_approval_reviewer(config: &Config) -> Option<ApprovalsReviewer> {
     let requirements = config.config_layer_stack.requirements();
     if requirements
@@ -211,12 +207,7 @@ impl ChatWidget {
             is_current: active_profile_id.as_deref() == Some(id)
                 && current_approval == approval_policy
                 && current_reviewer == approvals_reviewer,
-            actions: self.permission_mode_actions(
-                preset,
-                approvals_reviewer,
-                Some(selection),
-                /*return_to_permissions*/ true,
-            ),
+            actions: self.permission_mode_actions(preset, approvals_reviewer, Some(selection)),
             dismiss_on_select: true,
             disabled_reason: discovery
                 .disabled_reason(id, Some(approval_policy), Some(approvals_reviewer.into()))

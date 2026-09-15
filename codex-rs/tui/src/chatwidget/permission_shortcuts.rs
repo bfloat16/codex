@@ -23,17 +23,10 @@ impl ChatWidget {
         if !self.bottom_pane.no_modal_or_popup_active() {
             return false;
         }
-        if self.permission_shortcut_pending {
-            return true;
-        }
         if self.blocks_direct_input {
             self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());
             return true;
         }
-        let Some(thread_id) = self.thread_id else {
-            return true;
-        };
-
         let mut choices = self.permission_shortcut_choices();
         if !forward {
             choices.reverse();
@@ -49,11 +42,7 @@ impl ChatWidget {
             .take(choices.len())
             .find(|(current, _)| !current)
         {
-            self.permission_shortcut_pending = true;
-            self.app_event_tx.send(AppEvent::ApplyPermissionShortcut {
-                thread_id,
-                selection: selection.clone(),
-            });
+            self.apply_permission_shortcut_selection(selection.clone());
         } else {
             self.add_info_message(
                 "No other permission modes are available.".to_string(),
@@ -70,6 +59,9 @@ impl ChatWidget {
         let mut choices = Vec::new();
         for preset in builtin_approval_presets() {
             if !matches!(preset.id, "read-only" | "auto" | "full-access") {
+                continue;
+            }
+            if !cfg!(target_os = "windows") && preset.id == "read-only" {
                 continue;
             }
             for reviewer in [ApprovalsReviewer::User, ApprovalsReviewer::AutoReview] {
@@ -132,10 +124,7 @@ impl ChatWidget {
     }
 
     fn handle_collaboration_mode_shift_tab(&mut self) -> bool {
-        if !self.bottom_pane.no_modal_or_popup_active()
-            || self.bottom_pane.is_task_running()
-            || self.permission_shortcut_pending
-        {
+        if !self.bottom_pane.no_modal_or_popup_active() || self.bottom_pane.is_task_running() {
             return false;
         }
         if self.blocks_direct_input {
@@ -150,7 +139,7 @@ impl ChatWidget {
         if self.active_mode_kind() == ModeKind::Plan {
             self.cycle_collaboration_mode_preserving_model();
             if let Some((_, selection)) = choices.first() {
-                self.queue_permission_shortcut(selection.clone());
+                self.apply_permission_shortcut_selection(selection.clone());
             }
             return true;
         }
@@ -160,27 +149,61 @@ impl ChatWidget {
             return true;
         };
         if let Some((_, selection)) = choices.get(current + 1) {
-            self.queue_permission_shortcut(selection.clone());
+            self.apply_permission_shortcut_selection(selection.clone());
         } else {
             self.cycle_collaboration_mode_preserving_model();
         }
         true
     }
 
-    fn queue_permission_shortcut(&mut self, selection: PermissionProfileSelection) {
-        let Some(thread_id) = self.thread_id else {
+    fn apply_permission_shortcut_selection(&mut self, selection: PermissionProfileSelection) {
+        let Some(preset) = builtin_approval_presets()
+            .into_iter()
+            .find(|preset| preset.active_permission_profile.id == selection.profile_id)
+        else {
+            self.add_error_message(format!(
+                "Unknown built-in permission profile: {}",
+                selection.profile_id
+            ));
             return;
         };
-        self.permission_shortcut_pending = true;
-        self.app_event_tx.send(AppEvent::ApplyPermissionShortcut {
-            thread_id,
-            selection,
-        });
-    }
-
-    pub(crate) fn complete_permission_shortcut(&mut self, thread_id: ThreadId) {
-        if self.thread_id == Some(thread_id) {
-            self.permission_shortcut_pending = false;
+        let approval = selection
+            .approval_policy
+            .unwrap_or_else(|| AskForApproval::from(preset.approval));
+        let reviewer = selection
+            .approvals_reviewer
+            .unwrap_or(ApprovalsReviewer::User);
+        if let Err(error) = self.set_permission_profile_with_active_profile(
+            preset.permission_profile.clone(),
+            Some(preset.active_permission_profile.clone()),
+        ) {
+            self.add_error_message(format!("Failed to set permission profile: {error}"));
+            return;
         }
+        self.set_approval_policy(approval);
+        self.set_approvals_reviewer(reviewer);
+        self.app_event_tx
+            .send(AppEvent::CodexOp(AppCommand::override_turn_context(
+                /*cwd*/ None,
+                Some(approval),
+                Some(reviewer),
+                Some(preset.permission_profile),
+                Some(preset.active_permission_profile),
+                /*windows_sandbox_level*/ None,
+                /*model*/ None,
+                /*effort*/ None,
+                /*summary*/ None,
+                /*service_tier*/ None,
+                /*collaboration_mode*/ None,
+                /*personality*/ None,
+            )));
+        self.app_event_tx
+            .send(AppEvent::UpdateAskForApprovalPolicy(approval));
+        self.app_event_tx
+            .send(AppEvent::UpdateActivePermissionProfile(
+                ActivePermissionProfile::new(selection.profile_id),
+            ));
+        self.app_event_tx
+            .send(AppEvent::UpdateApprovalsReviewer(reviewer));
     }
 }

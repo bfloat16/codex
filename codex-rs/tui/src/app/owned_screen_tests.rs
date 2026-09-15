@@ -410,7 +410,7 @@ async fn copy_notice_stays_below_the_scroll_banner_and_above_the_composer() {
 "                    copied 12 chars to clipboard  "
 "› draft sentinel                                  "
 "                                                  "
-"  gpt-5.6-sol default · /tmp/project              "
+"  Read Only        · gpt-5.6-sol default · /tmp/p…"
 "###);
 }
 
@@ -497,7 +497,7 @@ async fn drag_selects_visible_text_and_copy_notice_renders_above_the_composer() 
 "                     copied 5 chars to clipboard  "
 "› draft sentinel                                  "
 "                                                  "
-"  gpt-5.6-sol default · /tmp/project              "
+"  Read Only        · gpt-5.6-sol default · /tmp/p…"
 "###);
 
     assert!(matches!(

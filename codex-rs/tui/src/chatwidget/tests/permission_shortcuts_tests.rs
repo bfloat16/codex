@@ -2,92 +2,55 @@ use super::permissions::requirements_stack;
 use super::*;
 use ApprovalsReviewer::AutoReview;
 use ApprovalsReviewer::User;
+use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn permission_shortcuts_cycle_builtin_modes() {
+async fn permission_shortcuts_use_local_permission_events() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let thread_id = ThreadId::new();
-    chat.thread_id = Some(thread_id);
     chat.set_feature_enabled(Feature::GuardianApproval, /*enabled*/ true);
     chat.chat_keymap.next_permission_mode = vec![crate::key_hint::plain(KeyCode::F(8))];
-    chat.chat_keymap.previous_permission_mode = vec![crate::key_hint::plain(KeyCode::F(7))];
     #[cfg(target_os = "windows")]
     {
         chat.local_settings.notices.hide_world_writable_warning = Some(true);
         chat.set_windows_sandbox_mode(Some(WindowsSandboxModeToml::Unelevated));
     }
-    for (current, reviewer, key, expected, next_reviewer) in [
-        (":workspace", User, KeyCode::F(8), ":workspace", AutoReview),
-        (":workspace", AutoReview, KeyCode::F(8), ":read-only", User),
-        (":read-only", User, KeyCode::F(8), ":workspace", User),
-        (":read-only", User, KeyCode::F(7), ":workspace", AutoReview),
-    ] {
-        let profile = if current == ":read-only" {
-            PermissionProfile::read_only()
-        } else {
-            PermissionProfile::workspace_write()
-        };
-        chat.config
-            .permissions
-            .set_permission_profile_from_session_snapshot(PermissionProfileSnapshot::active(
-                profile,
-                ActivePermissionProfile::new(current),
-            ))
-            .expect("set current profile");
-        chat.config.approvals_reviewer = reviewer;
-        chat.handle_key_event(KeyEvent::from(key));
-        chat.handle_key_event(KeyEvent::from(key));
-        let AppEvent::ApplyPermissionShortcut {
-            thread_id: target,
-            selection,
-        } = rx.try_recv().expect("permission selection")
-        else {
-            panic!("expected one typed permission selection");
-        };
-        assert_eq!(
-            (
-                target,
-                selection.profile_id.as_str(),
-                selection.approval_policy,
-                selection.approvals_reviewer
-            ),
-            (
-                thread_id,
-                expected,
-                Some(AskForApproval::OnRequest),
-                Some(next_reviewer)
-            )
-        );
-        assert!(
-            rx.try_recv().is_err(),
-            "pending shortcut must not be duplicated"
-        );
-        chat.complete_permission_shortcut(thread_id);
-    }
-    #[cfg(target_os = "windows")]
-    {
-        chat.set_windows_sandbox_mode(/*mode*/ None);
-        chat.set_feature_enabled(Feature::WindowsSandbox, /*enabled*/ false);
-        chat.set_feature_enabled(Feature::WindowsSandboxElevated, /*enabled*/ false);
-        chat.config
-            .permissions
-            .set_permission_profile(PermissionProfile::read_only())
-            .unwrap();
-        chat.config.approvals_reviewer = User;
-        chat.handle_key_event(KeyEvent::from(KeyCode::F(8)));
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(AppEvent::ApplyPermissionShortcut {
-                selection: PermissionProfileSelection {
-                    approvals_reviewer: Some(AutoReview),
-                    ..
-                },
-                ..
-            })
-        ));
-        assert!(rx.try_recv().is_err());
-    }
+    chat.config.approvals_reviewer = User;
+    chat.config
+        .permissions
+        .set_permission_profile_from_session_snapshot(PermissionProfileSnapshot::active(
+            PermissionProfile::workspace_write(),
+            ActivePermissionProfile::new(":workspace"),
+        ))
+        .expect("set current profile");
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::F(8)));
+
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AppEvent::CodexOp(AppCommand::OverrideTurnContext {
+            approval_policy: Some(AskForApproval::OnRequest),
+            approvals_reviewer: Some(AutoReview),
+            active_permission_profile: Some(ActivePermissionProfile { id, .. }),
+            ..
+        })) if id == ":workspace"
+    ));
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AppEvent::UpdateAskForApprovalPolicy(
+            AskForApproval::OnRequest
+        ))
+    ));
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AppEvent::UpdateActivePermissionProfile(profile))
+            if profile.id == ":workspace"
+    ));
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AppEvent::UpdateApprovalsReviewer(AutoReview))
+    ));
+    assert!(rx.try_recv().is_err());
 }
 
 #[tokio::test]
@@ -135,11 +98,18 @@ async fn permission_shortcuts_respect_managed_mode_requirements() {
 #[tokio::test]
 async fn shift_tab_cycles_to_plan_without_changing_model() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
-    chat.thread_id = Some(ThreadId::new());
     chat.config
         .permissions
-        .set_permission_profile(PermissionProfile::Disabled)
+        .set_permission_profile_from_session_snapshot(PermissionProfileSnapshot::active(
+            PermissionProfile::Disabled,
+            ActivePermissionProfile::new(BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS),
+        ))
         .expect("set full-access profile");
+    chat.config
+        .permissions
+        .approval_policy
+        .set(AskForApproval::Never.to_core())
+        .expect("set full-access approval policy");
     chat.config.approvals_reviewer = User;
     let model = chat.current_model().to_string();
 
@@ -147,8 +117,8 @@ async fn shift_tab_cycles_to_plan_without_changing_model() {
 
     assert_eq!(chat.active_mode_kind(), ModeKind::Plan);
     assert_eq!(chat.current_model(), model);
-    assert!(
-        rx.try_recv().is_ok(),
-        "mode switch should submit a thread op"
-    );
+    assert!(rx.try_recv().is_err(), "mode switch must stay local");
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
+    assert_eq!(chat.active_mode_kind(), ModeKind::Default);
 }

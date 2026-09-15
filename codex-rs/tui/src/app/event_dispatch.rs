@@ -1910,20 +1910,6 @@ impl App {
             AppEvent::OpenAllModelsPopup => {
                 self.chat_widget.open_all_models_popup();
             }
-            AppEvent::OpenFullAccessConfirmation {
-                preset,
-                return_to_permissions,
-                profile_selection,
-            } => {
-                self.chat_widget.open_full_access_confirmation(
-                    preset,
-                    return_to_permissions,
-                    profile_selection,
-                );
-            }
-            AppEvent::ApplyPermissionShortcut { thread_id, selection } => {
-                self.apply_permission_shortcut(app_server, tui, thread_id, selection).await;
-            }
             AppEvent::OpenWorldWritableWarningConfirmation {
                 preset,
                 profile_selection,

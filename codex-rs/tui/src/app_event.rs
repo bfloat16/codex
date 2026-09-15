@@ -1122,19 +1122,6 @@ pub(crate) enum AppEvent {
     /// Open the full model picker (non-auto models).
     OpenAllModelsPopup,
 
-    /// Open the confirmation prompt before enabling full access mode.
-    OpenFullAccessConfirmation {
-        preset: ApprovalPreset,
-        return_to_permissions: bool,
-        profile_selection: Option<PermissionProfileSelection>,
-    },
-
-    /// Apply a permission shortcut only while its originating thread is displayed.
-    ApplyPermissionShortcut {
-        thread_id: ThreadId,
-        selection: PermissionProfileSelection,
-    },
-
     /// Open the Windows world-writable directories warning.
     /// If `preset` is `Some`, the confirmation will apply the provided
     /// approval/sandbox configuration on Continue; if `None`, it performs no
@@ -1282,6 +1269,7 @@ pub(crate) enum AppEvent {
     SkipNextWorldWritableScan,
 
     /// Re-open the approval presets popup.
+    #[cfg_attr(not(test), allow(dead_code))]
     OpenApprovalsPopup,
 
     /// Open the skills list popup.

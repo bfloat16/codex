@@ -392,7 +392,7 @@ async fn profile_permissions_selection_emits_auto_review_mode_event() {
 }
 
 #[tokio::test]
-async fn profile_permissions_full_access_always_opens_confirmation() {
+async fn profile_permissions_full_access_selects_without_confirmation() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.config.explicit_permission_profile_mode = true;
     chat.set_feature_enabled(Feature::GuardianApproval, /*enabled*/ false);
@@ -406,17 +406,12 @@ async fn profile_permissions_full_access_always_opens_confirmation() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        AppEvent::OpenFullAccessConfirmation {
-            preset,
-            return_to_permissions: true,
-            profile_selection: Some(PermissionProfileSelection {
-                profile_id,
-                approval_policy: Some(AskForApproval::Never),
-                approvals_reviewer: Some(ApprovalsReviewer::User),
-                display_label,
-            }),
-        } if preset.id == "full-access"
-            && profile_id == BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS
+        AppEvent::SelectPermissionProfile(PermissionProfileSelection {
+            profile_id,
+            approval_policy: Some(AskForApproval::Never),
+            approvals_reviewer: Some(ApprovalsReviewer::User),
+            display_label,
+        }) if profile_id == BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS
             && display_label == "Full Access"
     ));
 }
@@ -515,22 +510,6 @@ async fn preset_matching_does_not_treat_non_cwd_writable_profile_as_read_only() 
         ),
         "profiles with any writable root should not be classified as Read Only"
     );
-}
-
-#[tokio::test]
-async fn full_access_confirmation_popup_snapshot() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    let preset = builtin_approval_presets()
-        .into_iter()
-        .find(|preset| preset.id == "full-access")
-        .expect("full access preset");
-    chat.open_full_access_confirmation(
-        preset, /*return_to_permissions*/ false, /*profile_selection*/ None,
-    );
-
-    let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert_chatwidget_snapshot!("full_access_confirmation_popup", popup);
 }
 
 #[cfg(target_os = "windows")]
@@ -993,7 +972,7 @@ async fn permissions_selection_emits_history_cell_when_selection_changes() {
 }
 
 #[tokio::test]
-async fn permissions_selection_history_snapshot_after_mode_switch() {
+async fn permissions_selection_does_not_open_full_access_confirmation() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     #[cfg(target_os = "windows")]
     {
@@ -1007,30 +986,12 @@ async fn permissions_selection_history_snapshot_after_mode_switch() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
-    let (preset, return_to_permissions, profile_selection) =
-        std::iter::from_fn(|| rx.try_recv().ok())
-            .find_map(|event| match event {
-                AppEvent::OpenFullAccessConfirmation {
-                    preset,
-                    return_to_permissions,
-                    profile_selection,
-                } => Some((preset, return_to_permissions, profile_selection)),
-                _ => None,
-            })
-            .expect("expected full access confirmation event");
-    chat.open_full_access_confirmation(preset, return_to_permissions, profile_selection);
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-
     let cells = drain_insert_history(&mut rx);
-    assert_eq!(cells.len(), 1, "expected one mode-switch history cell");
-    assert_chatwidget_snapshot!(
-        "permissions_selection_history_after_mode_switch",
-        lines_to_single_string(&cells[0])
-    );
+    assert!(cells.is_empty(), "permission selection should stay silent");
 }
 
 #[tokio::test]
-async fn permissions_selection_history_snapshot_full_access_to_default() {
+async fn permissions_selection_full_access_to_default_stays_silent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     #[cfg(target_os = "windows")]
     {
@@ -1056,19 +1017,7 @@ async fn permissions_selection_history_snapshot_full_access_to_default() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     let cells = drain_insert_history(&mut rx);
-    assert_eq!(cells.len(), 1, "expected one mode-switch history cell");
-    #[cfg(target_os = "windows")]
-    insta::with_settings!({ snapshot_suffix => "windows" }, {
-        assert_chatwidget_snapshot!(
-            "permissions_selection_history_full_access_to_default",
-            lines_to_single_string(&cells[0])
-        );
-    });
-    #[cfg(not(target_os = "windows"))]
-    assert_chatwidget_snapshot!(
-        "permissions_selection_history_full_access_to_default",
-        lines_to_single_string(&cells[0])
-    );
+    assert!(cells.is_empty(), "permission selection should stay silent");
 }
 
 #[tokio::test]
@@ -1363,7 +1312,7 @@ async fn permissions_selection_sends_approvals_reviewer_in_override_turn_context
 }
 
 #[tokio::test]
-async fn permissions_full_access_history_cell_emitted_only_after_confirmation() {
+async fn permissions_full_access_does_not_open_confirmation() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     #[cfg(target_os = "windows")]
     {
@@ -1377,44 +1326,6 @@ async fn permissions_full_access_history_cell_emitted_only_after_confirmation() 
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
-    let mut open_confirmation_event = None;
-    let mut cells_before_confirmation = Vec::new();
-    while let Ok(event) = rx.try_recv() {
-        match event {
-            AppEvent::InsertHistoryCell(cell) => {
-                cells_before_confirmation.push(cell.display_lines(/*width*/ 80));
-            }
-            AppEvent::OpenFullAccessConfirmation {
-                preset,
-                return_to_permissions,
-                profile_selection,
-            } => {
-                open_confirmation_event = Some((preset, return_to_permissions, profile_selection));
-            }
-            _ => {}
-        }
-    }
-    if cfg!(not(target_os = "windows")) {
-        assert!(
-            cells_before_confirmation.is_empty(),
-            "did not expect history cell before confirming full access"
-        );
-    }
-    let (preset, return_to_permissions, profile_selection) =
-        open_confirmation_event.expect("expected full access confirmation event");
-    chat.open_full_access_confirmation(preset, return_to_permissions, profile_selection);
-
-    let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert!(
-        popup.contains("Enable full access?"),
-        "expected full access confirmation popup, got: {popup}"
-    );
-
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-    let cells_after_confirmation = drain_insert_history(&mut rx);
-    let total_history_cells = cells_before_confirmation.len() + cells_after_confirmation.len();
-    assert_eq!(
-        total_history_cells, 0,
-        "full access confirmation should not add a history message"
-    );
+    let cells = drain_insert_history(&mut rx);
+    assert!(cells.is_empty(), "permission selection should stay silent");
 }

@@ -1,7 +1,6 @@
 //! Runtime settings state and model/collaboration coordination for `ChatWidget`.
 
 use super::*;
-use crate::app_event::AppEvent;
 use crate::chatwidget::rate_limits::RATE_LIMIT_SWITCH_PROMPT_VIEW_ID;
 
 impl ChatWidget {
@@ -658,6 +657,7 @@ impl ChatWidget {
     }
 
     /// Cycle to the next collaboration mode variant (Plan -> Default -> Plan).
+    #[cfg(test)]
     pub(super) fn cycle_collaboration_mode(&mut self) {
         if !self.collaboration_modes_enabled() {
             return;
@@ -692,7 +692,6 @@ impl ChatWidget {
 
     pub(crate) fn set_collaboration_mask_from_user_action(&mut self, mask: CollaborationModeMask) {
         self.set_collaboration_mask(mask);
-        self.submit_collaboration_mode_settings_update();
     }
 
     /// Update the active collaboration mask.
@@ -712,28 +711,5 @@ impl ChatWidget {
         self.update_collaboration_mode_indicator();
         self.refresh_model_dependent_surfaces();
         self.request_redraw();
-    }
-
-    fn submit_collaboration_mode_settings_update(&self) {
-        let Some(thread_id) = self.thread_id else {
-            return;
-        };
-        self.app_event_tx.send(AppEvent::SubmitThreadOp {
-            thread_id,
-            op: AppCommand::override_turn_context(
-                /*cwd*/ None,
-                /*approval_policy*/ None,
-                /*approvals_reviewer*/ None,
-                /*permission_profile*/ None,
-                /*active_permission_profile*/ None,
-                /*windows_sandbox_level*/ None,
-                /*model*/ None,
-                /*effort*/ None,
-                /*summary*/ None,
-                /*service_tier*/ None,
-                Some(self.effective_collaboration_mode()),
-                /*personality*/ None,
-            ),
-        });
     }
 }
