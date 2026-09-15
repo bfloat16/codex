@@ -28,6 +28,9 @@ impl ChatWidget {
         {
             return false;
         }
+        if self.unified_exec_wait_streak.is_some() && header != "Waiting for background terminal" {
+            return false;
+        }
         let details = details
             .filter(|details| !details.is_empty())
             .map(|details| {

@@ -79,6 +79,8 @@ pub(crate) struct StatusIndicatorWidget {
     app_event_tx: AppEventSender,
     frame_requester: FrameRequester,
     animations_enabled: bool,
+    waiting_animation_started_at: Option<Instant>,
+    waiting_animation_duration: Duration,
 }
 
 // Format elapsed seconds into a compact human-friendly form used by the status line.
@@ -116,6 +118,8 @@ impl StatusIndicatorWidget {
             app_event_tx,
             frame_requester,
             animations_enabled,
+            waiting_animation_started_at: None,
+            waiting_animation_duration: Duration::from_secs(30),
         }
     }
 
@@ -126,6 +130,12 @@ impl StatusIndicatorWidget {
     /// Update the animated header label (left of the brackets).
     pub(crate) fn update_header(&mut self, header: String) {
         self.header = header;
+    }
+
+    pub(crate) fn reset_waiting_animation(&mut self, duration: Duration) {
+        self.waiting_animation_duration = duration;
+        self.waiting_animation_started_at = Some(Instant::now());
+        self.frame_requester.schedule_frame();
     }
 
     /// Update the details text shown below the header.
@@ -254,12 +264,17 @@ impl StatusIndicator<'_> {
             });
             spans.push(" ".into());
         }
-        let header_spans = shimmer_text(&row.header, motion_mode);
-        if waiting {
-            spans.extend(header_spans.into_iter().map(waiting_span));
+        let header_spans = if waiting {
+            waiting_header_spans(
+                &row.header,
+                row.waiting_animation_started_at,
+                row.waiting_animation_duration,
+                Instant::now(),
+            )
         } else {
-            spans.extend(header_spans);
-        }
+            shimmer_text(&row.header, motion_mode)
+        };
+        spans.extend(header_spans);
         if !spans.is_empty() {
             spans.push(" ".into());
         }
@@ -328,6 +343,33 @@ impl StatusIndicator<'_> {
 fn waiting_span(mut span: Span<'static>) -> Span<'static> {
     span.style = span.style.fg(Color::Yellow);
     span
+}
+
+fn waiting_header_spans(
+    header: &str,
+    started_at: Option<Instant>,
+    duration: Duration,
+    now: Instant,
+) -> Vec<Span<'static>> {
+    let chars = header.chars().collect::<Vec<_>>();
+    let highlighted = started_at.map_or(0, |started_at| {
+        let elapsed = now.saturating_duration_since(started_at);
+        let progress = (elapsed.as_secs_f64() / duration.as_secs_f64().max(1.0)).min(1.0);
+        (progress * chars.len() as f64).ceil() as usize
+    });
+    chars
+        .into_iter()
+        .enumerate()
+        .map(|(index, character)| {
+            let mut span = Span::from(character.to_string()).fg(Color::Yellow);
+            if index < highlighted {
+                span = span.bold();
+            } else {
+                span = span.dim();
+            }
+            span
+        })
+        .collect()
 }
 
 impl Renderable for StatusIndicator<'_> {

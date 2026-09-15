@@ -96,6 +96,8 @@ impl ChatWidget {
             // the transcript. Keep the header short so the interrupt hint remains visible.
             self.bottom_pane.ensure_status_indicator();
             self.bottom_pane
+                .reset_waiting_animation(Duration::from_secs(180));
+            self.bottom_pane
                 .set_interrupt_hint_visible(/*visible*/ true);
             self.status_state.terminal_title_status_kind =
                 TerminalTitleStatusKind::WaitingForBackgroundTerminal;

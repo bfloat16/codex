@@ -1261,6 +1261,13 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn reset_waiting_animation(&mut self, duration: Duration) {
+        if let Some(status) = self.status.as_mut() {
+            status.reset_waiting_animation(duration);
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn set_context_window(&mut self, percent: Option<i64>, used_tokens: Option<i64>) {
         if self.context_window_percent == percent && self.context_window_used_tokens == used_tokens
         {
