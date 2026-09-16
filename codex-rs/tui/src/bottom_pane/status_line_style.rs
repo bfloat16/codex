@@ -110,7 +110,14 @@ where
         if !spans.is_empty() {
             spans.push(STATUS_LINE_SEPARATOR.dim());
         }
-        let style = if use_theme_colors {
+        let style = if use_theme_colors && item == StatusLineItem::Permissions {
+            permission_style(&text).unwrap_or_else(|| {
+                let accent = StatusLineAccent::for_item(item);
+                soften_status_line_style(
+                    theme_style_for_accent(accent).unwrap_or_else(|| accent.fallback_style()),
+                )
+            })
+        } else if use_theme_colors {
             let accent = StatusLineAccent::for_item(item);
             soften_status_line_style(
                 theme_style_for_accent(accent).unwrap_or_else(|| accent.fallback_style()),
@@ -127,6 +134,17 @@ where
     }
 
     (!spans.is_empty()).then(|| Line::from(spans))
+}
+
+fn permission_style(text: &str) -> Option<Style> {
+    match text.trim() {
+        "Read Only" => Some(Style::default().fg(Color::White)),
+        "Plan Mode" => Some(Style::default().fg(Color::LightCyan)),
+        "Ask For Approval" => Some(Style::default().fg(Color::LightMagenta)),
+        "Approval For Me" => Some(Style::default().fg(Color::Yellow)),
+        "Full Access" => Some(Style::default().fg(Color::LightRed)),
+        _ => None,
+    }
 }
 
 fn soften_status_line_style(mut style: Style) -> Style {
@@ -319,5 +337,23 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn permission_status_labels_use_requested_colors() {
+        for (label, expected) in [
+            ("Read Only        ", Color::White),
+            ("Plan Mode       ", Color::LightCyan),
+            ("Ask For Approval", Color::LightMagenta),
+            ("Approval For Me ", Color::Yellow),
+            ("Full Access     ", Color::LightRed),
+        ] {
+            let line = status_line_from_segments(
+                [(StatusLineItem::Permissions, label.to_string())],
+                /*use_theme_colors*/ true,
+            )
+            .expect("permission status line");
+            assert_eq!(line.spans[0].style.fg, Some(expected), "{label:?}");
+        }
     }
 }

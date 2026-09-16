@@ -5,6 +5,8 @@ use crate::chatwidget::rate_limits::NUDGE_MODEL_SLUG;
 use crate::chatwidget::rate_limits::get_limits_duration;
 use codex_app_server_protocol::SpendControlLimitSnapshot;
 use codex_app_server_protocol::ThreadUsage;
+use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
+use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_READ_ONLY;
 use pretty_assertions::assert_eq;
 use ratatui::backend::TestBackend;
 use serial_test::serial;
@@ -2915,6 +2917,67 @@ async fn status_line_invalid_items_warn_once() {
     assert!(
         cells.is_empty(),
         "expected invalid status line warning to emit only once"
+    );
+}
+
+#[tokio::test]
+async fn permission_status_line_uses_mode_labels() {
+    let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.local_settings.tui.status_line = Some(Vec::new());
+
+    let set_profile = |chat: &mut ChatWidget, profile, id| {
+        chat.set_permission_profile_with_active_profile(
+            profile,
+            Some(ActivePermissionProfile::new(id)),
+        )
+        .expect("permission profile should be valid");
+    };
+
+    set_profile(
+        &mut chat,
+        PermissionProfile::read_only(),
+        BUILT_IN_PERMISSION_PROFILE_READ_ONLY,
+    );
+    chat.set_approval_policy(AskForApproval::OnRequest);
+    chat.set_approvals_reviewer(ApprovalsReviewer::User);
+    assert_eq!(
+        status_line_text(&chat),
+        Some(format!("{:<16}", "Read Only"))
+    );
+
+    set_profile(
+        &mut chat,
+        PermissionProfile::workspace_write(),
+        BUILT_IN_PERMISSION_PROFILE_WORKSPACE,
+    );
+    assert_eq!(
+        status_line_text(&chat),
+        Some("Ask For Approval".to_string())
+    );
+
+    chat.set_approvals_reviewer(ApprovalsReviewer::AutoReview);
+    assert_eq!(
+        status_line_text(&chat),
+        Some(format!("{:<16}", "Approval For Me"))
+    );
+
+    set_profile(
+        &mut chat,
+        PermissionProfile::Disabled,
+        BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS,
+    );
+    chat.set_approval_policy(AskForApproval::Never);
+    assert_eq!(
+        status_line_text(&chat),
+        Some(format!("{:<16}", "Full Access"))
+    );
+
+    let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
+        .expect("expected plan collaboration mode");
+    chat.set_collaboration_mask(plan_mask);
+    assert_eq!(
+        status_line_text(&chat),
+        Some(format!("{:<16}", "Plan Mode"))
     );
 }
 

@@ -19,6 +19,9 @@ use codex_config::ConfigLayerSource;
 use codex_config::os_host_name;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::ServiceTier;
+use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
+use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_READ_ONLY;
+use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_sandbox_summary::summarize_permission_profile;
 
@@ -862,7 +865,7 @@ impl ChatWidget {
 
     fn permission_status_display(&self) -> String {
         let label = if self.active_mode_kind() == ModeKind::Plan {
-            "Plan".to_string()
+            "Plan Mode".to_string()
         } else {
             permissions_display(&self.config)
         };
@@ -1240,10 +1243,27 @@ fn matches_window_label(window: &RateLimitWindowDisplay, label: &str) -> bool {
 
 fn permissions_display(config: &Config) -> String {
     let active_permission_profile = config.permissions.active_permission_profile();
-    if let Some(active_permission_profile) = active_permission_profile.as_ref()
-        && !active_permission_profile.id.starts_with(':')
-    {
-        return active_permission_profile.id.clone();
+    if let Some(active_permission_profile) = active_permission_profile.as_ref() {
+        match active_permission_profile.id.as_str() {
+            BUILT_IN_PERMISSION_PROFILE_READ_ONLY => return "Read Only".to_string(),
+            BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS => return "Full Access".to_string(),
+            BUILT_IN_PERMISSION_PROFILE_WORKSPACE => {
+                return match (
+                    AskForApproval::from(config.permissions.approval_policy.value()),
+                    config.approvals_reviewer,
+                ) {
+                    (AskForApproval::OnRequest, ApprovalsReviewer::AutoReview) => {
+                        "Approval For Me".to_string()
+                    }
+                    (AskForApproval::OnRequest, ApprovalsReviewer::User) => {
+                        "Ask For Approval".to_string()
+                    }
+                    _ => "Workspace".to_string(),
+                };
+            }
+            id if !id.starts_with(':') => return id.to_string(),
+            _ => {}
+        }
     }
 
     let permission_profile = config.permissions.effective_permission_profile();
@@ -1258,7 +1278,16 @@ fn permissions_display(config: &Config) -> String {
     if let Some(details) = summary.strip_prefix("workspace-write")
         && !details.contains("(network access enabled)")
     {
-        return "Workspace".to_string();
+        return match (
+            AskForApproval::from(config.permissions.approval_policy.value()),
+            config.approvals_reviewer,
+        ) {
+            (AskForApproval::OnRequest, ApprovalsReviewer::AutoReview) => {
+                "Approval For Me".to_string()
+            }
+            (AskForApproval::OnRequest, ApprovalsReviewer::User) => "Ask For Approval".to_string(),
+            _ => "Workspace".to_string(),
+        };
     }
     if permission_profile == PermissionProfile::Disabled {
         return "Full Access".to_string();
