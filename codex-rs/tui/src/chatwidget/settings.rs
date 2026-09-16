@@ -672,7 +672,6 @@ impl ChatWidget {
     }
 
     pub(super) fn cycle_collaboration_mode_preserving_model(&mut self) {
-        let current_model = self.current_model().to_string();
         let Some(next_mask) = collaboration_modes::next_mask(
             self.model_catalog.as_ref(),
             self.active_collaboration_mask.as_ref(),
@@ -680,14 +679,19 @@ impl ChatWidget {
             return;
         };
         let next_mode = next_mask.mode;
-        self.set_collaboration_mask_from_user_action(CollaborationModeMask {
-            model: Some(current_model),
-            ..next_mask
-        });
+        self.set_collaboration_mask_preserving_model(next_mask);
         debug_assert_eq!(
             self.active_mode_kind(),
             next_mode.unwrap_or(ModeKind::Default)
         );
+    }
+
+    pub(super) fn set_collaboration_mask_preserving_model(&mut self, mask: CollaborationModeMask) {
+        let current_model = self.current_model().to_string();
+        self.set_collaboration_mask_from_user_action(CollaborationModeMask {
+            model: Some(current_model),
+            ..mask
+        });
     }
 
     pub(crate) fn set_collaboration_mask_from_user_action(&mut self, mask: CollaborationModeMask) {

@@ -1429,6 +1429,7 @@ async fn plan_slash_command_switches_to_plan_mode() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     let initial = chat.current_collaboration_mode().clone();
+    let initial_model = chat.current_model().to_string();
 
     chat.dispatch_command(SlashCommand::Plan);
 
@@ -1440,6 +1441,7 @@ async fn plan_slash_command_switches_to_plan_mode() {
     }
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
     assert_eq!(chat.current_collaboration_mode(), &initial);
+    assert_eq!(chat.current_model(), initial_model);
 }
 
 #[tokio::test]

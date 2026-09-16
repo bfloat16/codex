@@ -93,7 +93,7 @@ impl ChatWidget {
             return false;
         }
         if let Some(mask) = collaboration_modes::plan_mask(self.model_catalog.as_ref()) {
-            self.set_collaboration_mask_from_user_action(mask);
+            self.set_collaboration_mask_preserving_model(mask);
             true
         } else {
             self.add_info_message(
