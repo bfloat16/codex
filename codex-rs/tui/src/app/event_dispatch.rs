@@ -626,20 +626,33 @@ impl App {
                 };
                 match rollback_target {
                     Ok(target) => {
-                        let file_count = match app_server
+                        let file_restore = match app_server
                             .thread_file_change_read(
                                 thread_id,
                                 target.before_turn_id.clone(),
                             )
                             .await
                         {
-                            Ok(response) => response.data.len(),
+                            Ok(response) => {
+                                let restorable = response
+                                    .data
+                                    .iter()
+                                    .filter(|change| {
+                                        change.disposition
+                                            == codex_app_server_protocol::ThreadFileChangeDisposition::Restorable
+                                    })
+                                    .count();
+                                crate::app_backtrack::BacktrackFileRestoreSummary {
+                                    restorable,
+                                    blocked: response.data.len().saturating_sub(restorable),
+                                }
+                            }
                             Err(err) => {
                                 tracing::warn!("failed to preview tracked file restore: {err}");
-                                0
+                                crate::app_backtrack::BacktrackFileRestoreSummary::default()
                             }
                         };
-                        self.show_backtrack_restore_picker(selection, target, file_count);
+                        self.show_backtrack_restore_picker(selection, target, file_restore);
                     }
                     Err(err) => {
                         self.handle_backtrack_rollback_failed();

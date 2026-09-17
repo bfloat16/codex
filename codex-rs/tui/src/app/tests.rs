@@ -56,6 +56,7 @@ mod transcript_composer;
 mod turn_submission;
 
 use super::*;
+use crate::app_backtrack::BacktrackFileRestoreSummary;
 use crate::app_backtrack::BacktrackRollbackTarget;
 use crate::app_backtrack::BacktrackSelection;
 use crate::app_backtrack::BacktrackState;
@@ -7257,7 +7258,10 @@ async fn double_esc_opens_backtrack_picker_below_composer() -> Result<()> {
             before_turn_id: "turn-2".to_string(),
             legacy_num_turns: 1,
         },
-        /*file_count*/ 2,
+        BacktrackFileRestoreSummary {
+            restorable: 1,
+            blocked: 1,
+        },
     );
     terminal.draw(|frame| {
         app.chat_widget.render(frame.area(), frame.buffer_mut());

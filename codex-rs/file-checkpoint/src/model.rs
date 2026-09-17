@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
@@ -48,6 +49,7 @@ pub(super) enum ImageIdentity {
 pub(super) struct TurnCheckpoint {
     pub(super) turn_id: String,
     pub(super) before_by_file: HashMap<FileKey, BeforeImage>,
+    pub(super) changed_files: HashSet<FileKey>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -96,6 +98,7 @@ impl CheckpointState {
                     self.turns.push(TurnCheckpoint {
                         turn_id,
                         before_by_file: HashMap::new(),
+                        changed_files: HashSet::new(),
                     });
                 }
             }
@@ -112,6 +115,12 @@ impl CheckpointState {
                 }
             }
             JournalEntry::AfterImage { file, after } => {
+                // Turns do not overlap, so the latest begun turn owns every managed write until
+                // the next BeginTurn entry. This also reconstructs ownership for older journals
+                // whose AfterImage entries do not carry an explicit turn id.
+                if let Some(turn) = self.turns.last_mut() {
+                    turn.changed_files.insert(file.clone());
+                }
                 self.expected_by_file.insert(file, after);
             }
             JournalEntry::Restore { restored } => {
@@ -144,10 +153,12 @@ impl CheckpointState {
         };
         let mut target_by_file = HashMap::new();
         for turn in &self.turns[start..] {
-            for (file, before) in &turn.before_by_file {
-                target_by_file
-                    .entry(file.clone())
-                    .or_insert_with(|| before.clone());
+            for file in &turn.changed_files {
+                if let Some(before) = turn.before_by_file.get(file) {
+                    target_by_file
+                        .entry(file.clone())
+                        .or_insert_with(|| before.clone());
+                }
             }
         }
         let mut plan = target_by_file
@@ -171,9 +182,9 @@ impl CheckpointState {
         let tracked = self
             .turns
             .iter()
-            .flat_map(|turn| turn.before_by_file.keys())
+            .flat_map(|turn| &turn.changed_files)
             .cloned()
-            .collect::<std::collections::HashSet<_>>();
+            .collect::<HashSet<_>>();
         self.expected_by_file
             .retain(|file, _| tracked.contains(file));
     }

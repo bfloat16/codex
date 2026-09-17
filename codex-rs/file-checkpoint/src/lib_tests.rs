@@ -215,6 +215,57 @@ async fn skips_file_changed_outside_managed_tools() {
 }
 
 #[tokio::test]
+async fn ignores_captured_file_that_managed_tools_did_not_change() {
+    let home = TempDir::new().expect("temp dir");
+    let workspace = TempDir::new().expect("temp dir");
+    let changed_path = path_uri(&workspace.path().join("changed.txt"));
+    let unchanged_path = path_uri(&workspace.path().join("unchanged.txt"));
+    write(&changed_path, "original changed\n").await;
+    write(&unchanged_path, "original unchanged\n").await;
+    let store = FileCheckpointStore::open(&absolute(home.path()), ThreadId::new())
+        .await
+        .expect("open checkpoint store");
+
+    store.begin_turn("turn-1").await.expect("begin turn");
+    store
+        .capture_before_write(
+            "turn-1",
+            ENVIRONMENT_ID,
+            LOCAL_FS.as_ref(),
+            &[changed_path.clone(), unchanged_path.clone()],
+        )
+        .await
+        .expect("capture candidate files");
+    write(&changed_path, "managed\n").await;
+    store
+        .record_after_images(
+            ENVIRONMENT_ID,
+            &[FileAfterImage {
+                path: changed_path.clone(),
+                image: FileImage::Contents(b"managed\n".to_vec()),
+            }],
+        )
+        .await
+        .expect("record changed file");
+    write(&unchanged_path, "manual\n").await;
+
+    let preview = store
+        .preview("turn-1", &file_systems())
+        .await
+        .expect("preview restore");
+    assert_eq!(
+        preview.files,
+        vec![super::FileRestorePreviewEntry {
+            environment_id: ENVIRONMENT_ID.to_string(),
+            path: super::model::persisted_path(&changed_path).expect("persisted path"),
+            change_kind: FileRestoreChangeKind::Update,
+            disposition: FileRestoreDisposition::Restorable,
+            detail: None,
+        }]
+    );
+}
+
+#[tokio::test]
 async fn reloads_journal_and_discards_rewound_turns() {
     let home = TempDir::new().expect("temp dir");
     let workspace = TempDir::new().expect("temp dir");

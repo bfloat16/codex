@@ -91,6 +91,12 @@ pub(crate) struct BacktrackRollbackTarget {
     pub(crate) legacy_num_turns: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct BacktrackFileRestoreSummary {
+    pub(crate) restorable: usize,
+    pub(crate) blocked: usize,
+}
+
 /// A user-visible backtrack choice that can be reopened after truncating later history.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BacktrackSelection {
@@ -310,20 +316,22 @@ impl App {
         &mut self,
         selection: BacktrackSelection,
         target: BacktrackRollbackTarget,
-        file_count: usize,
+        file_restore: BacktrackFileRestoreSummary,
     ) {
+        let file_count = file_restore.restorable;
+        let file_label = if file_count == 1 { "file" } else { "files" };
         let mut options = Vec::new();
         if file_count > 0 {
             options.push((
                 "Restore code and conversation",
-                format!("Restore {file_count} tracked files and remove later messages"),
+                format!("Restore {file_count} tracked {file_label} and remove later messages"),
                 Some(crate::app_event::BacktrackRestoreMode::CodeAndConversation),
             ));
         }
         options.push((
             "Restore conversation",
             if file_count > 0 {
-                "Keep tracked file changes and remove later messages".to_string()
+                "Keep restorable tracked file changes and remove later messages".to_string()
             } else {
                 "Remove this message and every later message".to_string()
             },
@@ -332,7 +340,7 @@ impl App {
         if file_count > 0 {
             options.push((
                 "Restore code",
-                format!("Restore {file_count} tracked files and keep the conversation"),
+                format!("Restore {file_count} tracked {file_label} and keep the conversation"),
                 Some(crate::app_event::BacktrackRestoreMode::Code),
             ));
         }
@@ -364,14 +372,25 @@ impl App {
                 }
             })
             .collect();
+        let footer_note = if file_restore.blocked == 0 {
+            "Only changes made through Codex apply_patch are restored; shell and manual edits are left untouched."
+                .to_string()
+        } else {
+            let blocked_file_label = if file_restore.blocked == 1 {
+                "file"
+            } else {
+                "files"
+            };
+            format!(
+                "Only safe Codex apply_patch changes are restored; {} conflicting or unavailable tracked {} will be left untouched.",
+                file_restore.blocked, blocked_file_label
+            )
+        };
         self.chat_widget.show_selection_view(SelectionViewParams {
             view_id: Some(BACKTRACK_RESTORE_VIEW_ID),
             title: Some("Rewind".to_string()),
             subtitle: Some("Choose what to restore.".to_string()),
-            footer_note: Some(
-                "Only changes made through Codex apply_patch are restored; shell and manual edits are left untouched."
-                    .into(),
-            ),
+            footer_note: Some(footer_note.into()),
             items,
             initial_selected_idx: Some(0),
             on_cancel: Some(Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore))),
