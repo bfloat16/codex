@@ -178,7 +178,7 @@ pub(super) struct StatusState {
     pub(super) active_compaction: Option<CompactionStatusKind>,
     pub(super) pre_compaction_status: Option<StatusIndicatorState>,
     pub(super) pending_guardian_review_status: PendingGuardianReviewStatus,
-    waiting_status: Option<StatusIndicatorState>,
+    pub(super) waiting_status: Option<StatusIndicatorState>,
     pub(super) terminal_title_status_kind: TerminalTitleStatusKind,
     pub(super) retry_status_header: Option<String>,
     pub(super) pending_status_indicator_restore: bool,

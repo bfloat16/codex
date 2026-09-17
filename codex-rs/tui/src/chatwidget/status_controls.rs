@@ -116,6 +116,7 @@ impl ChatWidget {
             StatusDetailsCapitalization::Preserve,
             status.details_max_lines,
         );
+        self.restore_status_indicator_after_modal();
     }
 
     pub(super) fn clear_waiting(&mut self) {
@@ -123,6 +124,56 @@ impl ChatWidget {
         let Some(status) = self.status_state.finish_waiting() else {
             return;
         };
+        self.set_status(
+            status.header,
+            status.details,
+            StatusDetailsCapitalization::Preserve,
+            status.details_max_lines,
+        );
+    }
+
+    pub(super) fn restore_status_indicator_after_modal(&mut self) {
+        if !self.bottom_pane.is_task_running() {
+            return;
+        }
+        // Modal views hide the status row. Keep waiting bookkeeping intact, but show the cached
+        // pre-wait status after the modal closes so the live banner can resume scrolling.
+        let has_non_request_waiting_item = self
+            .waiting_items
+            .iter()
+            .any(|item_id| !item_id.starts_with("request:"));
+        if has_non_request_waiting_item {
+            if self.bottom_pane.status_widget().is_none() {
+                self.bottom_pane.ensure_status_indicator();
+                let status = self.status_state.current_status.clone();
+                self.set_status(
+                    status.header,
+                    status.details,
+                    StatusDetailsCapitalization::Preserve,
+                    status.details_max_lines,
+                );
+            }
+            return;
+        }
+        if !self.waiting_items.is_empty() {
+            let Some(status) = self.status_state.waiting_status.clone() else {
+                return;
+            };
+            self.bottom_pane.ensure_status_indicator();
+            self.bottom_pane.update_status(
+                status.header,
+                status.details,
+                StatusDetailsCapitalization::Preserve,
+                status.details_max_lines,
+            );
+            return;
+        }
+        if self.bottom_pane.status_widget().is_some() {
+            return;
+        }
+
+        self.bottom_pane.ensure_status_indicator();
+        let status = self.status_state.current_status.clone();
         self.set_status(
             status.header,
             status.details,

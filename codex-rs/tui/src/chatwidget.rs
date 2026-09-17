@@ -1053,6 +1053,9 @@ impl ChatWidget {
                 .is_some_and(|thread_id| thread_id.to_string() == request_thread_id)
         }) && self.interrupts.remove_resolved_prompt(request);
         let removed_visible = self.bottom_pane.dismiss_app_server_request(request);
+        if removed_visible {
+            self.restore_status_indicator_after_modal();
+        }
         if removed_deferred || removed_visible {
             self.request_redraw();
         }

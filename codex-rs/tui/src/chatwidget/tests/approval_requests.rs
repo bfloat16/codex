@@ -5,6 +5,69 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn approval_modal_preserves_working_status_after_resolution() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    handle_turn_started(&mut chat, "turn-approval-status");
+    chat.set_status_header("Analyzing".to_string());
+
+    let approval_id = "approval-status";
+    handle_exec_approval_request(
+        &mut chat,
+        approval_id,
+        ExecApprovalRequestEvent {
+            kind: Default::default(),
+            call_id: approval_id.to_string(),
+            approval_id: Some(approval_id.to_string()),
+            turn_id: "turn-approval-status".to_string(),
+            environment_id: None,
+            command: vec!["echo".to_string(), "hello".to_string()],
+            cwd: AbsolutePathBuf::current_dir().expect("current dir"),
+            reason: None,
+            network_approval_context: None,
+            proposed_execpolicy_amendment: None,
+            proposed_network_policy_amendments: None,
+            additional_permissions: None,
+            available_decisions: None,
+        },
+    );
+
+    assert_eq!(
+        chat.bottom_pane
+            .status_widget()
+            .map(crate::status_indicator_widget::StatusIndicatorWidget::header),
+        Some("Waiting")
+    );
+    assert!(chat.bottom_pane.has_active_view());
+
+    chat.bottom_pane.hide_status_indicator();
+    assert!(!chat.bottom_pane.status_indicator_visible());
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    assert!(!chat.bottom_pane.has_active_view());
+    assert_eq!(
+        chat.bottom_pane
+            .status_widget()
+            .map(crate::status_indicator_widget::StatusIndicatorWidget::header),
+        Some("Analyzing")
+    );
+
+    chat.dismiss_app_server_request(
+        &crate::app::app_server_requests::ResolvedAppServerRequest::ExecApproval {
+            thread_id: chat.thread_id.map(|id| id.to_string()).unwrap_or_default(),
+            id: approval_id.to_string(),
+        },
+    );
+
+    assert_eq!(
+        chat.bottom_pane
+            .status_widget()
+            .map(crate::status_indicator_widget::StatusIndicatorWidget::header),
+        Some("Analyzing")
+    );
+}
+
+#[tokio::test]
 async fn exec_approval_emits_proposed_command_and_decision_history() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
