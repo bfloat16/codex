@@ -170,6 +170,7 @@ async fn steering_does_not_wait_for_realtime_history() {
 #[tokio::test]
 async fn accepted_input_applies_thread_settings() {
     let (session, turn_context, _rx) = make_session_and_context_with_rx().await;
+    session.refresh_mcp_if_dirty().await;
     let config = session.get_config().await;
     handle(
         &session,
@@ -199,15 +200,22 @@ async fn accepted_input_applies_thread_settings() {
     )
     .await
     .expect("submit user turn");
+    session.refresh_mcp_if_dirty().await;
 
     let state = session.state.lock().await;
     assert_eq!(
         state.session_configuration.step_settings.approvals_reviewer,
         codex_config::types::ApprovalsReviewer::AutoReview
     );
-    assert!(
-        session.mcp_refresh.is_pending(),
-        "server elicitation authority changes must refresh MCP state"
+    assert!(!session.mcp_refresh.is_pending());
+    assert_eq!(
+        session
+            .services
+            .mcp_runtime
+            .current_config()
+            .expect("configured MCP runtime")
+            .approvals_reviewer,
+        codex_config::types::ApprovalsReviewer::AutoReview
     );
 }
 

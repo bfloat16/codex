@@ -225,6 +225,42 @@ impl McpConfig {
         self.server_permission_profiles.get(server_name)
     }
 
+    pub(crate) fn update_execution_authority(
+        &mut self,
+        approval_policy: Constrained<AskForApproval>,
+        permission_profile: PermissionProfile,
+        approvals_reviewer: ApprovalsReviewer,
+        environment_profiles: &HashMap<String, PermissionProfile>,
+    ) {
+        let published_server_profiles = std::mem::take(&mut self.server_permission_profiles);
+        self.approval_policy = approval_policy;
+        self.permission_profile = permission_profile;
+        self.approvals_reviewer = approvals_reviewer;
+        self.server_permission_profiles = published_server_profiles
+            .into_keys()
+            .filter_map(|server_name| {
+                let server = self.mcp_server_catalog.server(&server_name)?;
+                let permission_profile = if server
+                    .source()
+                    .is_host_owned_apps(&server_name, server.config())
+                {
+                    &self.permission_profile
+                } else if let Some(permission_profile) =
+                    environment_profiles.get(&server.config().environment_id)
+                {
+                    permission_profile
+                } else if server.config().is_local_environment()
+                    || matches!(server.source(), McpServerSource::SelectedPlugin(_))
+                {
+                    &self.permission_profile
+                } else {
+                    return None;
+                };
+                Some((server_name, permission_profile.clone()))
+            })
+            .collect();
+    }
+
     /// Standalone discovery and resource reads must not inherit thread execution authority.
     pub fn for_threadless_operations(&self, servers: &HashMap<String, EffectiveMcpServer>) -> Self {
         let mut config = self.clone();

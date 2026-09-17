@@ -1,3 +1,4 @@
+use super::mcp_refresh::McpAuthorityInvalidationGuard;
 use super::mcp_refresh::McpRefreshInvalidationGuard;
 use super::*;
 use crate::environment_selection::combine_selected_capability_roots;
@@ -208,7 +209,16 @@ impl Session {
             }
 
             if !self.mcp_refresh.claim() {
-                return;
+                if !self.mcp_refresh.claim_authority() {
+                    return;
+                }
+                let mut authority_invalidation = McpAuthorityInvalidationGuard {
+                    refresh: &self.mcp_refresh,
+                    published: false,
+                };
+                self.update_mcp_execution_authority().await;
+                authority_invalidation.published = true;
+                continue;
             }
             let mut refresh_invalidation = McpRefreshInvalidationGuard {
                 refresh: &self.mcp_refresh,

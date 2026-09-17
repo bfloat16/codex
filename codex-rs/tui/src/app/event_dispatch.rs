@@ -2634,24 +2634,12 @@ impl App {
                 }
                 self.config.approvals_reviewer = policy;
                 self.chat_widget.set_approvals_reviewer(policy);
+                // Permission mode changes are session-scoped. Writing config.toml here would
+                // reload every thread's user config and rebuild MCP for a local mode switch.
+                self.runtime_permission_profile_override =
+                    Some(RuntimePermissionProfileOverride::from_config(&self.config));
                 self.sync_active_thread_permission_settings_to_cached_session()
                     .await;
-                if let Err(err) = crate::config_update::write_config_batch(
-                    app_server.request_handle(),
-                    vec![crate::config_update::replace_config_value(
-                        "approvals_reviewer",
-                        serde_json::json!(policy.to_string()),
-                    )],
-                )
-                .await
-                {
-                    tracing::error!(
-                        error = %err,
-                        "failed to persist approvals reviewer update"
-                    );
-                    self.chat_widget
-                        .add_error_message(format!("Failed to save approvals reviewer: {err}"));
-                }
             }
             AppEvent::FetchExperimentalFeatures { thread_id, response_tx } => {
                 self.fetch_experimental_features(app_server, thread_id, response_tx);

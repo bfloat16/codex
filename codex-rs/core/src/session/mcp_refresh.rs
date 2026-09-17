@@ -7,6 +7,7 @@ use tokio::sync::SemaphorePermit;
 /// Owns MCP invalidation and the single gate used to publish runtime updates.
 pub(super) struct McpRefresh {
     pending: AtomicBool,
+    authority_pending: AtomicBool,
     gate: Semaphore,
 }
 
@@ -14,6 +15,7 @@ impl McpRefresh {
     pub(super) fn new() -> Self {
         Self {
             pending: AtomicBool::new(false),
+            authority_pending: AtomicBool::new(false),
             gate: Semaphore::new(/*permits*/ 1),
         }
     }
@@ -22,13 +24,26 @@ impl McpRefresh {
         self.pending.store(true, Ordering::Release);
     }
 
+    pub(super) fn invalidate_authority(&self) {
+        self.authority_pending.store(true, Ordering::Release);
+    }
+
     #[cfg(test)]
     pub(super) fn is_pending(&self) -> bool {
         self.pending.load(Ordering::Acquire)
     }
 
+    #[cfg(test)]
+    pub(super) fn is_authority_pending(&self) -> bool {
+        self.authority_pending.load(Ordering::Acquire)
+    }
+
     pub(super) fn claim(&self) -> bool {
         self.pending.swap(false, Ordering::AcqRel)
+    }
+
+    pub(super) fn claim_authority(&self) -> bool {
+        self.authority_pending.swap(false, Ordering::AcqRel)
     }
 
     #[tracing::instrument(name = "mcp.runtime.refresh_wait", skip_all)]
@@ -51,6 +66,20 @@ impl Drop for McpRefreshInvalidationGuard<'_> {
     fn drop(&mut self) {
         if !self.published {
             self.refresh.invalidate();
+        }
+    }
+}
+
+/// Restores a claimed authority update when its task is cancelled before publication.
+pub(super) struct McpAuthorityInvalidationGuard<'a> {
+    pub(super) refresh: &'a McpRefresh,
+    pub(super) published: bool,
+}
+
+impl Drop for McpAuthorityInvalidationGuard<'_> {
+    fn drop(&mut self) {
+        if !self.published {
+            self.refresh.invalidate_authority();
         }
     }
 }

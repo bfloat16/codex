@@ -1203,7 +1203,7 @@ pub(crate) enum AppEvent {
     /// Select a named permission profile, optionally applying built-in mode settings too.
     SelectPermissionProfile(PermissionProfileSelection),
 
-    /// Update the current approvals reviewer in the running app and widget.
+    /// Update the current session's approvals reviewer without persisting user config.
     UpdateApprovalsReviewer(ApprovalsReviewer),
 
     /// Discover experimental features for the requesting popup only.

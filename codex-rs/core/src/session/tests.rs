@@ -9441,6 +9441,28 @@ async fn cancelled_mcp_refresh_remains_pending() {
 }
 
 #[tokio::test]
+async fn cancelled_mcp_authority_update_remains_pending() {
+    let (session, _turn_context) = make_session_and_context().await;
+    let session = Arc::new(session);
+    session.refresh_mcp_if_dirty().await;
+    session.mcp_refresh.invalidate_authority();
+
+    {
+        let _state = session.state.lock().await;
+        {
+            let mut refresh = Box::pin(session.refresh_mcp_if_dirty());
+            let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
+            assert!(std::future::Future::poll(refresh.as_mut(), &mut context).is_pending());
+            assert!(!session.mcp_refresh.is_authority_pending());
+        }
+    }
+
+    assert!(session.mcp_refresh.is_authority_pending());
+    session.refresh_mcp_if_dirty().await;
+    assert!(!session.mcp_refresh.is_authority_pending());
+}
+
+#[tokio::test]
 async fn mcp_elicitation_reviewer_is_reused_across_runtime_refreshes() {
     let (session, _turn_context) = make_session_and_context().await;
     let session = Arc::new(session);
@@ -9453,9 +9475,37 @@ async fn mcp_elicitation_reviewer_is_reused_across_runtime_refreshes() {
 }
 
 #[tokio::test]
-async fn mcp_policy_changes_schedule_runtime_refresh() {
+async fn mode_and_permission_changes_do_not_refresh_mcp_connections() {
     let (session, _turn_context) = make_session_and_context().await;
     let session = Arc::new(session);
+    session.refresh_mcp_if_dirty().await;
+    let before = session
+        .services
+        .mcp_runtime
+        .current_binding()
+        .await
+        .expect("initial MCP binding");
+    let mut plan_mode = session.thread_settings_snapshot().await.collaboration_mode;
+    plan_mode.mode = ModeKind::Plan;
+    session
+        .update_settings(SessionSettingsUpdate {
+            step_settings: StepSettingsUpdate {
+                collaboration_mode: Some(plan_mode),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await
+        .expect("Plan mode update should succeed");
+    let after_plan = session
+        .services
+        .mcp_runtime
+        .current_binding()
+        .await
+        .expect("MCP binding after Plan mode update");
+    assert!(!session.mcp_refresh.is_pending());
+    assert!(!session.mcp_refresh.is_authority_pending());
+    assert!(Arc::ptr_eq(&before, &after_plan));
 
     session
         .new_turn_with_sub_id(
@@ -9471,8 +9521,22 @@ async fn mcp_policy_changes_schedule_runtime_refresh() {
         )
         .await
         .expect("approval policy update should succeed");
+    assert!(!session.mcp_refresh.is_pending());
+    assert!(session.mcp_refresh.is_authority_pending());
+    session.refresh_mcp_if_dirty().await;
 
-    assert!(session.mcp_refresh.is_pending());
+    let after = session
+        .services
+        .mcp_runtime
+        .current_binding()
+        .await
+        .expect("updated MCP binding");
+    assert!(!session.mcp_refresh.is_pending());
+    assert!(!Arc::ptr_eq(&after_plan, &after));
+    assert_eq!(
+        after.config().approval_policy.value(),
+        AskForApproval::Never
+    );
 }
 
 #[tokio::test]

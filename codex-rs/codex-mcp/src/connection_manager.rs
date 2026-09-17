@@ -786,6 +786,17 @@ impl McpConnectionSet {
         !self.servers.is_empty()
     }
 
+    pub(crate) fn update_execution_authority(&self, config: Arc<crate::McpConfig>) -> bool {
+        let Ok(mut authority) = self.elicitation_requests.authority.lock() else {
+            return false;
+        };
+        let Some(authority) = authority.as_mut() else {
+            return false;
+        };
+        authority.config = config;
+        true
+    }
+
     pub(crate) fn contains_server(&self, server_name: &str) -> bool {
         self.servers.contains_key(server_name)
     }

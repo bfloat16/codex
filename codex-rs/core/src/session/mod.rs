@@ -1719,7 +1719,14 @@ impl Session {
         should_commit: impl FnOnce(&SessionConfiguration, &SessionConfiguration) -> bool + Send,
     ) -> ConstraintResult<Option<SessionSettingsCommit>> {
         let notify_config_contributors = !self.services.extensions.config_contributors().is_empty();
-        let (commit, previous_config, new_config, permission_profile_changed, mcp_inputs_changed) = {
+        let (
+            commit,
+            previous_config,
+            new_config,
+            permission_profile_changed,
+            mcp_connection_inputs_changed,
+            mcp_execution_authority_changed,
+        ) = {
             let mut state = self.state.lock().await;
             let updated = match self.apply_session_settings(&state.session_configuration, &updates)
             {
@@ -1740,8 +1747,10 @@ impl Session {
             let updated_permission_profile = updated.permission_profile();
             let permission_profile_changed =
                 previous_permission_profile != updated_permission_profile;
-            let mcp_inputs_changed =
-                self.mcp_inputs_differ(&state.session_configuration, &updated, &updates);
+            let mcp_connection_inputs_changed =
+                self.mcp_connection_inputs_differ(&state.session_configuration, &updated, &updates);
+            let mcp_execution_authority_changed =
+                self.mcp_execution_authority_differs(&state.session_configuration, &updated);
             let root_service_tier_changed = updated.parent_thread_id.is_none()
                 && state.session_configuration.step_settings.service_tier
                     != updated.step_settings.service_tier;
@@ -1750,8 +1759,11 @@ impl Session {
                     .model_client
                     .update_provider(model_provider.provider.clone());
             }
-            if mcp_inputs_changed {
+            if mcp_connection_inputs_changed {
                 self.mark_mcp_runtime_dirty();
+            }
+            if mcp_execution_authority_changed {
+                self.mcp_refresh.invalidate_authority();
             }
             let environment_config = updated.inferred_environment_config();
             if let Some(environments) = &updates.environments {
@@ -1788,7 +1800,8 @@ impl Session {
                 previous_config,
                 new_config,
                 permission_profile_changed,
-                mcp_inputs_changed,
+                mcp_connection_inputs_changed,
+                mcp_execution_authority_changed,
             )
         };
         self.emit_config_changed_contributors(previous_config.as_ref(), new_config.as_ref());
@@ -1796,7 +1809,7 @@ impl Session {
             self.refresh_managed_network_proxy_for_current_permission_profile()
                 .await;
         }
-        if mcp_inputs_changed {
+        if mcp_connection_inputs_changed || mcp_execution_authority_changed {
             self.schedule_mcp_prewarm();
         }
         self.refresh_active_turn_runtime_permissions().await;

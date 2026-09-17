@@ -16,6 +16,8 @@ use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use async_channel::Sender;
+use codex_config::Constrained;
+use codex_config::types::ApprovalsReviewer;
 use codex_config::types::McpServerDisabledReason;
 use codex_connectors::ConnectorRuntimeContextKey;
 use codex_connectors::ConnectorRuntimeManager;
@@ -31,6 +33,7 @@ use codex_protocol::mcp::CallToolResult;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::mcp::McpResourceOriginCheckpoint;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_rmcp_client::ElicitationResponse;
@@ -277,6 +280,45 @@ impl McpRuntime {
     pub async fn replace_fresh(&self, input: McpRuntimeInput) -> anyhow::Result<Vec<ToolInfo>> {
         self.publish(input, /*previous*/ None).await;
         self.latest_hard_refresh_codex_apps_tools_cache().await
+    }
+
+    /// Publishes new approval and sandbox authority without rebuilding MCP connections.
+    pub fn update_execution_authority(
+        &self,
+        approval_policy: Constrained<AskForApproval>,
+        permission_profile: PermissionProfile,
+        approvals_reviewer: ApprovalsReviewer,
+        environment_profiles: HashMap<String, PermissionProfile>,
+    ) -> bool {
+        let current = self.current.load_full();
+        let Some(current_config) = current.config.as_ref() else {
+            return false;
+        };
+        let mut config = current_config.as_ref().clone();
+        config.update_execution_authority(
+            approval_policy,
+            permission_profile,
+            approvals_reviewer,
+            &environment_profiles,
+        );
+        let config = Arc::new(config);
+        if !current
+            .connections
+            .update_execution_authority(Arc::clone(&config))
+        {
+            return false;
+        }
+        self.current.store(Arc::new(PublishedMcpRuntime {
+            connections: Arc::clone(&current.connections),
+            config: Some(config),
+            auth: current.auth.clone(),
+            auth_token: current.auth_token.clone(),
+            plugins_available: current.plugins_available,
+            ready_selected_capability_roots: current.ready_selected_capability_roots.clone(),
+            selected_environments: current.selected_environments.clone(),
+            cached_binding: Mutex::new(None),
+        }));
+        true
     }
 
     async fn publish(&self, input: McpRuntimeInput, previous: Option<&McpConnectionSet>) {
@@ -898,6 +940,89 @@ mod tests {
         let (publish, gate) = McpPublicationGate::pending();
         drop(publish);
         assert!(!gate.wait().await);
+    }
+
+    #[tokio::test]
+    async fn execution_authority_updates_without_replacing_connections() -> anyhow::Result<()> {
+        let codex_home = tempfile::tempdir()?;
+        let local_server = stdio_server(DEFAULT_MCP_SERVER_ENVIRONMENT_ID);
+        let remote_server = stdio_server("remote");
+        let mut catalog = crate::ResolvedMcpCatalog::builder();
+        catalog.register(crate::McpServerRegistration::from_config(
+            "local".to_string(),
+            local_server,
+        ));
+        catalog.register(crate::McpServerRegistration::from_config(
+            "remote".to_string(),
+            remote_server,
+        ));
+        let mut config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
+        config.mcp_server_catalog = catalog.build();
+        config.server_permission_profiles = HashMap::from([
+            ("local".to_string(), PermissionProfile::read_only()),
+            ("remote".to_string(), PermissionProfile::workspace_write()),
+        ]);
+        let cache_key = ConnectorRuntimeContextKey::personal(
+            /*account_id*/ None, /*chatgpt_user_id*/ None,
+        );
+        let runtime = McpRuntime::new(McpRuntimeInput {
+            startup_policy: McpStartupPolicy::Eager,
+            config: Arc::new(config),
+            plugins_available: false,
+            ready_selected_capability_roots: Vec::new(),
+            mcp_servers: HashMap::new(),
+            submit_id: "authority-update-test".to_string(),
+            tx_event: None,
+            startup_cancellation_token: CancellationToken::new(),
+            runtime_context: McpRuntimeContext::new(
+                Arc::new(environment_manager_without_environments()),
+                codex_home.path().to_path_buf(),
+            ),
+            codex_apps_tools_cache: ConnectorRuntimeManager::default(),
+            tool_catalog_cache: McpToolCatalogCache::default(),
+            codex_apps_tools_cache_key: cache_key,
+            client_mcp_extensions: ClientMcpExtensions::default(),
+            auth: None,
+            auth_manager: None,
+            elicitation_reviewer: None,
+            elicitation_lifecycle: None,
+        })
+        .await;
+        let before = runtime.current.load_full();
+        let before_binding = runtime.current_binding().await.expect("initial binding");
+        let permission_profile = PermissionProfile::Disabled;
+        let environment_profile = PermissionProfile::read_only();
+
+        assert!(runtime.update_execution_authority(
+            Constrained::allow_any(AskForApproval::Never),
+            permission_profile.clone(),
+            ApprovalsReviewer::AutoReview,
+            HashMap::from([("remote".to_string(), environment_profile.clone())]),
+        ));
+
+        let after = runtime.current.load_full();
+        let after_binding = runtime.current_binding().await.expect("updated binding");
+        assert!(Arc::ptr_eq(&before.connections, &after.connections));
+        assert!(!Arc::ptr_eq(&before_binding, &after_binding));
+        let config = after.config.as_ref().expect("updated config");
+        assert_eq!(
+            (
+                config.approval_policy.value(),
+                config.permission_profile.clone(),
+                config.approvals_reviewer,
+                config.server_permission_profiles.clone(),
+            ),
+            (
+                AskForApproval::Never,
+                permission_profile.clone(),
+                ApprovalsReviewer::AutoReview,
+                HashMap::from([
+                    ("local".to_string(), permission_profile),
+                    ("remote".to_string(), environment_profile),
+                ]),
+            )
+        );
+        Ok(())
     }
 
     #[tokio::test]

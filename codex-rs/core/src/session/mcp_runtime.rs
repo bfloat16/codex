@@ -18,6 +18,7 @@ use codex_mcp::McpStartupPolicy;
 use codex_mcp::PreparedMcpCall;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::protocol::EnvironmentConfigState;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub(super) struct McpDesiredState {
@@ -31,21 +32,57 @@ pub(super) struct McpDesiredState {
 }
 
 impl Session {
-    pub(super) fn mcp_inputs_differ(
+    pub(super) fn mcp_connection_inputs_differ(
         &self,
         current: &SessionConfiguration,
         next: &SessionConfiguration,
         updates: &SessionSettingsUpdate,
     ) -> bool {
         current.cwd() != next.cwd()
-            || current.step_settings.approval_policy.value()
-                != next.step_settings.approval_policy.value()
-            || current.step_settings.approvals_reviewer != next.step_settings.approvals_reviewer
-            || current.permission_profile() != next.permission_profile()
-            || current.windows_sandbox_level != next.windows_sandbox_level
             || updates.environments.as_ref().is_some_and(|environments| {
                 environments.environments != self.services.turn_environments.selections()
             })
+    }
+
+    pub(super) fn mcp_execution_authority_differs(
+        &self,
+        current: &SessionConfiguration,
+        next: &SessionConfiguration,
+    ) -> bool {
+        current.step_settings.approval_policy.value() != next.step_settings.approval_policy.value()
+            || current.step_settings.approvals_reviewer != next.step_settings.approvals_reviewer
+            || current.permission_profile() != next.permission_profile()
+    }
+
+    pub(super) async fn update_mcp_execution_authority(&self) {
+        let (approval_policy, permission_profile, approvals_reviewer) = {
+            let state = self.state.lock().await;
+            (
+                state
+                    .session_configuration
+                    .step_settings
+                    .approval_policy
+                    .clone(),
+                state.session_configuration.permission_profile(),
+                state.session_configuration.step_settings.approvals_reviewer,
+            )
+        };
+        let environments = self.services.turn_environments.snapshot().await;
+        let environment_profiles = environments
+            .turn_environments()
+            .map(|environment| {
+                (
+                    environment.selection.environment_id.clone(),
+                    environment.permission_profile_with_workspace_roots(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        self.services.mcp_runtime.update_execution_authority(
+            approval_policy,
+            permission_profile,
+            approvals_reviewer,
+            environment_profiles,
+        );
     }
 
     /// Waits on this session's refreshed server before tool execution is admitted.
