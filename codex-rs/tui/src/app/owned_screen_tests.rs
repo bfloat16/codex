@@ -373,9 +373,10 @@ async fn mouse_wheel_scrolls_transcript_without_changing_draft() {
 }
 
 #[tokio::test]
-async fn copy_notice_stays_below_the_scroll_banner_and_above_the_composer() {
+async fn copy_notice_tracks_multiline_composer_top_below_scroll_banner() {
     let (mut chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
-    chat_widget.apply_external_edit("draft sentinel".to_string());
+    chat_widget
+        .apply_external_edit("first draft line\nsecond draft line\nthird draft line".to_string());
     let mut screen = OwnedScreen::new(&chat_widget, crate::keymap::RuntimeKeymap::defaults().pager);
     for text in ["oldest", "older", "middle", "newer", "latest"] {
         screen.viewport.push_cell(Arc::new(TestCell(text)));
@@ -402,13 +403,13 @@ async fn copy_notice_stays_below_the_scroll_banner_and_above_the_composer() {
 
     assert_snapshot!(normalized_backend_snapshot(terminal.backend()), @r###"
 "                                                  "
-"older                                             "
-"                                                  "
 "middle                                            "
 "           ctrl + end jump to bottom ↓            "
-"                                                  "
 "                    copied 12 chars to clipboard  "
-"› draft sentinel                                  "
+"                                                  "
+"› first draft line                                "
+"  second draft line                               "
+"  third draft line                                "
 "                                                  "
 "  Read Only        · gpt-5.6-sol default · /tmp/p…"
 "###);
@@ -484,7 +485,7 @@ async fn drag_selects_visible_text_and_copy_notice_renders_above_the_composer() 
         })
         .expect("render copy notice");
     assert_eq!(
-        terminal.backend().buffer()[Position::new(/*x*/ 21, /*y*/ 6)].fg,
+        terminal.backend().buffer()[Position::new(/*x*/ 21, /*y*/ 5)].fg,
         selected_background,
     );
     assert_snapshot!(normalized_backend_snapshot(terminal.backend()), @r###"
@@ -493,8 +494,8 @@ async fn drag_selects_visible_text_and_copy_notice_renders_above_the_composer() 
 "                                                  "
 "                                                  "
 "                                                  "
-"                                                  "
 "                     copied 5 chars to clipboard  "
+"                                                  "
 "› draft sentinel                                  "
 "                                                  "
 "  Read Only        · gpt-5.6-sol default · /tmp/p…"
