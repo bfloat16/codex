@@ -1,5 +1,6 @@
 use anyhow::Context;
 use codex_core::TurnInputRequest;
+use codex_core::shell::default_user_shell;
 use codex_features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -264,10 +265,11 @@ async fn user_shell_command_honors_default_and_extended_deadlines() -> anyhow::R
 }
 
 fn slow_user_shell_command() -> &'static str {
-    match codex_core::shell::default_user_shell().name() {
+    match default_user_shell().name() {
         "powershell" => "Write-Output shell-timeout-ready; Start-Sleep -Seconds 60",
-        "cmd" => "echo shell-timeout-ready & ping -n 61 127.0.0.1 > nul",
-        _ => "printf 'shell-timeout-ready\\n'; exec sleep 60",
+        "bash" if cfg!(windows) => "printf 'shell-timeout-ready\\n'; sleep 1",
+        "bash" | "zsh" | "sh" => "printf 'shell-timeout-ready\\n'; exec sleep 60",
+        shell => panic!("unsupported default shell `{shell}`"),
     }
 }
 
@@ -278,17 +280,14 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
     let fixture = builder.build(&server).await?;
 
     let call_id = "active-turn-shell-call";
-    let args = if cfg!(windows) {
-        serde_json::json!({
-            "cmd": "Start-Sleep -Seconds 2; Write-Output model-shell",
-            "yield_time_ms": 10_000,
-        })
-    } else {
-        serde_json::json!({
-            "cmd": "sleep 2; echo model-shell",
-            "yield_time_ms": 10_000,
-        })
-    };
+    let model_shell_command = current_shell_command(
+        /*powershell*/ "Start-Sleep -Seconds 2; Write-Output model-shell",
+        /*posix*/ "sleep 2; printf 'model-shell\\n'",
+    );
+    let args = serde_json::json!({
+        "cmd": model_shell_command,
+        "yield_time_ms": 10_000,
+    });
     let first = sse(vec![
         ev_response_created("resp-1"),
         ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
@@ -339,10 +338,10 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
     })
     .await;
 
-    #[cfg(windows)]
-    let user_shell_command = "Write-Output user-shell".to_string();
-    #[cfg(not(windows))]
-    let user_shell_command = "printf user-shell".to_string();
+    let user_shell_command = current_shell_command(
+        /*powershell*/ "Write-Output user-shell",
+        /*posix*/ "printf 'user-shell\\n'",
+    );
     fixture
         .codex
         .submit(Op::RunUserShellCommand {
@@ -397,12 +396,17 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
 async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
     // Disable it to ease command matching.
-    let mut builder = core_test_support::test_codex::test_codex().with_config(move |config| {
+    let builder = core_test_support::test_codex::test_codex().with_config(move |config| {
         config
             .features
             .disable(Feature::ShellSnapshot)
             .expect("test config should allow feature update");
     });
+    #[cfg(windows)]
+    let mut builder = builder.with_user_shell(
+        codex_core::shell::get_shell(codex_core::shell::ShellType::PowerShell)
+            .expect("PowerShell required for this Windows environment test"),
+    );
     let test = builder.build(&server).await?;
 
     #[cfg(windows)]
@@ -480,7 +484,7 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
 #[tokio::test]
 async fn user_shell_command_does_not_set_network_sandbox_env_var() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
-    let mut builder = core_test_support::test_codex::test_codex().with_config(|config| {
+    let builder = core_test_support::test_codex::test_codex().with_config(|config| {
         let file_system_sandbox_policy = config.permissions.file_system_sandbox_policy();
         config
             .permissions
@@ -490,6 +494,11 @@ async fn user_shell_command_does_not_set_network_sandbox_env_var() -> anyhow::Re
             ))
             .expect("set permission profile");
     });
+    #[cfg(windows)]
+    let mut builder = builder.with_user_shell(
+        codex_core::shell::get_shell(codex_core::shell::ShellType::PowerShell)
+            .expect("PowerShell required for this Windows environment test"),
+    );
     let test = builder.build(&server).await?;
 
     #[cfg(windows)]
@@ -602,17 +611,14 @@ async fn user_shell_command_is_truncated_only_once() -> anyhow::Result<()> {
     let fixture = builder.build(&server).await?;
 
     let call_id = "user-shell-double-truncation";
-    let args = if cfg!(windows) {
-        serde_json::json!({
-            "cmd": "for ($i=1; $i -le 2000; $i++) { Write-Output $i }",
-            "yield_time_ms": 5_000,
-        })
-    } else {
-        serde_json::json!({
-            "cmd": "seq 1 2000",
-            "yield_time_ms": 5_000,
-        })
-    };
+    let command = current_shell_command(
+        /*powershell*/ "for ($i=1; $i -le 2000; $i++) { Write-Output $i }",
+        /*posix*/ "seq 1 2000",
+    );
+    let args = serde_json::json!({
+        "cmd": command,
+        "yield_time_ms": 5_000,
+    });
 
     mount_sse_once(
         &server,
@@ -652,4 +658,12 @@ async fn user_shell_command_is_truncated_only_once() -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+fn current_shell_command(powershell: &str, posix: &str) -> String {
+    match default_user_shell().name() {
+        "powershell" => powershell.to_string(),
+        "bash" | "zsh" | "sh" => posix.to_string(),
+        shell => panic!("unsupported default shell `{shell}`"),
+    }
 }

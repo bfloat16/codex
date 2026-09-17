@@ -6695,6 +6695,39 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     (session, turn_context)
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_hook_config_uses_powershell_for_git_bash_environment() {
+    let Some(git_bash) = crate::shell::get_shell(crate::shell::ShellType::Bash) else {
+        return;
+    };
+    let (session, turn_context) = make_session_and_context().await;
+    let mut environment = turn_context
+        .environments
+        .single_local_environment()
+        .expect("test session should have one local environment")
+        .clone();
+    environment.shell = Some(git_bash);
+
+    let hooks_config = build_hooks_config(
+        turn_context.config.as_ref(),
+        session.services.plugins_manager.as_ref(),
+        Some(&environment),
+    )
+    .await;
+    let program = hooks_config
+        .shell_program
+        .expect("Windows hook shell should be configured");
+    let program_name = Path::new(&program)
+        .file_stem()
+        .expect("PowerShell executable should have a file name")
+        .to_string_lossy()
+        .to_ascii_lowercase();
+
+    assert!(matches!(program_name.as_str(), "pwsh" | "powershell"));
+    assert_eq!(hooks_config.shell_args, ["-NoProfile", "-Command"]);
+}
+
 async fn make_session_with_config(
     mutator: impl FnOnce(&mut Config),
 ) -> anyhow::Result<Arc<Session>> {

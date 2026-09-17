@@ -365,6 +365,10 @@ impl InProcessClientHandle {
 /// the handle, so callers receive a ready-to-use runtime. If initialize fails,
 /// the runtime is shut down and an `InvalidData` error is returned.
 pub async fn start(mut args: InProcessStartArgs) -> IoResult<InProcessClientHandle> {
+    if let Err(message) = codex_shell_command::shell_detect::ensure_default_user_shell() {
+        return Err(IoError::new(ErrorKind::NotFound, message));
+    }
+
     if let Ok(Some(err)) = check_execpolicy_for_warnings(&args.config.config_layer_stack).await {
         let (path, range) = crate::exec_policy_warning_location(&err);
         args.config_warnings.push(ConfigWarningNotification {

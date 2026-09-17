@@ -4764,6 +4764,24 @@ async fn build_hooks_config(
     plugins_manager: &PluginsManager,
     environment: Option<&TurnEnvironment>,
 ) -> HooksConfig {
+    #[cfg(windows)]
+    let _ = environment;
+    #[cfg(windows)]
+    let (hook_shell_program, hook_shell_argv) =
+        crate::shell::get_shell(crate::shell::ShellType::PowerShell)
+            .map(|shell| {
+                let mut argv = shell.derive_exec_args("", /*use_login_shell*/ false);
+                let program = argv.remove(0);
+                let _ = argv.pop();
+                (Some(program), argv)
+            })
+            .unwrap_or_else(|| {
+                (
+                    Some("powershell.exe".to_string()),
+                    vec!["-NoProfile".to_string(), "-Command".to_string()],
+                )
+            });
+    #[cfg(not(windows))]
     let (hook_shell_program, hook_shell_argv) = environment
         .and_then(|environment| environment.shell.as_ref())
         .map(|shell| {

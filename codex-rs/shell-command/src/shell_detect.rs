@@ -226,9 +226,26 @@ fn get_zsh_shell() -> Option<DetectedShell> {
     })
 }
 
+#[cfg(not(windows))]
 const BASH_FALLBACK_PATHS: &[&str] = &["/bin/bash", "/usr/bin/bash"];
 
+#[cfg(windows)]
+const GIT_BASH_FALLBACK_PATHS: &[&str] = &[
+    r#"C:\Program Files\Git\bin\bash.exe"#,
+    r#"C:\Program Files (x86)\Git\bin\bash.exe"#,
+];
+
 fn get_bash_shell() -> Option<DetectedShell> {
+    #[cfg(windows)]
+    let shell_path = GIT_BASH_FALLBACK_PATHS
+        .iter()
+        .find_map(|path| file_exists(std::path::Path::new(path)))
+        .or_else(|| {
+            let git_path = which::which("git").ok()?;
+            let git_root = git_path.parent()?.parent()?;
+            file_exists(&git_root.join("bin").join("bash.exe"))
+        });
+    #[cfg(not(windows))]
     let shell_path = get_shell_path(ShellType::Bash, "bash", BASH_FALLBACK_PATHS);
 
     shell_path.map(|shell_path| DetectedShell {
@@ -347,15 +364,15 @@ pub fn default_user_shell() -> DetectedShell {
     default_user_shell_from_path(get_user_shell_path())
 }
 
-pub fn default_user_shell_from_path(user_shell_path: Option<PathBuf>) -> DetectedShell {
+fn default_user_shell_candidate(user_shell_path: Option<PathBuf>) -> Option<DetectedShell> {
     if cfg!(windows) {
-        get_shell(ShellType::PowerShell).unwrap_or_else(ultimate_fallback_shell)
+        get_shell(ShellType::Bash).or_else(|| get_shell(ShellType::PowerShell))
     } else {
         let user_default_shell = user_shell_path
             .and_then(|shell| detect_shell_type(&shell))
             .and_then(get_shell);
 
-        let shell_with_fallback = if cfg!(target_os = "macos") {
+        if cfg!(target_os = "macos") {
             user_default_shell
                 .or_else(|| get_shell(ShellType::Zsh))
                 .or_else(|| get_shell(ShellType::Bash))
@@ -363,9 +380,30 @@ pub fn default_user_shell_from_path(user_shell_path: Option<PathBuf>) -> Detecte
             user_default_shell
                 .or_else(|| get_shell(ShellType::Bash))
                 .or_else(|| get_shell(ShellType::Zsh))
-        };
+        }
+    }
+}
 
-        shell_with_fallback.unwrap_or_else(ultimate_fallback_shell)
+/// Returns the preferred local shell when a supported shell is installed.
+pub fn try_default_user_shell() -> Option<DetectedShell> {
+    default_user_shell_candidate(get_user_shell_path())
+}
+
+pub fn default_user_shell_from_path(user_shell_path: Option<PathBuf>) -> DetectedShell {
+    default_user_shell_candidate(user_shell_path).unwrap_or_else(ultimate_fallback_shell)
+}
+
+/// Returns the startup error shown when Windows has no supported shell.
+pub fn default_user_shell_unavailable_message() -> &'static str {
+    "Codex on Windows requires either Git for Windows (Git Bash) or PowerShell (pwsh or powershell). Install one of:\n  - Git for Windows: https://git-scm.com/downloads/win\n  - PowerShell: https://aka.ms/powershell"
+}
+
+/// Rejects startup when Windows has neither Git Bash nor PowerShell.
+pub fn ensure_default_user_shell() -> Result<(), &'static str> {
+    if cfg!(windows) && try_default_user_shell().is_none() {
+        Err(default_user_shell_unavailable_message())
+    } else {
+        Ok(())
     }
 }
 
@@ -491,5 +529,18 @@ mod tests {
             detect_shell_type(PathBuf::from("cmd.exe")),
             Some(ShellType::Cmd)
         );
+    }
+
+    #[test]
+    fn default_shell_uses_only_supported_shells() {
+        let shell = try_default_user_shell();
+        if cfg!(windows) {
+            assert!(matches!(
+                shell.map(|shell| shell.shell_type),
+                Some(ShellType::Bash | ShellType::PowerShell) | None
+            ));
+        } else {
+            assert!(shell.is_some());
+        }
     }
 }

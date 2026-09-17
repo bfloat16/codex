@@ -400,7 +400,7 @@ fn build_command(
     };
     if shell.program.is_empty() {
         #[cfg(windows)]
-        command.raw_arg(format!(r#""{command_line}""#));
+        command.arg(command_line);
 
         #[cfg(not(windows))]
         command.arg(command_line);
@@ -427,31 +427,25 @@ fn build_command(
 
 fn default_shell_command(environment: &[(OsString, OsString)]) -> Command {
     #[cfg(windows)]
-    let (environment_variable, fallback_program, argument) = ("COMSPEC", "cmd.exe", "/C");
+    {
+        let _ = environment;
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile", "-Command"]);
+        command
+    }
 
     #[cfg(not(windows))]
-    let (environment_variable, fallback_program, argument) = ("SHELL", "/bin/sh", "-lc");
+    {
+        let program = environment
+            .iter()
+            .find(|(key, _)| key == OsStr::new("SHELL"))
+            .map(|(_, value)| value.clone())
+            .unwrap_or_else(|| OsString::from("/bin/sh"));
 
-    let program = environment
-        .iter()
-        .find(|(key, _)| {
-            #[cfg(windows)]
-            {
-                key.to_str()
-                    .is_some_and(|key| key.eq_ignore_ascii_case(environment_variable))
-            }
-
-            #[cfg(not(windows))]
-            {
-                key == OsStr::new(environment_variable)
-            }
-        })
-        .map(|(_, value)| value.clone())
-        .unwrap_or_else(|| OsString::from(fallback_program));
-
-    let mut command = Command::new(program);
-    command.arg(argument);
-    command
+        let mut command = Command::new(program);
+        command.arg("-lc");
+        command
+    }
 }
 
 #[cfg(test)]

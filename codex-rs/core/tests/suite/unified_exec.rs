@@ -1,6 +1,7 @@
 use codex_config::test_support::CloudConfigBundleFixture;
 use codex_core::EnvironmentConfig;
 use codex_core::TurnInputRequest;
+use codex_core::shell::default_user_shell;
 use codex_core::windows_sandbox::WindowsSandboxLevelExt;
 use codex_features::Feature;
 use codex_protocol::approvals::ExecApprovalKind;
@@ -72,6 +73,14 @@ use serde_json::json;
 use tokio::time::Duration;
 
 const UNIFIED_EXEC_LAGGED_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn current_shell_command<'a>(powershell: &'a str, posix: &'a str) -> &'a str {
+    match default_user_shell().name() {
+        "powershell" => powershell,
+        "bash" | "zsh" | "sh" => posix,
+        shell => panic!("unsupported default shell `{shell}`"),
+    }
+}
 
 fn extract_output_text(item: &Value) -> Option<&str> {
     item.get("output").and_then(|value| match value {
@@ -419,14 +428,12 @@ async fn exec_command_does_not_expose_configured_noise_auth_token() -> Result<()
         );
     });
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
-    let command = match core_test_support::test_target_os() {
-        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
-            "if [ -n \"${CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN:-}\" ] || [ -n \"${codex_exec_server_noise_auth_token:-}\" ]; then echo leaked; else echo unset; fi"
-        }
-        core_test_support::TestTargetOs::Windows => {
-            "if ($env:CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN) { Write-Output leaked } else { Write-Output unset }"
-        }
-    };
+    let command = current_shell_command(
+        /*powershell*/
+        "if ($env:CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN) { Write-Output leaked } else { Write-Output unset }",
+        /*posix*/
+        "if [ -n \"${CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN:-}\" ] || [ -n \"${codex_exec_server_noise_auth_token:-}\" ]; then echo leaked; else echo unset; fi",
+    );
     let call_id = "exec-command-noise-auth-token";
     let arguments = json!({ "cmd": command, "yield_time_ms": 5_000 });
     mount_sse_sequence(
@@ -524,14 +531,12 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
         .await?;
 
     let call_id = "exec-command-environment-shell-policy";
-    let command = match core_test_support::test_target_os() {
-        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
-            r#"printf '%s:%s:%s:%s' "$KEEP" "${DROP:-missing}" "${OWNER_ONLY:-missing}" "$CODEX_VERSION""#
-        }
-        core_test_support::TestTargetOs::Windows => {
-            r#"if (Test-Path Env:DROP) { $drop = $env:DROP } else { $drop = 'missing' }; if (Test-Path Env:OWNER_ONLY) { $owner = $env:OWNER_ONLY } else { $owner = 'missing' }; Write-Output "${env:KEEP}:${drop}:${owner}:${env:CODEX_VERSION}""#
-        }
-    };
+    let command = current_shell_command(
+        /*powershell*/
+        r#"if (Test-Path Env:DROP) { $drop = $env:DROP } else { $drop = 'missing' }; if (Test-Path Env:OWNER_ONLY) { $owner = $env:OWNER_ONLY } else { $owner = 'missing' }; Write-Output "${env:KEEP}:${drop}:${owner}:${env:CODEX_VERSION}""#,
+        /*posix*/
+        r#"printf '%s:%s:%s:%s' "$KEEP" "${DROP:-missing}" "${OWNER_ONLY:-missing}" "$CODEX_VERSION""#,
+    );
     let arguments = json!({
         "cmd": command,
         "login": false,
@@ -2804,7 +2809,10 @@ async fn write_stdin_ctrl_c_terminates_non_tty_session_on_windows() -> Result<()
     let interrupt_call_id = "uexec-windows-interrupt";
 
     let start_args = serde_json::json!({
-        "cmd": "Start-Sleep -Seconds 30",
+        "cmd": current_shell_command(
+            /*powershell*/ "Start-Sleep -Seconds 30",
+            /*posix*/ "sleep 30",
+        ),
         "yield_time_ms": 250,
         "tty": false,
     });

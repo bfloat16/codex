@@ -38,7 +38,7 @@ use crate::events::user_prompt_submit::UserPromptSubmitRequest;
 
 #[cfg(windows)]
 #[tokio::test]
-async fn cmd_shell_runs_quoted_hook_command_path() {
+async fn powershell_runs_quoted_hook_command_path() {
     let temp = tempdir().expect("create temp dir");
     let hook_dir = temp.path().join("hook with spaces");
     fs::create_dir(&hook_dir).expect("create hook dir");
@@ -50,7 +50,8 @@ async fn cmd_shell_runs_quoted_hook_command_path() {
     .expect("write hook command");
     let source_path =
         AbsolutePathBuf::try_from(hook_path.clone()).expect("absolute hook command path");
-    let command = format!(r#""{}" notify"#, hook_path.display());
+    let hook_path = hook_path.display().to_string().replace('\'', "''");
+    let command = format!("& '{hook_path}' notify");
     let env = HashMap::new();
     let handler = ConfiguredHandler {
         builtin: false,
@@ -74,8 +75,8 @@ async fn cmd_shell_runs_quoted_hook_command_path() {
             args: Vec::new(),
         },
         CommandShell {
-            program: std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string()),
-            args: vec!["/c".to_string()],
+            program: "powershell.exe".to_string(),
+            args: vec!["-NoProfile".to_string(), "-Command".to_string()],
         },
     ];
 
@@ -133,7 +134,11 @@ async fn command_hook_does_not_expose_configured_noise_auth_token() {
     let temp = tempdir().expect("create temp dir");
     let source_path = AbsolutePathBuf::try_from(temp.path().join("hooks.json"))
         .expect("absolute hook configuration path");
-    let command = if cfg!(windows) { "set" } else { "env" };
+    let command = if cfg!(windows) {
+        r#"Get-ChildItem Env: | ForEach-Object { Write-Output "$($_.Name)=$($_.Value)" }"#
+    } else {
+        "env"
+    };
     let env = HashMap::from([
         (
             CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN_ENV_VAR.to_ascii_lowercase(),
@@ -238,7 +243,7 @@ fn build_command_replays_snapshot_before_hook_overrides_and_scrubbing() {
 #[test]
 fn fallback_shell_uses_snapshot() {
     #[cfg(windows)]
-    let (name, program) = ("comspec", r"C:\captured\cmd.exe");
+    let (name, program) = ("comspec", "powershell.exe");
     #[cfg(not(windows))]
     let (name, program) = ("SHELL", "/captured/shell");
     let command = build_command(
@@ -252,6 +257,19 @@ fn fallback_shell_uses_snapshot() {
     );
 
     assert_eq!(command.as_std().get_program(), OsStr::new(program));
+    #[cfg(windows)]
+    assert_eq!(
+        command
+            .as_std()
+            .get_args()
+            .map(OsStr::to_os_string)
+            .collect::<Vec<_>>(),
+        vec![
+            OsString::from("-NoProfile"),
+            OsString::from("-Command"),
+            OsString::from("echo hook-ran"),
+        ]
+    );
     #[cfg(not(windows))]
     assert_eq!(
         command

@@ -561,6 +561,9 @@ pub async fn run_main_with_transport_options(
         }
     };
     config.auth_config().validate()?;
+    if let Err(message) = codex_shell_command::shell_detect::ensure_default_user_shell() {
+        return Err(std::io::Error::new(ErrorKind::NotFound, message));
+    }
     #[cfg(target_os = "macos")]
     let local_runtime_paths = local_runtime_paths.with_allowed_symlinked_codex_home(
         codex_config::allowed_symlinked_codex_home(&config.config_layer_stack, &config.codex_home),

@@ -687,7 +687,7 @@ async fn requirements_managed_hooks_execute_windows_command_override() {
                 matcher: Some("^Bash$".to_string()),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "exit 17".to_string(),
-                    command_windows: Some("exit /B 19".to_string()),
+                    command_windows: Some("exit 19".to_string()),
                     timeout_sec: Some(10),
                     r#async: false,
                     status_message: Some("checking".to_string()),

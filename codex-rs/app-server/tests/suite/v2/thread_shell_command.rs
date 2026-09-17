@@ -538,8 +538,9 @@ fn current_shell_slow_command() -> Result<(String, String)> {
     let (command, expected_output) = current_shell_output_command("shell-timeout-ready")?;
     let suffix = match default_user_shell().name() {
         "powershell" => "; Start-Sleep -Seconds 60",
-        "cmd" => " & ping -n 61 127.0.0.1 > nul",
-        _ => "; exec sleep 60",
+        "bash" if cfg!(windows) => "; sleep 4",
+        "bash" | "zsh" | "sh" => "; exec sleep 60",
+        shell => panic!("unsupported default shell `{shell}`"),
     };
     Ok((format!("{command}{suffix}"), expected_output))
 }
@@ -562,11 +563,11 @@ fn current_shell_output_command(text: &str) -> Result<(String, String)> {
                 format!("{text}\r\n"),
             )
         }
-        "cmd" => (format!("echo {text}"), format!("{text}\r\n")),
-        _ => {
+        "bash" | "zsh" | "sh" => {
             let quoted_text = shlex::try_quote(text)?;
             (format!("printf '%s\\n' {quoted_text}"), format!("{text}\n"))
         }
+        shell => panic!("unsupported default shell `{shell}`"),
     };
     Ok(command_and_output)
 }
