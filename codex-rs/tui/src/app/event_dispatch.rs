@@ -550,6 +550,10 @@ impl App {
                 self.handle_backtrack_rollback_failed();
                 self.reset_backtrack_state();
             }
+            AppEvent::BacktrackRestoreBack => {
+                self.handle_backtrack_rollback_failed();
+                self.open_backtrack_message_picker(tui);
+            }
             AppEvent::BeginInitialHistoryReplayBuffer => {
                 self.begin_initial_history_replay_buffer();
             }

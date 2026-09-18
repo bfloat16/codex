@@ -512,6 +512,8 @@ pub(crate) enum AppEvent {
         mode: BacktrackRestoreMode,
     },
 
+    BacktrackRestoreBack,
+
     CancelBacktrackRestore,
 
     RollbackOutputFreeTurnForPromptRestore {

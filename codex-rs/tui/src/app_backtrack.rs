@@ -35,9 +35,9 @@ use crate::app::App;
 use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
 use crate::bottom_pane::LocalImageAttachment;
-use crate::bottom_pane::SelectionItem;
-use crate::bottom_pane::SelectionRowDisplay;
-use crate::bottom_pane::SelectionViewParams;
+use crate::bottom_pane::RewindPromptItem;
+use crate::bottom_pane::RewindRestoreOption;
+use crate::bottom_pane::RewindViewParams;
 use crate::chatwidget::UserMessage;
 #[cfg(test)]
 use crate::history_cell::AgentMessageCell;
@@ -50,6 +50,7 @@ use crate::tui::TuiEvent;
 use codex_protocol::ThreadId;
 use codex_protocol::models::local_image_label_text;
 use color_eyre::eyre::Result;
+use ratatui::text::Line;
 
 const NO_PREVIOUS_MESSAGE_TO_EDIT: &str = "No previous message to edit.";
 const BACKTRACK_MESSAGE_VIEW_ID: &str = "backtrack-message";
@@ -272,42 +273,52 @@ impl App {
             return;
         }
         self.chat_widget.clear_esc_backtrack_hint();
-        let count = user_count(&self.transcript_cells);
-        let items = (0..count)
-            .filter_map(|nth_user_message| {
+        let user_positions = user_positions_iter(&self.transcript_cells).collect::<Vec<_>>();
+        let mut items = user_positions
+            .iter()
+            .enumerate()
+            .filter_map(|(nth_user_message, position)| {
                 let selection = self.backtrack_selection(nth_user_message)?;
-                let name = selection
+                let end = user_positions
+                    .get(nth_user_message + 1)
+                    .copied()
+                    .unwrap_or(self.transcript_cells.len());
+                let code_summary =
+                    backtrack_code_summary(&self.transcript_cells[position.saturating_add(1)..end]);
+                let prompt = selection
                     .prompt
                     .text
                     .lines()
                     .next()
-                    .unwrap_or_default()
+                    .unwrap_or("(no prompt)")
                     .to_string();
-                Some(SelectionItem {
-                    name,
-                    actions: vec![Box::new(move |tx| {
+                Some(RewindPromptItem {
+                    prompt,
+                    code_summary: Some(code_summary),
+                    is_current: false,
+                    action: Box::new(move |tx| {
                         tx.send(AppEvent::RollbackSessionForPromptEdit {
                             thread_id: selection.thread_id,
                             nth_user_message: selection.nth_user_message,
                             newer_user_messages: selection.newer_user_messages,
                             prompt: selection.prompt.clone(),
                         });
-                    })],
-                    dismiss_on_select: true,
-                    ..Default::default()
+                    }),
                 })
             })
-            .collect();
-        self.chat_widget.show_selection_view(SelectionViewParams {
-            view_id: Some(BACKTRACK_MESSAGE_VIEW_ID),
-            title: Some("Rewind".to_string()),
-            subtitle: Some("Restore code and/or conversation to the point before...".to_string()),
-            items,
-            initial_selected_idx: count.checked_sub(1),
-            row_display: SelectionRowDisplay::SingleLine,
-            on_cancel: Some(Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore))),
-            ..Default::default()
+            .collect::<Vec<_>>();
+        items.push(RewindPromptItem {
+            prompt: String::new(),
+            code_summary: None,
+            is_current: true,
+            action: Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore)),
         });
+        self.chat_widget
+            .show_rewind_view(RewindViewParams::Prompts {
+                view_id: BACKTRACK_MESSAGE_VIEW_ID,
+                items,
+                on_cancel: Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore)),
+            });
         tui.frame_requester().schedule_frame();
     }
 
@@ -319,58 +330,52 @@ impl App {
     ) {
         let file_count = file_restore.restorable;
         let file_label = if file_count == 1 { "file" } else { "files" };
+        let conversation_removed = "The selected message and everything after it will be removed.";
+        let code_restored =
+            format!("The code in {file_count} tracked {file_label} will be restored.");
         let mut options = Vec::new();
         if file_count > 0 {
-            options.push((
-                "Restore code and conversation",
-                format!("Restore {file_count} tracked {file_label} and remove later messages"),
-                Some(crate::app_event::BacktrackRestoreMode::CodeAndConversation),
-            ));
+            options.push(RewindRestoreOption {
+                label: "Restore code and conversation".to_string(),
+                details: vec![conversation_removed.into(), code_restored.clone().into()],
+                action: backtrack_restore_action(
+                    &selection,
+                    &target,
+                    crate::app_event::BacktrackRestoreMode::CodeAndConversation,
+                ),
+            });
         }
-        options.push((
-            "Restore conversation",
-            if file_count > 0 {
-                "Keep restorable tracked file changes and remove later messages".to_string()
-            } else {
-                "Remove this message and every later message".to_string()
-            },
-            Some(crate::app_event::BacktrackRestoreMode::Conversation),
-        ));
+        options.push(RewindRestoreOption {
+            label: "Restore conversation".to_string(),
+            details: vec![
+                conversation_removed.into(),
+                "The code will be unchanged.".into(),
+            ],
+            action: backtrack_restore_action(
+                &selection,
+                &target,
+                crate::app_event::BacktrackRestoreMode::Conversation,
+            ),
+        });
         if file_count > 0 {
-            options.push((
-                "Restore code",
-                format!("Restore {file_count} tracked {file_label} and keep the conversation"),
-                Some(crate::app_event::BacktrackRestoreMode::Code),
-            ));
+            options.push(RewindRestoreOption {
+                label: "Restore code".to_string(),
+                details: vec![
+                    "The conversation will be unchanged.".into(),
+                    code_restored.into(),
+                ],
+                action: backtrack_restore_action(
+                    &selection,
+                    &target,
+                    crate::app_event::BacktrackRestoreMode::Code,
+                ),
+            });
         }
-        options.push((
-            "Never mind",
-            "Leave the code and conversation unchanged".to_string(),
-            None,
-        ));
-        let items = options
-            .into_iter()
-            .map(|(name, description, mode)| {
-                let prompt = selection.prompt.clone();
-                let target = target.clone();
-                SelectionItem {
-                    name: name.to_string(),
-                    description: Some(description),
-                    actions: vec![Box::new(move |tx| match mode {
-                        Some(mode) => tx.send(AppEvent::ApplyBacktrackRestore {
-                            thread_id: selection.thread_id,
-                            nth_user_message: selection.nth_user_message,
-                            target: target.clone(),
-                            prompt: prompt.clone(),
-                            mode,
-                        }),
-                        None => tx.send(AppEvent::CancelBacktrackRestore),
-                    })],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                }
-            })
-            .collect();
+        options.push(RewindRestoreOption {
+            label: "Never mind".to_string(),
+            details: vec!["The code and conversation will be unchanged.".into()],
+            action: Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore)),
+        });
         let footer_note = if file_restore.blocked == 0 {
             "Only changes made through Codex apply_patch are restored; shell and manual edits are left untouched."
                 .to_string()
@@ -385,16 +390,14 @@ impl App {
                 file_restore.blocked, blocked_file_label
             )
         };
-        self.chat_widget.show_selection_view(SelectionViewParams {
-            view_id: Some(BACKTRACK_RESTORE_VIEW_ID),
-            title: Some("Rewind".to_string()),
-            subtitle: Some("Choose what to restore.".to_string()),
-            footer_note: Some(footer_note.into()),
-            items,
-            initial_selected_idx: Some(0),
-            on_cancel: Some(Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore))),
-            ..Default::default()
-        });
+        self.chat_widget
+            .show_rewind_view(RewindViewParams::Restore {
+                view_id: BACKTRACK_RESTORE_VIEW_ID,
+                prompt: selection.prompt.text,
+                options,
+                warning: footer_note.into(),
+                on_cancel: Box::new(|tx| tx.send(AppEvent::BacktrackRestoreBack)),
+            });
     }
 
     /// Apply a computed backtrack selection to the overlay and internal counter.
@@ -532,6 +535,46 @@ fn user_message_from_history_cell(cell: &UserHistoryCell) -> UserMessage {
         text_elements: cell.text_elements.clone(),
         mention_bindings: Vec::new(),
     }
+}
+
+fn backtrack_code_summary(cells: &[Arc<dyn crate::history_cell::HistoryCell>]) -> Line<'static> {
+    let headings = cells
+        .iter()
+        .filter(|cell| cell.is_file_change())
+        .filter_map(|cell| cell.raw_lines().into_iter().next())
+        .collect::<Vec<_>>();
+    match headings.as_slice() {
+        [] => "No code changes".into(),
+        [heading] => {
+            let text = heading
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            text.strip_prefix("● ").unwrap_or(&text).to_string().into()
+        }
+        headings => format!("{} code changes", headings.len()).into(),
+    }
+}
+
+fn backtrack_restore_action(
+    selection: &BacktrackSelection,
+    target: &BacktrackRollbackTarget,
+    mode: crate::app_event::BacktrackRestoreMode,
+) -> Box<dyn Fn(&crate::app_event_sender::AppEventSender) + Send + Sync> {
+    let thread_id = selection.thread_id;
+    let nth_user_message = selection.nth_user_message;
+    let prompt = selection.prompt.clone();
+    let target = target.clone();
+    Box::new(move |tx| {
+        tx.send(AppEvent::ApplyBacktrackRestore {
+            thread_id,
+            nth_user_message,
+            target: target.clone(),
+            prompt: prompt.clone(),
+            mode,
+        });
+    })
 }
 
 pub(crate) fn user_count(cells: &[Arc<dyn crate::history_cell::HistoryCell>]) -> usize {
