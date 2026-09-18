@@ -124,7 +124,7 @@ impl ChatWidget {
     }
 
     fn handle_collaboration_mode_shift_tab(&mut self) -> bool {
-        if !self.bottom_pane.no_modal_or_popup_active() || self.bottom_pane.is_task_running() {
+        if !self.bottom_pane.no_modal_or_popup_active() {
             return false;
         }
         if self.blocks_direct_input {

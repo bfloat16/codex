@@ -1,0 +1,10 @@
+---
+source: tui/src/chatwidget/tests/permission_shortcuts_tests.rs
+expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80))"
+---
+● Working (0s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  Plan Mode        · gpt-5.5 medium · /tmp/project                 Plan mode

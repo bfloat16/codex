@@ -96,8 +96,9 @@ async fn permission_shortcuts_respect_managed_mode_requirements() {
 }
 
 #[tokio::test]
-async fn shift_tab_cycles_to_plan_without_changing_model() {
+async fn shift_tab_cycles_to_plan_while_task_running_without_changing_model() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    chat.thread_id = Some(ThreadId::new());
     chat.config
         .permissions
         .set_permission_profile_from_session_snapshot(PermissionProfileSnapshot::active(
@@ -111,6 +112,7 @@ async fn shift_tab_cycles_to_plan_without_changing_model() {
         .set(AskForApproval::Never.to_core())
         .expect("set full-access approval policy");
     chat.config.approvals_reviewer = User;
+    chat.bottom_pane.set_task_running(/*running*/ true);
     let model = chat.current_model().to_string();
 
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
@@ -118,7 +120,47 @@ async fn shift_tab_cycles_to_plan_without_changing_model() {
     assert_eq!(chat.active_mode_kind(), ModeKind::Plan);
     assert_eq!(chat.current_model(), model);
     assert!(rx.try_recv().is_err(), "mode switch must stay local");
+    assert_chatwidget_snapshot!(
+        "shift_tab_cycles_to_plan_while_task_running",
+        normalize_snapshot_paths(render_bottom_popup(&chat, /*width*/ 80))
+    );
 
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
     assert_eq!(chat.active_mode_kind(), ModeKind::Default);
+}
+
+#[tokio::test]
+async fn shift_tab_cycles_permissions_while_task_running() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.set_feature_enabled(Feature::GuardianApproval, /*enabled*/ true);
+    #[cfg(target_os = "windows")]
+    {
+        chat.local_settings.notices.hide_world_writable_warning = Some(true);
+        chat.set_windows_sandbox_mode(Some(WindowsSandboxModeToml::Unelevated));
+    }
+    chat.set_approval_policy(AskForApproval::OnRequest);
+    chat.config.approvals_reviewer = User;
+    chat.config
+        .permissions
+        .set_permission_profile_from_session_snapshot(PermissionProfileSnapshot::active(
+            PermissionProfile::workspace_write(),
+            ActivePermissionProfile::new(":workspace"),
+        ))
+        .expect("set current profile");
+    chat.bottom_pane.set_task_running(/*running*/ true);
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
+
+    assert_eq!(chat.active_mode_kind(), ModeKind::Default);
+    assert_eq!(chat.config.approvals_reviewer, AutoReview);
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AppEvent::CodexOp(AppCommand::OverrideTurnContext {
+            approval_policy: Some(AskForApproval::OnRequest),
+            approvals_reviewer: Some(AutoReview),
+            active_permission_profile: Some(ActivePermissionProfile { id, .. }),
+            ..
+        })) if id == ":workspace"
+    ));
 }
