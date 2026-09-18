@@ -721,10 +721,6 @@ impl PagerContent {
         self.view.pop_renderable()
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.view.renderables.len()
-    }
-
     pub(crate) fn is_following_bottom(&self) -> bool {
         self.view.is_scrolled_to_bottom()
     }
