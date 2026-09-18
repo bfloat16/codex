@@ -357,6 +357,24 @@ pub(crate) fn create_file_diff_summary(
     render_changes_block(vec![row_for_change(path, change)], wrap_cols, cwd)
 }
 
+pub(crate) fn create_file_diff_body(
+    path: &Path,
+    change: &FileChange,
+    wrap_cols: usize,
+) -> Vec<RtLine<'static>> {
+    let lang_path = match change {
+        FileChange::Update {
+            move_path: Some(move_path),
+            ..
+        } => move_path.as_path(),
+        FileChange::Add { .. } | FileChange::Delete { .. } | FileChange::Update { .. } => path,
+    };
+    let lang = detect_lang_for_path(lang_path);
+    let mut lines = Vec::new();
+    render_change(change, &mut lines, wrap_cols, lang.as_deref());
+    lines
+}
+
 // Shared row for per-file presentation
 struct Row<'a> {
     path: &'a Path,

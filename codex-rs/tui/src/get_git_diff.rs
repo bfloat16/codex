@@ -23,6 +23,12 @@ const DISABLE_HOOKS_CONFIG: &str = if cfg!(windows) {
 };
 const EXECUTABLE_FILTER_CONFIG_PATTERN: &str = r"^filter\..*\.(clean|process)$";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GitDiffColor {
+    Always,
+    Never,
+}
+
 // `/diff` may execute Git through a remote workspace, so git-utils owns the
 // probe policy while this adapter keeps command execution in the TUI layer.
 // WorkspaceCommand bounds each call; `/diff` has no aggregate command deadline.
@@ -51,6 +57,7 @@ impl FsmonitorProbeRunner for WorkspaceFsmonitorProbeRunner<'_> {
 pub(crate) async fn get_git_diff(
     runner: &dyn WorkspaceCommandExecutor,
     cwd: &Path,
+    color: GitDiffColor,
 ) -> Result<(bool, String), String> {
     // First check if we are inside a Git repository.
     if !inside_git_repo(runner, cwd).await? {
@@ -63,20 +70,25 @@ pub(crate) async fn get_git_diff(
 
     // Keep `/diff` informational: repository configuration must not select executable diff helpers.
     let diff_config_overrides = diff_filter_config_overrides(runner, cwd, fsmonitor).await?;
+    let color_arg = match color {
+        GitDiffColor::Always => "--color",
+        GitDiffColor::Never => "--no-color",
+    };
+    let tracked_diff_args = [
+        "diff",
+        "--no-textconv",
+        "--no-ext-diff",
+        "--submodule=short",
+        "--ignore-submodules=dirty",
+        color_arg,
+    ];
     let (tracked_diff_res, untracked_output_res) = tokio::join!(
         run_git_capture_diff(
             runner,
             cwd,
             fsmonitor,
             &diff_config_overrides,
-            &[
-                "diff",
-                "--no-textconv",
-                "--no-ext-diff",
-                "--submodule=short",
-                "--ignore-submodules=dirty",
-                "--color",
-            ]
+            &tracked_diff_args,
         ),
         run_git_capture_stdout(
             runner,
@@ -107,7 +119,7 @@ pub(crate) async fn get_git_diff(
             "--no-ext-diff",
             "--submodule=short",
             "--ignore-submodules=dirty",
-            "--color",
+            color_arg,
             "--no-index",
             "--",
             null_path,
@@ -287,7 +299,7 @@ mod tests {
             "",
         )]);
 
-        let result = get_git_diff(&runner, &cwd).await;
+        let result = get_git_diff(&runner, &cwd, GitDiffColor::Always).await;
 
         assert_eq!(result, Ok((false, String::new())));
         assert_command_metadata(&runner.commands(), &cwd);
@@ -346,7 +358,7 @@ mod tests {
                         "--no-ext-diff",
                         "--submodule=short",
                         "--ignore-submodules=dirty",
-                        "--color",
+                        "--no-color",
                     ],
                 ),
                 /*exit_code*/ 1,
@@ -369,7 +381,7 @@ mod tests {
                         "--no-ext-diff",
                         "--submodule=short",
                         "--ignore-submodules=dirty",
-                        "--color",
+                        "--no-color",
                         "--no-index",
                         "--",
                         null_device(),
@@ -381,7 +393,7 @@ mod tests {
             ),
         ]);
 
-        let result = get_git_diff(&runner, &cwd).await;
+        let result = get_git_diff(&runner, &cwd, GitDiffColor::Never).await;
 
         assert_eq!(result, Ok((true, "tracked\nuntracked\n".to_string())));
         let commands = runner.commands();
@@ -470,7 +482,7 @@ mod tests {
             ),
         ]);
 
-        let result = get_git_diff(&runner, &cwd).await;
+        let result = get_git_diff(&runner, &cwd, GitDiffColor::Always).await;
 
         assert_eq!(result, Ok((true, "tracked\nuntracked\n".to_string())));
         assert_command_metadata(&runner.commands(), &cwd);
@@ -532,7 +544,7 @@ mod tests {
             ),
         ]);
 
-        let result = get_git_diff(&runner, &cwd).await;
+        let result = get_git_diff(&runner, &cwd, GitDiffColor::Always).await;
 
         assert_eq!(result, Ok((true, "tracked\n".to_string())));
         assert_command_metadata(&runner.commands(), &cwd);
@@ -594,7 +606,7 @@ mod tests {
             ),
         ]);
 
-        let error = get_git_diff(&runner, &cwd)
+        let error = get_git_diff(&runner, &cwd, GitDiffColor::Always)
             .await
             .expect_err("unexpected git diff status should fail");
 
@@ -668,7 +680,7 @@ mod tests {
         fs::write(repo.join("unchanged.txt"), "unchanged\n").expect("refresh unchanged file");
         fs::write(repo.join("tracked.txt"), "after\n").expect("modify tracked file");
 
-        let result = get_git_diff(&LocalRunner, &repo)
+        let result = get_git_diff(&LocalRunner, &repo, GitDiffColor::Always)
             .await
             .expect("generate diff without invoking helpers");
 
@@ -735,7 +747,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(/*secs*/ 1));
         fs::write(checkout.join("tracked.txt"), "before\n").expect("refresh child tracked file");
 
-        let result = get_git_diff(&LocalRunner, &repo)
+        let result = get_git_diff(&LocalRunner, &repo, GitDiffColor::Always)
             .await
             .expect("generate diff without inspecting submodule worktrees");
 
