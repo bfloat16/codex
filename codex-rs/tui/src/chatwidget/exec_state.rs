@@ -5,6 +5,9 @@ use codex_protocol::parse_command::ParsedCommand;
 
 use crate::exec_command::split_command_string;
 
+use super::status_state::StatusIndicatorState;
+use super::status_state::TerminalTitleStatusKind;
+
 pub(super) struct RunningCommand {
     pub(super) command: Vec<String>,
     pub(super) parsed_cmd: Vec<ParsedCommand>,
@@ -36,13 +39,22 @@ impl UnifiedExecWaitState {
 pub(super) struct UnifiedExecWaitStreak {
     pub(super) process_id: String,
     pub(super) command_display: Option<String>,
+    pub(super) previous_status: StatusIndicatorState,
+    pub(super) previous_terminal_title_status_kind: TerminalTitleStatusKind,
 }
 
 impl UnifiedExecWaitStreak {
-    pub(super) fn new(process_id: String, command_display: Option<String>) -> Self {
+    pub(super) fn new(
+        process_id: String,
+        command_display: Option<String>,
+        previous_status: StatusIndicatorState,
+        previous_terminal_title_status_kind: TerminalTitleStatusKind,
+    ) -> Self {
         Self {
             process_id,
             command_display: command_display.filter(|display| !display.is_empty()),
+            previous_status,
+            previous_terminal_title_status_kind,
         }
     }
 

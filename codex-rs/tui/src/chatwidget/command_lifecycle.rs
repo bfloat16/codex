@@ -14,7 +14,13 @@ impl ChatWidget {
         let cell = history_cell::new_unified_exec_interaction(wait.command_display, String::new());
         self.app_event_tx
             .send(AppEvent::InsertHistoryCell(Box::new(cell)));
-        self.restore_reasoning_status_header();
+        self.status_state.terminal_title_status_kind = wait.previous_terminal_title_status_kind;
+        self.set_status(
+            wait.previous_status.header,
+            wait.previous_status.details,
+            StatusDetailsCapitalization::Preserve,
+            wait.previous_status.details_max_lines,
+        );
     }
 
     pub(super) fn on_command_execution_started(&mut self, item: ThreadItem) {
@@ -91,6 +97,28 @@ impl ChatWidget {
 
         self.flush_answer_stream_with_separator();
         if stdin.is_empty() {
+            match &mut self.unified_exec_wait_streak {
+                Some(wait) if wait.process_id == process_id => {
+                    wait.update_command_display(command_display.clone());
+                }
+                Some(_) => {
+                    self.flush_unified_exec_wait_streak();
+                    self.unified_exec_wait_streak = Some(UnifiedExecWaitStreak::new(
+                        process_id,
+                        command_display.clone(),
+                        self.status_state.current_status.clone(),
+                        self.status_state.terminal_title_status_kind,
+                    ));
+                }
+                None => {
+                    self.unified_exec_wait_streak = Some(UnifiedExecWaitStreak::new(
+                        process_id,
+                        command_display.clone(),
+                        self.status_state.current_status.clone(),
+                        self.status_state.terminal_title_status_kind,
+                    ));
+                }
+            }
             // Empty stdin means we are polling for background output.
             // Surface this in the status indicator (single "waiting" surface) instead of
             // the transcript. Keep the header short so the interrupt hint remains visible.
@@ -103,24 +131,10 @@ impl ChatWidget {
                 TerminalTitleStatusKind::WaitingForBackgroundTerminal;
             self.set_status(
                 "Waiting for background terminal".to_string(),
-                command_display.clone(),
+                command_display,
                 StatusDetailsCapitalization::Preserve,
                 /*details_max_lines*/ 1,
             );
-            match &mut self.unified_exec_wait_streak {
-                Some(wait) if wait.process_id == process_id => {
-                    wait.update_command_display(command_display);
-                }
-                Some(_) => {
-                    self.flush_unified_exec_wait_streak();
-                    self.unified_exec_wait_streak =
-                        Some(UnifiedExecWaitStreak::new(process_id, command_display));
-                }
-                None => {
-                    self.unified_exec_wait_streak =
-                        Some(UnifiedExecWaitStreak::new(process_id, command_display));
-                }
-            }
             self.request_redraw();
         } else {
             if self

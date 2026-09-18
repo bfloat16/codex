@@ -1,0 +1,11 @@
+---
+source: tui/src/chatwidget/tests/exec_flow.rs
+expression: "render_bottom_popup(&chat, 64)"
+---
+● Inspecting repository (0s • esc to interrupt)
+  └ checking the active branch
+
+
+› Ask Codex to do anything
+
+  Read Only        · gpt-5.6-sol default · C:\tmp\project

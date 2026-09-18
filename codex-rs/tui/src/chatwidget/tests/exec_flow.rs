@@ -986,6 +986,38 @@ async fn unified_exec_wait_status_header_updates_on_late_command_display() {
 }
 
 #[tokio::test]
+async fn unified_exec_wait_completion_restores_previous_status() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+    let previous_status = StatusIndicatorState {
+        header: "Inspecting repository".to_string(),
+        details: Some("checking the active branch".to_string()),
+        details_max_lines: 2,
+    };
+    chat.status_state.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+    chat.set_status(
+        previous_status.header.clone(),
+        previous_status.details.clone(),
+        StatusDetailsCapitalization::Preserve,
+        previous_status.details_max_lines,
+    );
+    let begin = begin_unified_exec_startup(&mut chat, "call-wait", "proc-1", "just test");
+
+    terminal_interaction(&mut chat, "call-wait-stdin", "proc-1", "");
+    end_exec(&mut chat, begin, "", "", /*exit_code*/ 0);
+
+    assert_eq!(chat.status_state.current_status, previous_status);
+    assert_eq!(
+        chat.status_state.terminal_title_status_kind,
+        TerminalTitleStatusKind::Thinking
+    );
+    assert_chatwidget_snapshot!(
+        "unified_exec_wait_completion_restores_previous_status",
+        render_bottom_popup(&chat, /*width*/ 64)
+    );
+}
+
+#[tokio::test]
 async fn unified_exec_empty_poll_for_finished_process_does_not_show_waiting_status() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
