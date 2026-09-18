@@ -1,6 +1,7 @@
 //! Collapsible adjacent-tool projection for the owned full-screen transcript.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -43,12 +44,12 @@ struct ToolGroupTail<'a> {
     state: ActiveToolGroupState,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 struct CellRangeRenderState<'a> {
     hovered_tool_group: Option<usize>,
     expanded_tool_group: Option<usize>,
     hovered_file_change: Option<usize>,
-    expanded_file_change: Option<usize>,
+    expanded_file_changes: &'a BTreeSet<usize>,
     tail: ToolGroupTail<'a>,
 }
 
@@ -69,7 +70,7 @@ impl ConversationViewport {
                 hovered_tool_group: self.hovered_tool_group,
                 expanded_tool_group: self.expanded_tool_group,
                 hovered_file_change: self.hovered_file_change,
-                expanded_file_change: self.expanded_file_change,
+                expanded_file_changes: &self.expanded_file_changes,
                 tail: tail.unwrap_or_default(),
             },
         )
@@ -82,7 +83,7 @@ impl ConversationViewport {
         hovered_tool_group: Option<usize>,
         expanded_tool_group: Option<usize>,
         hovered_file_change: Option<usize>,
-        expanded_file_change: Option<usize>,
+        expanded_file_changes: &BTreeSet<usize>,
     ) -> Vec<Box<dyn Renderable>> {
         Self::render_cell_range_with_tail(
             cells,
@@ -92,7 +93,7 @@ impl ConversationViewport {
                 hovered_tool_group,
                 expanded_tool_group,
                 hovered_file_change,
-                expanded_file_change,
+                expanded_file_changes,
                 tail: ToolGroupTail::default(),
             },
         )
@@ -150,7 +151,7 @@ impl ConversationViewport {
                         /*hovered_file_change*/
                         state.hovered_file_change == Some(cell_index),
                         /*expanded_file_change*/
-                        state.expanded_file_change == Some(cell_index),
+                        state.expanded_file_changes.contains(&cell_index),
                     ));
                 }
                 continue;
@@ -161,7 +162,7 @@ impl ConversationViewport {
                 render_mode,
                 /*has_prior_cells*/ index > 0,
                 /*hovered_file_change*/ state.hovered_file_change == Some(index),
-                /*expanded_file_change*/ state.expanded_file_change == Some(index),
+                /*expanded_file_change*/ state.expanded_file_changes.contains(&index),
             ));
             index += 1;
         }

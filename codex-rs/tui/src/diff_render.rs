@@ -348,13 +348,13 @@ impl From<DiffSummary> for Box<dyn Renderable> {
     }
 }
 
-pub(crate) fn create_diff_summary(
-    changes: &HashMap<PathBuf, FileChange>,
+pub(crate) fn create_file_diff_summary(
+    path: &Path,
+    change: &FileChange,
     cwd: &Path,
     wrap_cols: usize,
 ) -> Vec<RtLine<'static>> {
-    let rows = collect_rows(changes);
-    render_changes_block(rows, wrap_cols, cwd)
+    render_changes_block(vec![row_for_change(path, change)], wrap_cols, cwd)
 }
 
 // Shared row for per-file presentation
@@ -366,27 +366,22 @@ struct Row<'a> {
     change: &'a FileChange,
 }
 
-fn collect_rows(changes: &HashMap<PathBuf, FileChange>) -> Vec<Row<'_>> {
-    let mut rows = Vec::with_capacity(changes.len());
-    for (path, change) in changes.iter() {
-        let (added, removed) = line_counts(change);
-        let move_path = match change {
-            FileChange::Update {
-                move_path: Some(new),
-                ..
-            } => Some(new.as_path()),
-            _ => None,
-        };
-        rows.push(Row {
-            path: path.as_path(),
-            move_path,
-            added,
-            removed,
-            change,
-        });
+fn row_for_change<'a>(path: &'a Path, change: &'a FileChange) -> Row<'a> {
+    let (added, removed) = line_counts(change);
+    let move_path = match change {
+        FileChange::Update {
+            move_path: Some(new),
+            ..
+        } => Some(new.as_path()),
+        FileChange::Add { .. } | FileChange::Delete { .. } | FileChange::Update { .. } => None,
+    };
+    Row {
+        path,
+        move_path,
+        added,
+        removed,
+        change,
     }
-    rows.sort_by(|left, right| left.path.cmp(right.path));
-    rows
 }
 
 fn line_counts(change: &FileChange) -> (usize, usize) {
@@ -1368,8 +1363,25 @@ mod tests {
         assert_eq!(del_sign.fg, Some(Color::Red));
         assert_eq!(del_sign.bg, None);
     }
+    fn diff_summaries_for_tests(
+        changes: &HashMap<PathBuf, FileChange>,
+        cwd: &Path,
+        wrap_cols: usize,
+    ) -> Vec<RtLine<'static>> {
+        let mut changes = changes.iter().collect::<Vec<_>>();
+        changes.sort_by(|left, right| left.0.cmp(right.0));
+        let mut lines = Vec::new();
+        for (index, (path, change)) in changes.into_iter().enumerate() {
+            if index > 0 {
+                lines.push("".into());
+            }
+            lines.extend(create_file_diff_summary(path, change, cwd, wrap_cols));
+        }
+        lines
+    }
+
     fn diff_summary_for_tests(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'static>> {
-        create_diff_summary(changes, &PathBuf::from("/"), /*wrap_cols*/ 80)
+        diff_summaries_for_tests(changes, &PathBuf::from("/"), /*wrap_cols*/ 80)
     }
 
     fn snapshot_lines(name: &str, lines: Vec<RtLine<'static>>, width: u16, height: u16) {
@@ -1480,7 +1492,7 @@ mod tests {
     }
 
     fn snapshot_diff_gallery(name: &str, width: u16, height: u16) {
-        let lines = create_diff_summary(
+        let lines = diff_summaries_for_tests(
             &diff_gallery_changes(),
             &PathBuf::from("/"),
             usize::from(width),
@@ -1634,7 +1646,7 @@ mod tests {
             /*height*/ 10,
         );
 
-        let narrow = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 3);
+        let narrow = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 3);
         assert_snapshot!(format!("{}\n{}", narrow[1], narrow[2]), @r"
             1 +a
                l
@@ -1676,7 +1688,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 72);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 72);
 
         // Render with backend width wider than wrap width to avoid Paragraph auto-wrap.
         snapshot_lines(
@@ -1704,7 +1716,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 28);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 28);
         snapshot_lines_text("apply_update_block_wraps_long_lines_text", &lines);
     }
 
@@ -1731,7 +1743,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
         snapshot_lines_text("apply_update_block_line_numbers_three_digits_text", &lines);
     }
 
@@ -1754,7 +1766,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &cwd, /*wrap_cols*/ 80);
+        let lines = diff_summaries_for_tests(&changes, &cwd, /*wrap_cols*/ 80);
 
         snapshot_lines(
             "apply_update_block_relativizes_path",
@@ -2215,7 +2227,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
         let has_rgb = lines.iter().any(|line| {
             line.spans
                 .iter()
@@ -2246,7 +2258,8 @@ mod tests {
                 },
             );
 
-            let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
+            let lines =
+                diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
             let rgb_tokens = lines
                 .iter()
                 .flat_map(|line| &line.spans)
@@ -2274,7 +2287,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
         assert!(lines.iter().all(|line| {
             line.spans
                 .iter()
@@ -2292,7 +2305,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
         let has_rgb = lines.iter().any(|line| {
             line.spans
                 .iter()
@@ -2463,7 +2476,7 @@ mod tests {
 
         // Should complete quickly (no per-line parser init). If guardrails
         // are bypassed this would be extremely slow.
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
 
         // The diff rendered without timing out — the guardrails prevented
         // thousands of per-line parser initializations.  Verify we actually
@@ -2507,7 +2520,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
         let has_rgb = lines.iter().any(|line| {
             line.spans
                 .iter()
@@ -2546,7 +2559,7 @@ mod tests {
             .map(|span| span.style)
             .expect("expected highlighted span for second multiline string line");
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 120);
+        let lines = diff_summaries_for_tests(&changes, &PathBuf::from("/"), /*wrap_cols*/ 120);
         let actual_style = lines
             .iter()
             .flat_map(|line| line.spans.iter())

@@ -1383,7 +1383,6 @@ mod tests {
     use codex_app_server_protocol::CommandExecutionSource as ExecCommandSource;
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
-    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
@@ -1756,24 +1755,22 @@ mod tests {
         let cwd = PathBuf::from("/repo");
         let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
 
-        let mut approval_changes = HashMap::new();
-        approval_changes.insert(
+        let approval_cell: Arc<dyn HistoryCell> = Arc::new(new_patch_event(
             PathBuf::from("foo.txt"),
             FileChange::Add {
                 content: "hello\nworld\n".to_string(),
             },
-        );
-        let approval_cell: Arc<dyn HistoryCell> = Arc::new(new_patch_event(approval_changes, &cwd));
+            &cwd,
+        ));
         cells.push(approval_cell);
 
-        let mut apply_changes = HashMap::new();
-        apply_changes.insert(
+        let apply_begin_cell: Arc<dyn HistoryCell> = Arc::new(new_patch_event(
             PathBuf::from("foo.txt"),
             FileChange::Add {
                 content: "hello\nworld\n".to_string(),
             },
-        );
-        let apply_begin_cell: Arc<dyn HistoryCell> = Arc::new(new_patch_event(apply_changes, &cwd));
+            &cwd,
+        ));
         cells.push(apply_begin_cell);
 
         let apply_end_cell: Arc<dyn HistoryCell> = history_cell::new_approval_decision_cell(

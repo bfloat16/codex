@@ -6,6 +6,7 @@
 //! representation remains owned by `pager_overlay`.
 
 use std::cell::Cell;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use ratatui::buffer::Buffer;
@@ -42,7 +43,7 @@ pub(crate) struct ConversationViewport {
     hovered_tool_group: Option<usize>,
     expanded_tool_group: Option<usize>,
     hovered_file_change: Option<usize>,
-    expanded_file_change: Option<usize>,
+    expanded_file_changes: BTreeSet<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,7 +68,7 @@ impl ConversationViewport {
             /*hovered_tool_group*/ None,
             /*expanded_tool_group*/ None,
             /*hovered_file_change*/ None,
-            /*expanded_file_change*/ None,
+            /*expanded_file_changes*/ &BTreeSet::new(),
         );
         Self {
             content: PagerContent::new(renderables, keymap),
@@ -80,7 +81,7 @@ impl ConversationViewport {
             hovered_tool_group: None,
             expanded_tool_group: None,
             hovered_file_change: None,
-            expanded_file_change: None,
+            expanded_file_changes: BTreeSet::new(),
         }
     }
 
@@ -197,7 +198,7 @@ impl ConversationViewport {
         self.hovered_tool_group = None;
         self.expanded_tool_group = None;
         self.hovered_file_change = None;
-        self.expanded_file_change = None;
+        self.expanded_file_changes.clear();
         self.cells = cells;
         self.content.replace(Self::render_cells(
             &self.cells,
@@ -205,7 +206,7 @@ impl ConversationViewport {
             self.hovered_tool_group,
             self.expanded_tool_group,
             self.hovered_file_change,
-            self.expanded_file_change,
+            &self.expanded_file_changes,
         ));
         if follow_bottom {
             self.content.scroll_to_bottom();
@@ -269,7 +270,7 @@ impl ConversationViewport {
         self.hovered_tool_group = None;
         self.expanded_tool_group = None;
         self.hovered_file_change = None;
-        self.expanded_file_change = None;
+        self.expanded_file_changes.clear();
         self.render_mode = render_mode;
         self.content.replace(Self::render_cells(
             &self.cells,
@@ -277,7 +278,7 @@ impl ConversationViewport {
             self.hovered_tool_group,
             self.expanded_tool_group,
             self.hovered_file_change,
-            self.expanded_file_change,
+            &self.expanded_file_changes,
         ));
         if follow_bottom {
             self.content.scroll_to_bottom();
@@ -338,7 +339,7 @@ impl ConversationViewport {
         hovered_tool_group: Option<usize>,
         expanded_tool_group: Option<usize>,
         hovered_file_change: Option<usize>,
-        expanded_file_change: Option<usize>,
+        expanded_file_changes: &BTreeSet<usize>,
     ) -> Vec<Box<dyn Renderable>> {
         Self::render_cell_range_from(
             cells,
@@ -347,7 +348,7 @@ impl ConversationViewport {
             hovered_tool_group,
             expanded_tool_group,
             hovered_file_change,
-            expanded_file_change,
+            expanded_file_changes,
         )
     }
 

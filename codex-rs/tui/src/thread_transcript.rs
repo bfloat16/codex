@@ -18,7 +18,7 @@ use crate::history_cell::PrefixedWrappedHistoryCell;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::UserHistoryCell;
 use crate::history_cell::new_patch_apply_failure;
-use crate::history_cell::new_patch_event;
+use crate::history_cell::new_patch_events;
 use crate::history_cell::new_unified_exec_interaction;
 use crate::history_cell::split_reasoning_summary_parts;
 use crate::inline_visualization::InlineVisualizationContext;
@@ -246,10 +246,11 @@ pub(crate) fn thread_items_to_transcript_cells(
             ThreadItem::FileChange {
                 changes, status, ..
             } => {
-                cells.push(Arc::new(new_patch_event(
-                    file_update_changes_to_display(changes),
-                    cwd.as_path(),
-                )));
+                cells.extend(
+                    new_patch_events(file_update_changes_to_display(changes), cwd.as_path())
+                        .into_iter()
+                        .map(|cell| Arc::new(cell) as Arc<dyn HistoryCell>),
+                );
                 if status == codex_app_server_protocol::PatchApplyStatus::Failed {
                     cells.push(Arc::new(new_patch_apply_failure(String::new())));
                 }

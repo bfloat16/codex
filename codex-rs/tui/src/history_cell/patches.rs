@@ -8,7 +8,8 @@ use std::sync::Mutex;
 
 #[derive(Debug)]
 pub(crate) struct PatchHistoryCell {
-    changes: HashMap<PathBuf, FileChange>,
+    path: PathBuf,
+    change: FileChange,
     cwd: PathBuf,
     display_cache: Mutex<Option<(PatchDisplayCacheKey, FileChangeDisplayLines)>>,
 }
@@ -42,8 +43,9 @@ impl PatchHistoryCell {
             return lines.clone();
         }
 
-        let source = plain_hyperlink_lines(create_diff_summary(
-            &self.changes,
+        let source = plain_hyperlink_lines(create_file_diff_summary(
+            &self.path,
+            &self.change,
             &self.cwd,
             usize::from(width),
         ));
@@ -81,8 +83,9 @@ impl HistoryCell for PatchHistoryCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        plain_lines(create_diff_summary(
-            &self.changes,
+        plain_lines(create_file_diff_summary(
+            &self.path,
+            &self.change,
             &self.cwd,
             RAW_DIFF_SUMMARY_WIDTH,
         ))
@@ -100,15 +103,23 @@ impl HistoryCell for PatchHistoryCell {
         true
     }
 }
-/// Create a new `PendingPatch` cell that lists the file‑level summary of
-/// a proposed patch. The summary lines should already be formatted (e.g.
-/// "A path/to/file.rs").
-pub(crate) fn new_patch_event(
+/// Create one independently collapsible history cell per changed file.
+pub(crate) fn new_patch_events(
     changes: HashMap<PathBuf, FileChange>,
     cwd: &Path,
-) -> PatchHistoryCell {
+) -> Vec<PatchHistoryCell> {
+    let mut changes = changes.into_iter().collect::<Vec<_>>();
+    changes.sort_by(|left, right| left.0.cmp(&right.0));
+    changes
+        .into_iter()
+        .map(|(path, change)| new_patch_event(path, change, cwd))
+        .collect()
+}
+
+pub(crate) fn new_patch_event(path: PathBuf, change: FileChange, cwd: &Path) -> PatchHistoryCell {
     PatchHistoryCell {
-        changes,
+        path,
+        change,
         cwd: cwd.to_path_buf(),
         display_cache: Mutex::new(None),
     }

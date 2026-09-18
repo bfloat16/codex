@@ -29,7 +29,7 @@ impl ConversationViewport {
         let content_row = usize::from(row.saturating_sub(top_padding));
         let footer_row = lines.lines.len();
         (content_row < lines.heading_rows
-            || (self.expanded_file_change == Some(index) && content_row == footer_row))
+            || (self.expanded_file_changes.contains(&index) && content_row == footer_row))
             .then_some(index)
     }
 
@@ -37,9 +37,10 @@ impl ConversationViewport {
         let Some(index) = self.file_change_hit(area, position) else {
             return false;
         };
-        let previous = self.expanded_file_change;
-        self.expanded_file_change = (previous != Some(index)).then_some(index);
-        self.refresh_file_changes([previous, Some(index)].into_iter().flatten(), area.width);
+        if !self.expanded_file_changes.remove(&index) {
+            self.expanded_file_changes.insert(index);
+        }
+        self.refresh_file_changes([index], area.width);
         true
     }
 
@@ -71,31 +72,36 @@ impl ConversationViewport {
     }
 
     pub(super) fn shift_file_change_state(&mut self, index: usize, inserted_count: usize) {
-        for cell_index in [
-            &mut self.hovered_file_change,
-            &mut self.expanded_file_change,
-        ] {
-            if let Some(cell_index) = cell_index.as_mut()
-                && *cell_index >= index
-            {
-                *cell_index = cell_index.saturating_add(inserted_count);
-            }
+        if let Some(cell_index) = self.hovered_file_change.as_mut()
+            && *cell_index >= index
+        {
+            *cell_index = cell_index.saturating_add(inserted_count);
         }
+        self.expanded_file_changes = std::mem::take(&mut self.expanded_file_changes)
+            .into_iter()
+            .map(|cell_index| {
+                if cell_index >= index {
+                    cell_index.saturating_add(inserted_count)
+                } else {
+                    cell_index
+                }
+            })
+            .collect();
     }
 
     pub(super) fn validate_file_change_state(&mut self) {
-        for cell_index in [
-            &mut self.hovered_file_change,
-            &mut self.expanded_file_change,
-        ] {
-            if !cell_index.is_some_and(|index| {
-                self.cells
-                    .get(index)
-                    .is_some_and(|cell| cell.is_file_change())
-            }) {
-                *cell_index = None;
-            }
+        if !self.hovered_file_change.is_some_and(|index| {
+            self.cells
+                .get(index)
+                .is_some_and(|cell| cell.is_file_change())
+        }) {
+            self.hovered_file_change = None;
         }
+        self.expanded_file_changes.retain(|index| {
+            self.cells
+                .get(*index)
+                .is_some_and(|cell| cell.is_file_change())
+        });
     }
 }
 

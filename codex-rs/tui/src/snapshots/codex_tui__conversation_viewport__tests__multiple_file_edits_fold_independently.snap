@@ -1,0 +1,43 @@
+---
+source: tui/src/conversation_viewport_tests.rs
+expression: "format!(\"collapsed:\\n{collapsed}\\nfirst expanded:\\n{first_expanded}\\nboth expanded:\\n{both_expanded}\\nsecond expanded:\\n{second_expanded}\",)"
+---
+collapsed:
+● Added src/a.rs (+1 -0)
+
+● Added src/b.rs (+1 -0)
+
+
+
+
+
+
+
+first expanded:
+● Added src/a.rs (+1 -0)
+    1 +fn a() {}
+  Show less ↑
+
+● Added src/b.rs (+1 -0)
+
+
+
+
+
+both expanded:
+● Added src/a.rs (+1 -0)
+    1 +fn a() {}
+  Show less ↑
+
+● Added src/b.rs (+1 -0)
+    1 +fn b() {}
+  Show less ↑
+
+
+
+second expanded:
+● Added src/a.rs (+1 -0)
+
+● Added src/b.rs (+1 -0)
+    1 +fn b() {}
+  Show less ↑

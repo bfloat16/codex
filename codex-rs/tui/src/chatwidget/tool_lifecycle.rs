@@ -8,7 +8,9 @@ use codex_utils_path_uri::LegacyAppPathString;
 
 impl ChatWidget {
     pub(super) fn on_patch_apply_begin(&mut self, changes: HashMap<PathBuf, FileChange>) {
-        self.add_to_history(history_cell::new_patch_event(changes, &self.config.cwd));
+        for cell in history_cell::new_patch_events(changes, &self.config.cwd) {
+            self.add_to_history(cell);
+        }
     }
 
     pub(super) fn on_view_image_tool_call(&mut self, path: LegacyAppPathString) {
@@ -168,8 +170,8 @@ impl ChatWidget {
         let ThreadItem::FileChange { status, .. } = item else {
             return;
         };
-        // If the patch was successful, just let the "Edited" block stand.
-        // Otherwise, add a failure block.
+        // If the patch was successful, let the per-file change blocks stand. Otherwise, add a
+        // failure block.
         if matches!(status, codex_app_server_protocol::PatchApplyStatus::Failed) {
             self.add_to_history(history_cell::new_patch_apply_failure(String::new()));
         }

@@ -192,12 +192,10 @@ async fn patch_background_extends_past_the_reserved_wrap_width() {
     screen
         .viewport
         .push_cell(Arc::new(crate::history_cell::new_patch_event(
-            std::collections::HashMap::from([(
-                std::path::PathBuf::from("src/new.rs"),
-                crate::diff_model::FileChange::Add {
-                    content: "fn added() {}\n".to_string(),
-                },
-            )]),
+            std::path::PathBuf::from("src/new.rs"),
+            crate::diff_model::FileChange::Add {
+                content: "fn added() {}\n".to_string(),
+            },
             std::path::Path::new("/tmp/project"),
         )));
     let width = 50;
@@ -209,7 +207,16 @@ async fn patch_background_extends_past_the_reserved_wrap_width() {
         .draw(|frame| {
             screen.render(&chat_widget, frame.area(), frame.buffer_mut());
         })
-        .expect("render patch with reserved columns");
+        .expect("render collapsed patch with reserved columns");
+    assert!(screen.viewport.handle_left_click(
+        screen.last_conversation_area,
+        Position::new(/*x*/ 4, screen.last_conversation_area.y),
+    ));
+    terminal
+        .draw(|frame| {
+            screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+        })
+        .expect("render expanded patch with reserved columns");
 
     let diff_background = terminal.backend().buffer()[Position::new(/*x*/ 4, /*y*/ 1)].bg;
     assert_ne!(diff_background, Color::Reset);

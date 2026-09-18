@@ -656,12 +656,10 @@ fn first_live_tool_uses_the_clickable_collapsed_group() {
 fn single_tools_and_file_edits_are_collapsed_by_default() {
     let cwd = crate::test_support::test_path_buf("/tmp/project");
     let patch = crate::history_cell::new_patch_event(
-        std::collections::HashMap::from([(
-            std::path::PathBuf::from("src/lib.rs"),
-            crate::diff_model::FileChange::Add {
-                content: "pub fn added() {}\n".to_string(),
-            },
-        )]),
+        std::path::PathBuf::from("src/lib.rs"),
+        crate::diff_model::FileChange::Add {
+            content: "pub fn added() {}\n".to_string(),
+        },
         &cwd,
     );
     let cells: Vec<Arc<dyn HistoryCell>> = vec![
@@ -712,16 +710,64 @@ fn single_tools_and_file_edits_are_collapsed_by_default() {
 }
 
 #[test]
+fn multiple_file_edits_fold_independently() {
+    let cwd = crate::test_support::test_path_buf("/tmp/project");
+    let cells = crate::history_cell::new_patch_events(
+        std::collections::HashMap::from([
+            (
+                std::path::PathBuf::from("src/b.rs"),
+                crate::diff_model::FileChange::Add {
+                    content: "fn b() {}\n".to_string(),
+                },
+            ),
+            (
+                std::path::PathBuf::from("src/a.rs"),
+                crate::diff_model::FileChange::Add {
+                    content: "fn a() {}\n".to_string(),
+                },
+            ),
+        ]),
+        &cwd,
+    )
+    .into_iter()
+    .map(|cell| Arc::new(cell) as Arc<dyn HistoryCell>)
+    .collect();
+    let mut viewport = viewport(cells);
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 64, /*height*/ 10,
+    );
+    let render = |viewport: &mut ConversationViewport| {
+        let mut buffer = Buffer::empty(area);
+        viewport.render(area, &mut buffer);
+        buffer_text(&buffer, area)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let collapsed = render(&mut viewport);
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    let first_expanded = render(&mut viewport);
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 4)));
+    let both_expanded = render(&mut viewport);
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    let second_expanded = render(&mut viewport);
+
+    assert_snapshot!(format!(
+        "collapsed:\n{collapsed}\nfirst expanded:\n{first_expanded}\nboth expanded:\n{both_expanded}\nsecond expanded:\n{second_expanded}",
+    ));
+}
+
+#[test]
 fn large_file_edits_cache_fold_hover_expand_and_collapse() {
     let cwd = crate::test_support::test_path_buf("/tmp/project");
     let content = (1..=55)
         .map(|line| format!("let value_{line:02} = {line};\n"))
         .collect::<String>();
     let patch = crate::history_cell::new_patch_event(
-        std::collections::HashMap::from([(
-            std::path::PathBuf::from("src/large.rs"),
-            crate::diff_model::FileChange::Add { content },
-        )]),
+        std::path::PathBuf::from("src/large.rs"),
+        crate::diff_model::FileChange::Add { content },
         &cwd,
     );
     let first_layout = patch
@@ -799,10 +845,8 @@ fn small_file_edits_are_collapsed_and_interactive() {
         .map(|line| format!("line {line}\n"))
         .collect::<String>();
     let patch = crate::history_cell::new_patch_event(
-        std::collections::HashMap::from([(
-            std::path::PathBuf::from("src/small.txt"),
-            crate::diff_model::FileChange::Add { content },
-        )]),
+        std::path::PathBuf::from("src/small.txt"),
+        crate::diff_model::FileChange::Add { content },
         &cwd,
     );
     let mut viewport = viewport(vec![Arc::new(patch)]);
@@ -907,14 +951,12 @@ fn background_terminal_interactions_fold_and_expand() {
     viewport.render(area, &mut expanded);
     assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
     let patch = crate::history_cell::new_patch_event(
-        std::collections::HashMap::from([(
-            std::path::PathBuf::from("src/worker.rs"),
-            crate::diff_model::FileChange::Add {
-                content: (1..=48)
-                    .map(|line| format!("line {line}\n"))
-                    .collect::<String>(),
-            },
-        )]),
+        std::path::PathBuf::from("src/worker.rs"),
+        crate::diff_model::FileChange::Add {
+            content: (1..=48)
+                .map(|line| format!("line {line}\n"))
+                .collect::<String>(),
+        },
         &crate::test_support::test_path_buf("/tmp/project"),
     );
     viewport.push_cell(Arc::new(patch));

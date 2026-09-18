@@ -387,11 +387,9 @@ impl App {
         if request.thread_label.is_none() || request.changes.is_empty() {
             return;
         }
-        self.chat_widget
-            .add_to_history(history_cell::new_patch_event(
-                request.changes.clone(),
-                &request.cwd,
-            ));
+        for cell in history_cell::new_patch_events(request.changes.clone(), &request.cwd) {
+            self.chat_widget.add_to_history(cell);
+        }
     }
 
     pub(super) async fn pending_inactive_thread_requests(&self) -> Vec<(ThreadId, ServerRequest)> {

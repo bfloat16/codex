@@ -11,7 +11,7 @@
 //! rendered transcript output can change.
 
 use crate::diff_model::FileChange;
-use crate::diff_render::create_diff_summary;
+use crate::diff_render::create_file_diff_summary;
 use crate::diff_render::display_path_for;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::OutputLinesParams;
