@@ -137,6 +137,7 @@ mod auto_review_denials;
 mod cwd_prompt;
 mod debug_config;
 mod diff_model;
+mod diff_panel;
 mod diff_render;
 mod dynamic_tools;
 mod dynamic_tools_mcp;

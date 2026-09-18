@@ -1,0 +1,42 @@
+---
+source: tui/src/diff_panel_tests.rs
+expression: "format!(\"first file:\\n{first}\\nsecond file:\\n{second}\")"
+---
+first file:
+│ 2 files changed +2 -1                         ×
+│ uncommitted (vs HEAD)
+│
+│ › src/a.rs                                +1 -1
+│   src/b.rs                                +1 -0
+│
+│ src/a.rs +1 -1
+│ ───────────────────────────────────────────────
+│ 1 -old
+│ 1 +new
+│
+│ src/b.rs +1 -0
+│ ───────────────────────────────────────────────
+│ 1 +fn b() {}
+│
+│
+│
+│
+second file:
+│ 2 files changed +2 -1                         ×
+│ uncommitted (vs HEAD)
+│
+│   src/a.rs                                +1 -1
+│ › src/b.rs                                +1 -0
+│
+│ src/a.rs +1 -1
+│ ───────────────────────────────────────────────
+│ 1 -old
+│ 1 +new
+│
+│ src/b.rs +1 -0
+│ ───────────────────────────────────────────────
+│ 1 +fn b() {}
+│
+│
+│
+│
