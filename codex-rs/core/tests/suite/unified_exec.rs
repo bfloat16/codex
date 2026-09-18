@@ -23,8 +23,6 @@ use codex_protocol::config_types::Settings;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
 use codex_protocol::config_types::WindowsSandboxLevel;
-use codex_protocol::items::CommandExecutionItem;
-use codex_protocol::items::CommandExecutionStatus as ItemCommandExecutionStatus;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::PermissionProfileSnapshot;
@@ -1889,7 +1887,7 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unified_exec_empty_poll_emits_durable_wait_item() -> Result<()> {
+async fn unified_exec_empty_poll_stays_in_memory_only() -> Result<()> {
     skip_if_target_windows!(Ok(()), "uses a POSIX sleep command");
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
@@ -1956,45 +1954,23 @@ async fn unified_exec_empty_poll_emits_durable_wait_item() -> Result<()> {
     test.codex.flush_rollout().await?;
     let rollout_path = test.codex.rollout_path().expect("rollout path");
     let (items, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(&rollout_path).await?;
-    let mut durable_waits = items.iter().filter_map(|item| match item {
-        RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => match &event.item {
-            TurnItem::CommandExecution(item)
-                if item.source == ExecCommandSource::UnifiedExecInteraction =>
-            {
-                Some(item.clone())
+    let persisted_waits = items
+        .iter()
+        .filter(|item| match item {
+            RolloutItem::EventMsg(EventMsg::TerminalInteraction(event)) => {
+                event.call_id == open_call_id
             }
-            _ => None,
-        },
-        _ => None,
-    });
-    let mut wait = durable_waits.next().expect("durable wait item");
-    assert!(durable_waits.next().is_none());
-    assert_command(&wait.command, "-lc", "sleep 15");
-    let duration = wait.duration.take();
-    assert!(duration.is_some());
-    wait.command.clear();
-    wait.parsed_cmd.clear();
-    let cwd = wait.cwd.clone();
-    assert_eq!(
-        wait,
-        CommandExecutionItem {
-            id: format!("{poll_call_id}:wait"),
-            plugin_id: None,
-            script_path: None,
-            process_id: Some("1000".to_string()),
-            command: Vec::new(),
-            cwd,
-            parsed_cmd: Vec::new(),
-            source: ExecCommandSource::UnifiedExecInteraction,
-            interaction_input: Some(String::new()),
-            status: ItemCommandExecutionStatus::Completed,
-            stdout: None,
-            stderr: None,
-            aggregated_output: None,
-            exit_code: None,
-            duration: None,
-            formatted_output: None,
-        }
+            RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => matches!(
+                &event.item,
+                TurnItem::CommandExecution(item)
+                    if item.source == ExecCommandSource::UnifiedExecInteraction
+            ),
+            _ => false,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        persisted_waits.is_empty(),
+        "terminal waits must remain in memory only: {persisted_waits:?}"
     );
 
     Ok(())
