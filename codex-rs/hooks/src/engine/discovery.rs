@@ -80,12 +80,13 @@ struct NormalizedHandler {
 }
 
 #[derive(Clone, Copy)]
-struct HookDiscoveryPolicy {
+struct HookDiscoveryPolicy<'a> {
     allow_managed_hooks_only: bool,
     bypass_hook_trust: bool,
+    codex_home: Option<&'a AbsolutePathBuf>,
 }
 
-impl HookDiscoveryPolicy {
+impl HookDiscoveryPolicy<'_> {
     fn allows(self, source: &HookHandlerSource<'_>) -> bool {
         !self.allow_managed_hooks_only || source.is_managed
     }
@@ -104,29 +105,49 @@ pub(crate) fn discover_handlers(
     let mut display_order = 0_i64;
     let mut visited_json_hook_folders = HashSet::new();
     let hook_states = hook_states_from_stack(config_layer_stack);
+    let codex_home = config_layer_stack.and_then(codex_home_for_hook_discovery);
     let policy = HookDiscoveryPolicy {
-        allow_managed_hooks_only: config_layer_stack.is_some_and(|config_layer_stack| {
-            config_layer_stack
-                .requirements()
-                .allow_managed_hooks_only
-                .as_ref()
-                .is_some_and(|requirement| requirement.value)
-        }),
+        allow_managed_hooks_only: codex_home.is_none()
+            && config_layer_stack.is_some_and(|config_layer_stack| {
+                config_layer_stack
+                    .requirements()
+                    .allow_managed_hooks_only
+                    .as_ref()
+                    .is_some_and(|requirement| {
+                        requirement.value
+                            && !is_system_global_requirement_source(&requirement.source)
+                    })
+            }),
         bypass_hook_trust,
+        codex_home: codex_home.as_ref(),
     };
 
     if let Some(config_layer_stack) = config_layer_stack {
-        required_load_errors = append_managed_requirement_handlers(
-            &mut handlers,
-            &mut hook_entries,
-            &mut warnings,
-            &mut display_order,
-            config_layer_stack,
-            &hook_states,
-            policy,
-        );
+        if codex_home.is_none() {
+            required_load_errors = append_managed_requirement_handlers(
+                &mut handlers,
+                &mut hook_entries,
+                &mut warnings,
+                &mut display_order,
+                config_layer_stack,
+                &hook_states,
+                policy,
+            );
+        }
 
         for layer in config_layer_stack.layers_low_to_high() {
+            if codex_home.is_some() && !matches!(layer.name, ConfigLayerSource::User { .. }) {
+                continue;
+            }
+            if codex_home.is_none()
+                && matches!(
+                    layer.name,
+                    ConfigLayerSource::System { .. }
+                        | ConfigLayerSource::LegacyManagedConfigTomlFromFile { .. }
+                )
+            {
+                continue;
+            }
             let (hook_source, is_managed) = hook_metadata_for_config_layer_source(&layer.name);
             let policy_path = config_toml_source_path(layer);
             let policy_source = HookHandlerSource {
@@ -205,6 +226,28 @@ pub(crate) fn discover_handlers(
     }
 }
 
+fn codex_home_for_hook_discovery(config_layer_stack: &ConfigLayerStack) -> Option<AbsolutePathBuf> {
+    config_layer_stack
+        .layers_low_to_high()
+        .find_map(|layer| match &layer.name {
+            ConfigLayerSource::User {
+                file,
+                profile: None,
+            } => file.parent(),
+            ConfigLayerSource::User {
+                profile: Some(_), ..
+            }
+            | ConfigLayerSource::PackagedDefaults { .. }
+            | ConfigLayerSource::Mdm { .. }
+            | ConfigLayerSource::System { .. }
+            | ConfigLayerSource::EnterpriseManaged { .. }
+            | ConfigLayerSource::Project { .. }
+            | ConfigLayerSource::SessionFlags
+            | ConfigLayerSource::LegacyManagedConfigTomlFromFile { .. }
+            | ConfigLayerSource::LegacyManagedConfigTomlFromMdm => None,
+        })
+}
+
 fn append_managed_requirement_handlers(
     handlers: &mut Vec<ConfiguredHandler>,
     hook_entries: &mut Vec<HookListEntry>,
@@ -212,11 +255,18 @@ fn append_managed_requirement_handlers(
     display_order: &mut i64,
     config_layer_stack: &ConfigLayerStack,
     hook_states: &HashMap<String, HookStateToml>,
-    policy: HookDiscoveryPolicy,
+    policy: HookDiscoveryPolicy<'_>,
 ) -> Vec<String> {
     let Some(managed_hooks) = config_layer_stack.requirements().managed_hooks.as_ref() else {
         return Vec::new();
     };
+    if managed_hooks
+        .source
+        .as_ref()
+        .is_some_and(is_system_global_requirement_source)
+    {
+        return Vec::new();
+    }
     let mut required_load_errors = Vec::new();
     let source_path = managed_hooks_source_path(managed_hooks.get(), managed_hooks.source.as_ref());
     append_hook_events(
@@ -241,6 +291,20 @@ fn append_managed_requirement_handlers(
     required_load_errors
 }
 
+fn is_system_global_requirement_source(source: &RequirementSource) -> bool {
+    match source {
+        RequirementSource::SystemRequirementsToml { .. }
+        | RequirementSource::LegacyManagedConfigTomlFromFile { .. } => true,
+        RequirementSource::Composite { sources } => {
+            sources.iter().any(is_system_global_requirement_source)
+        }
+        RequirementSource::Unknown
+        | RequirementSource::MdmManagedPreferences { .. }
+        | RequirementSource::EnterpriseManaged { .. }
+        | RequirementSource::LegacyManagedConfigTomlFromMdm => false,
+    }
+}
+
 fn append_plugin_hook_sources(
     handlers: &mut Vec<ConfiguredHandler>,
     hook_entries: &mut Vec<HookListEntry>,
@@ -248,7 +312,7 @@ fn append_plugin_hook_sources(
     display_order: &mut i64,
     plugin_hook_sources: Vec<PluginHookSource>,
     hook_states: &HashMap<String, HookStateToml>,
-    policy: HookDiscoveryPolicy,
+    policy: HookDiscoveryPolicy<'_>,
 ) {
     for source in plugin_hook_sources {
         let PluginHookSource {
@@ -259,6 +323,12 @@ fn append_plugin_hook_sources(
             source_relative_path,
             hooks,
         } = source;
+        if policy
+            .codex_home
+            .is_some_and(|codex_home| !source_path.as_path().starts_with(codex_home.as_path()))
+        {
+            continue;
+        }
         let mut env = HashMap::new();
         let plugin_root_value = plugin_root.display().to_string();
         let plugin_data_root_value = plugin_data_root.display().to_string();
@@ -456,7 +526,7 @@ fn append_hook_events(
     display_order: &mut i64,
     mut source: HookHandlerSource<'_>,
     hook_events: HookEventsToml,
-    policy: HookDiscoveryPolicy,
+    policy: HookDiscoveryPolicy<'_>,
 ) {
     if !policy.allows(&source) {
         return;
