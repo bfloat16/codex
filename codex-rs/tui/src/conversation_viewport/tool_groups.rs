@@ -238,8 +238,13 @@ impl ConversationViewport {
         }))
     }
 
-    pub(super) fn refresh_trailing_tool_group(&mut self, width: u16) {
-        let Some(last) = self.cells.len().checked_sub(1) else {
+    /// Refresh the newest committed tool group even when a later non-tool cell ended it.
+    pub(super) fn refresh_latest_tool_group(&mut self, width: u16) {
+        let Some(last) = self
+            .cells
+            .iter()
+            .rposition(|cell| cell.tool_activity().is_some())
+        else {
             return;
         };
         let Some(range) = self.tool_group_at(last) else {
@@ -357,6 +362,13 @@ impl ToolActivityGroupRenderable {
                 "called",
                 "MCP tool",
                 "MCP tools",
+            ),
+            (
+                self.activity.background_terminal_interactions,
+                "Interacted with",
+                "interacted with",
+                "background terminal",
+                "background terminals",
             ),
             (
                 self.activity.background_terminal_waits,

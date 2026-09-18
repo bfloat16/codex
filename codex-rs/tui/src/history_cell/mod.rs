@@ -153,6 +153,7 @@ pub(crate) struct ToolActivity {
     pub(crate) listed_directories: usize,
     pub(crate) shell_commands: usize,
     pub(crate) mcp_calls: usize,
+    pub(crate) background_terminal_interactions: usize,
     pub(crate) background_terminal_waits: usize,
 }
 
@@ -172,6 +173,9 @@ impl ToolActivity {
             .saturating_add(other.listed_directories);
         self.shell_commands = self.shell_commands.saturating_add(other.shell_commands);
         self.mcp_calls = self.mcp_calls.saturating_add(other.mcp_calls);
+        self.background_terminal_interactions = self
+            .background_terminal_interactions
+            .saturating_add(other.background_terminal_interactions);
         self.background_terminal_waits = self
             .background_terminal_waits
             .saturating_add(other.background_terminal_waits);

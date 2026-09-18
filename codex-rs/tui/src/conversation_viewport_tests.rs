@@ -879,6 +879,108 @@ shell transcript detail
 }
 
 #[test]
+fn background_terminal_interactions_fold_and_expand() {
+    let cells: Vec<Arc<dyn HistoryCell>> =
+        vec![Arc::new(crate::history_cell::new_unified_exec_interaction(
+            Some("worker command".to_string()),
+            "confirm\n".to_string(),
+        ))];
+    let mut viewport = viewport(cells);
+    viewport.sync_live_tail(
+        /*width*/ 56,
+        /*active_key*/ None,
+        ActiveToolGroupState {
+            accepting_content: true,
+            started_at: None,
+            animations_enabled: false,
+            animation_tick: None,
+        },
+        |_| None,
+    );
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 56, /*height*/ 9,
+    );
+    let mut active_collapsed = Buffer::empty(area);
+    viewport.render(area, &mut active_collapsed);
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    let mut expanded = Buffer::empty(area);
+    viewport.render(area, &mut expanded);
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
+    let patch = crate::history_cell::new_patch_event(
+        std::collections::HashMap::from([(
+            std::path::PathBuf::from("src/worker.rs"),
+            crate::diff_model::FileChange::Add {
+                content: (1..=48)
+                    .map(|line| format!("line {line}\n"))
+                    .collect::<String>(),
+            },
+        )]),
+        &crate::test_support::test_path_buf("/tmp/project"),
+    );
+    viewport.push_cell(Arc::new(patch));
+    let mut after_file_change = Buffer::empty(area);
+    viewport.render(area, &mut after_file_change);
+    viewport.sync_live_tail(
+        /*width*/ 56,
+        /*active_key*/ None,
+        ActiveToolGroupState::default(),
+        |_| None,
+    );
+    let mut after_turn_end = Buffer::empty(area);
+    viewport.render(area, &mut after_turn_end);
+
+    let trim_rows = |buffer: &Buffer| {
+        buffer_text(buffer, area)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_snapshot!(format!(
+        "active collapsed:\n{}\nexpanded:\n{}\nafter file change:\n{}\nafter turn end:\n{}",
+        trim_rows(&active_collapsed),
+        trim_rows(&expanded),
+        trim_rows(&after_file_change),
+        trim_rows(&after_turn_end),
+    ), @r"
+    active collapsed:
+    ● Interacted with 1 background terminal
+      └ Interacted with background terminal · worker command
+        · sent `confirm\n`
+
+
+
+
+
+
+    expanded:
+
+    ↳ Interacted with background terminal · worker command
+      └ confirm
+
+
+
+
+
+
+    after file change:
+      Interacted with 1 background terminal
+
+    ● Added src/worker.rs (+48 -0)
+
+
+
+
+
+
+    after turn end:
+      Interacted with 1 background terminal
+
+    ● Added src/worker.rs (+48 -0)
+    ");
+}
+
+#[test]
 fn raw_mode_keeps_adjacent_tool_details_unfolded() {
     let cells = vec![
         tool_cell(

@@ -153,6 +153,12 @@ impl ConversationViewport {
 
     pub(crate) fn push_cell(&mut self, cell: Arc<dyn HistoryCell>) {
         let follow_bottom = self.content.is_following_bottom();
+        let closes_trailing_tool_group = self.render_mode == HistoryRenderMode::Rich
+            && cell.tool_activity().is_none()
+            && self
+                .cells
+                .last()
+                .is_some_and(|cell| cell.tool_activity().is_some());
         let inserted_before_synthetic = self.synthetic_live_tool_group_index()
             == Some(self.cells.len())
             && cell.tool_activity().is_none();
@@ -165,6 +171,11 @@ impl ConversationViewport {
         if self.render_mode == HistoryRenderMode::Rich
             && self.cells[rebuild_start].tool_activity().is_some()
         {
+            while rebuild_start > 0 && self.cells[rebuild_start - 1].tool_activity().is_some() {
+                rebuild_start -= 1;
+            }
+        } else if closes_trailing_tool_group {
+            rebuild_start = rebuild_start.saturating_sub(1);
             while rebuild_start > 0 && self.cells[rebuild_start - 1].tool_activity().is_some() {
                 rebuild_start -= 1;
             }
@@ -304,7 +315,7 @@ impl ConversationViewport {
         self.live_tail_key = next_key;
         self.live_display = next_key.and_then(|_| compute_display(width));
         self.live_tool_group_state = tool_group_state;
-        self.refresh_trailing_tool_group(width);
+        self.refresh_latest_tool_group(width);
         self.validate_tool_group_state();
         self.append_live_renderables();
         if follow_bottom {

@@ -567,6 +567,14 @@ fn session_configured_event(model: &str) -> ThreadSessionState {
 fn unified_exec_interaction_cell_renders_input() {
     let input = (1..=16).map(|line| format!("line {line}\n")).collect();
     let cell = new_unified_exec_interaction(Some("cat".to_string()), input);
+    assert_eq!(
+        cell.tool_activity(),
+        Some(ToolActivity {
+            call_count: 1,
+            background_terminal_interactions: 1,
+            ..ToolActivity::default()
+        })
+    );
     let lines = render_lines(&cell.display_lines(/*width*/ 80));
     assert_eq!(lines, render_transcript(&cell));
     insta::assert_snapshot!(lines.join("\n"), @"

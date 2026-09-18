@@ -81,7 +81,7 @@ fn format_unified_exec_interaction(command: &[String], input: Option<&str>) -> S
     }
 }
 
-fn summarize_interaction_input(input: &str) -> String {
+pub(crate) fn summarize_interaction_input(input: &str) -> String {
     let single_line = input.replace('\n', "\\n");
     let sanitized = single_line.replace('`', "\\`");
     if sanitized.chars().count() <= MAX_INTERACTION_PREVIEW_CHARS {

@@ -1,6 +1,7 @@
 //! Background terminal interaction and process-summary history cells.
 
 use super::*;
+use crate::exec_cell::summarize_interaction_input;
 use crate::width::display_width;
 
 #[derive(Debug)]
@@ -96,21 +97,32 @@ impl HistoryCell for UnifiedExecInteractionCell {
     }
 
     fn tool_activity(&self) -> Option<ToolActivity> {
-        self.stdin.is_empty().then_some(ToolActivity {
+        Some(ToolActivity {
             call_count: 1,
-            background_terminal_waits: 1,
+            background_terminal_interactions: usize::from(!self.stdin.is_empty()),
+            background_terminal_waits: usize::from(self.stdin.is_empty()),
             ..ToolActivity::default()
         })
     }
 
     fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
-        let mut spans = vec!["Waited".cyan(), " for background terminal".into()];
+        let mut spans = if self.stdin.is_empty() {
+            vec!["Waited".cyan(), " for background terminal".into()]
+        } else {
+            vec!["Interacted".cyan(), " with background terminal".into()]
+        };
         if let Some(command) = self
             .command_display
             .as_ref()
             .filter(|command| !command.is_empty())
         {
             spans.extend([" · ".dim(), command.clone().dim()]);
+        }
+        if !self.stdin.is_empty() {
+            spans.extend([
+                " · sent ".dim(),
+                format!("`{}`", summarize_interaction_input(&self.stdin)).dim(),
+            ]);
         }
         vec![spans.into()]
     }
