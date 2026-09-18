@@ -15,6 +15,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use super::*;
+use crate::chatwidget::ActiveToolDisplay;
 use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::ToolActivity;
 use crate::history_cell::UserHistoryCell;
@@ -100,6 +101,13 @@ struct ToolTestCell {
 }
 
 #[derive(Debug)]
+struct PreviewToolTestCell {
+    detail: &'static str,
+    preview: &'static str,
+    activity: ToolActivity,
+}
+
+#[derive(Debug)]
 struct DetailCountingToolCell {
     detail_calls: Arc<AtomicUsize>,
 }
@@ -119,6 +127,24 @@ impl HistoryCell for ToolTestCell {
 
     fn tool_activity(&self) -> Option<ToolActivity> {
         Some(self.activity)
+    }
+}
+
+impl HistoryCell for PreviewToolTestCell {
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        vec![self.detail.into()]
+    }
+
+    fn raw_lines(&self) -> Vec<Line<'static>> {
+        vec![self.detail.into()]
+    }
+
+    fn tool_activity(&self) -> Option<ToolActivity> {
+        Some(self.activity)
+    }
+
+    fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
+        vec![self.preview.into()]
     }
 }
 
@@ -191,6 +217,26 @@ fn tool_cell(
     })
 }
 
+fn preview_tool_cell(
+    detail: &'static str,
+    preview: &'static str,
+    activity: ToolActivity,
+) -> Arc<dyn HistoryCell> {
+    Arc::new(PreviewToolTestCell {
+        detail,
+        preview,
+        activity,
+    })
+}
+
+fn live_display(lines: Vec<HyperlinkLine>) -> Option<ActiveCellDisplay> {
+    Some(ActiveCellDisplay {
+        lines,
+        auxiliary_lines: Vec::new(),
+        tool: None,
+    })
+}
+
 #[test]
 fn renders_main_display_and_live_tail_without_pager_chrome() {
     let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(TestCell {
@@ -207,7 +253,8 @@ fn renders_main_display_and_live_tail_without_pager_chrome() {
             is_stream_continuation: false,
             animation_tick: None,
         }),
-        |_| Some(vec![HyperlinkLine::from("live tail")]),
+        ActiveToolGroupState::default(),
+        |_| live_display(vec![HyperlinkLine::from("live tail")]),
     );
     let mut terminal =
         Terminal::new(TestBackend::new(/*width*/ 32, /*height*/ 6)).expect("create terminal");
@@ -378,6 +425,231 @@ after
 
 
 "###);
+}
+
+#[test]
+fn active_tool_group_merges_live_activity_and_hides_previews_when_closed() {
+    let live_preview = "Call repo.inspect with a deliberately long argument list that would otherwise occupy more than two preview rows in the collapsed block";
+    let live_activity = ToolActivity {
+        call_count: 1,
+        mcp_calls: 1,
+        ..ToolActivity::default()
+    };
+    let mut viewport = viewport(vec![
+        cell("before"),
+        preview_tool_cell(
+            "read detail",
+            "Read src/lib.rs",
+            ToolActivity {
+                call_count: 1,
+                read_files: 1,
+                ..ToolActivity::default()
+            },
+        ),
+        preview_tool_cell(
+            "shell detail",
+            "Run cargo check",
+            ToolActivity {
+                call_count: 1,
+                shell_commands: 1,
+                ..ToolActivity::default()
+            },
+        ),
+        preview_tool_cell(
+            "search detail",
+            "Search hook discovery",
+            ToolActivity {
+                call_count: 1,
+                searches: 1,
+                ..ToolActivity::default()
+            },
+        ),
+    ]);
+    let active_state = ActiveToolGroupState {
+        accepting_content: true,
+        started_at: None,
+        animations_enabled: false,
+        animation_tick: None,
+    };
+    viewport.sync_live_tail(
+        /*width*/ 64,
+        Some(ActiveCellRenderKey {
+            revision: 1,
+            is_stream_continuation: false,
+            animation_tick: None,
+        }),
+        active_state,
+        |_| {
+            Some(ActiveCellDisplay {
+                lines: vec![HyperlinkLine::from("live MCP detail")],
+                auxiliary_lines: Vec::new(),
+                tool: Some(ActiveToolDisplay {
+                    activity: live_activity,
+                    preview_lines: vec![live_preview.into()],
+                    detail_lines: vec![HyperlinkLine::from("live MCP detail")],
+                    is_stream_continuation: false,
+                }),
+            })
+        },
+    );
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 64, /*height*/ 12,
+    );
+    let render = |viewport: &mut ConversationViewport| {
+        let mut buffer = Buffer::empty(area);
+        viewport.render(area, &mut buffer);
+        buffer_text(&buffer, area)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let active_collapsed = render(&mut viewport);
+    assert!(!active_collapsed.contains("Read src/lib.rs"));
+    assert!(!active_collapsed.contains("Run cargo check"));
+    assert!(!active_collapsed.contains("Search hook discovery"));
+    assert!(active_collapsed.contains("Call repo.inspect"));
+    assert!(active_collapsed.contains('…'));
+    assert!(!active_collapsed.contains("collapsed block"));
+
+    assert!(viewport.handle_mouse_move(area, Position::new(/*x*/ 8, /*y*/ 4)));
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 8, /*y*/ 4)));
+    let active_expanded = render(&mut viewport);
+    assert!(active_expanded.contains("read detail"));
+    assert!(active_expanded.contains("live MCP detail"));
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 40, /*y*/ 8)));
+
+    viewport.push_cell(preview_tool_cell(
+        "live MCP detail",
+        live_preview,
+        live_activity,
+    ));
+    viewport.sync_live_tail(
+        /*width*/ 64,
+        /*active_key*/ None,
+        active_state,
+        |_| None,
+    );
+    let active_between_tools = render(&mut viewport);
+    assert!(active_between_tools.contains("Call repo.inspect"));
+    assert!(active_between_tools.contains('…'));
+
+    viewport.sync_live_tail(
+        /*width*/ 64,
+        /*active_key*/ None,
+        ActiveToolGroupState::default(),
+        |_| None,
+    );
+    let inactive = render(&mut viewport);
+    assert!(!inactive.contains("Search hook discovery"));
+    assert!(!inactive.contains("Call repo.inspect"));
+
+    assert_snapshot!(format!(
+        "active collapsed:\n{active_collapsed}\nactive expanded:\n{active_expanded}\nactive between tools:\n{active_between_tools}\ninactive:\n{inactive}",
+    ), @r###"
+active collapsed:
+before
+
+● Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
+  shell command
+  └ Call repo.inspect with a deliberately long argument list
+    that would otherwise occupy more than two preview rows in…
+
+
+
+
+
+
+active expanded:
+before
+
+read detail
+
+shell detail
+
+search detail
+
+live MCP detail
+
+
+
+active between tools:
+before
+
+● Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
+  shell command
+  └ Call repo.inspect with a deliberately long argument list
+    that would otherwise occupy more than two preview rows in…
+
+
+
+
+
+
+inactive:
+before
+
+  Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
+  shell command
+
+
+
+
+
+
+
+
+
+"###);
+}
+
+#[test]
+fn first_live_tool_uses_the_clickable_collapsed_group() {
+    let mut viewport = viewport(vec![cell("before")]);
+    viewport.sync_live_tail(
+        /*width*/ 48,
+        Some(ActiveCellRenderKey {
+            revision: 1,
+            is_stream_continuation: false,
+            animation_tick: None,
+        }),
+        ActiveToolGroupState {
+            accepting_content: true,
+            started_at: None,
+            animations_enabled: false,
+            animation_tick: None,
+        },
+        |_| {
+            Some(ActiveCellDisplay {
+                lines: vec![HyperlinkLine::from("live detail")],
+                auxiliary_lines: Vec::new(),
+                tool: Some(ActiveToolDisplay {
+                    activity: ToolActivity {
+                        call_count: 1,
+                        shell_commands: 1,
+                        ..ToolActivity::default()
+                    },
+                    preview_lines: vec!["Run just test".into()],
+                    detail_lines: vec![HyperlinkLine::from("live detail")],
+                    is_stream_continuation: false,
+                }),
+            })
+        },
+    );
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 48, /*height*/ 6,
+    );
+    let mut collapsed = Buffer::empty(area);
+    viewport.render(area, &mut collapsed);
+    assert!(buffer_text(&collapsed, area).contains("● Ran 1 shell command"));
+    assert!(buffer_text(&collapsed, area).contains("└ Run just test"));
+
+    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 8, /*y*/ 3)));
+    let mut expanded = Buffer::empty(area);
+    viewport.render(area, &mut expanded);
+    assert!(buffer_text(&expanded, area).contains("live detail"));
+    assert!(!buffer_text(&expanded, area).contains("Run just test"));
 }
 
 #[test]
@@ -877,7 +1149,8 @@ fn append_keeps_live_tail_after_committed_cells() {
             is_stream_continuation: false,
             animation_tick: None,
         }),
-        |_| Some(vec![HyperlinkLine::from("live tail")]),
+        ActiveToolGroupState::default(),
+        |_| live_display(vec![HyperlinkLine::from("live tail")]),
     );
 
     viewport.push_cell(cell("committed"));
@@ -904,14 +1177,20 @@ fn replacing_cells_invalidates_and_respaces_the_live_tail() {
         animation_tick: None,
     };
     let mut viewport = viewport(Vec::new());
-    viewport.sync_live_tail(/*width*/ 24, Some(key), |_| {
-        Some(vec![HyperlinkLine::from("live tail")])
-    });
+    viewport.sync_live_tail(
+        /*width*/ 24,
+        Some(key),
+        ActiveToolGroupState::default(),
+        |_| live_display(vec![HyperlinkLine::from("live tail")]),
+    );
 
     viewport.replace_cells(vec![cell("replacement")]);
-    viewport.sync_live_tail(/*width*/ 24, Some(key), |_| {
-        Some(vec![HyperlinkLine::from("live tail")])
-    });
+    viewport.sync_live_tail(
+        /*width*/ 24,
+        Some(key),
+        ActiveToolGroupState::default(),
+        |_| live_display(vec![HyperlinkLine::from("live tail")]),
+    );
 
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 24, /*height*/ 4,
@@ -1010,7 +1289,8 @@ fn preserves_semantic_links_for_committed_and_live_content() {
             is_stream_continuation: false,
             animation_tick: None,
         }),
-        |width| Some(live.display_hyperlink_lines(width)),
+        ActiveToolGroupState::default(),
+        |width| live_display(live.display_hyperlink_lines(width)),
     );
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 28, /*height*/ 6,

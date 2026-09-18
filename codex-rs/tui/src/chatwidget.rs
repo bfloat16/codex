@@ -303,6 +303,7 @@ use crate::history_cell::HookCell;
 use crate::history_cell::McpInvocation;
 use crate::history_cell::McpToolCallCell;
 use crate::history_cell::PlainHistoryCell;
+use crate::history_cell::ToolActivity;
 use crate::history_cell::WebSearchCell;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
@@ -830,6 +831,29 @@ pub(crate) struct ActiveCellRenderKey {
     /// When this changes, the overlay recomputes the cached tail even if the revision and width
     /// are unchanged, which is how shimmer/spinner visuals can animate in the overlay without any
     /// underlying data change.
+    pub(crate) animation_tick: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ActiveToolDisplay {
+    pub(crate) activity: ToolActivity,
+    pub(crate) preview_lines: Vec<Line<'static>>,
+    pub(crate) detail_lines: Vec<HyperlinkLine>,
+    pub(crate) is_stream_continuation: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct ActiveCellDisplay {
+    pub(crate) lines: Vec<HyperlinkLine>,
+    pub(crate) auxiliary_lines: Vec<HyperlinkLine>,
+    pub(crate) tool: Option<ActiveToolDisplay>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ActiveToolGroupState {
+    pub(crate) accepting_content: bool,
+    pub(crate) started_at: Option<Instant>,
+    pub(crate) animations_enabled: bool,
     pub(crate) animation_tick: Option<u64>,
 }
 
@@ -1996,33 +2020,76 @@ impl ChatWidget {
         (!lines.is_empty()).then_some(lines)
     }
 
-    /// Returns the active cells' main-viewport lines for a given terminal width.
-    pub(crate) fn active_cell_display_hyperlink_lines(
-        &self,
-        width: u16,
-    ) -> Option<Vec<HyperlinkLine>> {
+    /// Returns the active cells' main-viewport projection for a given terminal width.
+    pub(crate) fn active_cell_display(&self, width: u16) -> Option<ActiveCellDisplay> {
         let mode = self.history_render_mode();
         let mut lines = Vec::new();
-        let mut append = |cell: &dyn HistoryCell| {
+        let mut auxiliary_lines = Vec::new();
+        let append = |lines: &mut Vec<HyperlinkLine>, cell: &dyn HistoryCell| {
             let cell_lines = cell.display_hyperlink_lines_for_mode(width, mode);
             if !cell_lines.is_empty() && !lines.is_empty() {
                 lines.push(HyperlinkLine::from(""));
             }
             lines.extend(cell_lines);
         };
+        let tool = self.transcript.active_cell.as_deref().and_then(|cell| {
+            cell.tool_activity().map(|activity| ActiveToolDisplay {
+                activity,
+                preview_lines: cell.tool_group_preview_lines(),
+                detail_lines: cell.tool_group_detail_lines(width),
+                is_stream_continuation: cell.is_stream_continuation(),
+            })
+        });
         if let Some(cell) = self.transcript.active_cell.as_deref() {
-            append(cell);
+            append(&mut lines, cell);
         }
         if let Some(cell) = self.active_hook_cell.as_ref() {
-            append(cell);
+            append(&mut lines, cell);
+            append(&mut auxiliary_lines, cell);
         }
         if let Some(cell) = self.pending_token_activity_output() {
-            append(cell);
+            append(&mut lines, cell);
+            append(&mut auxiliary_lines, cell);
         }
         if let Some(cell) = self.pending_rate_limit_reset_hint() {
-            append(cell);
+            append(&mut lines, cell);
+            append(&mut auxiliary_lines, cell);
         }
-        (!lines.is_empty()).then_some(lines)
+        (!lines.is_empty() || tool.is_some()).then_some(ActiveCellDisplay {
+            lines,
+            auxiliary_lines,
+            tool,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_cell_display_hyperlink_lines(
+        &self,
+        width: u16,
+    ) -> Option<Vec<HyperlinkLine>> {
+        self.active_cell_display(width).map(|display| display.lines)
+    }
+
+    pub(crate) fn active_tool_group_state(&self) -> ActiveToolGroupState {
+        let accepting_content = self.turn_lifecycle.agent_turn_running
+            && self
+                .transcript
+                .active_cell
+                .as_ref()
+                .is_none_or(|cell| cell.tool_activity().is_some());
+        let started_at = self.turn_lifecycle.goal_status_active_turn_started_at;
+        let animations_enabled = self.local_settings.tui.animations;
+        let animation_tick = (accepting_content && animations_enabled).then(|| {
+            started_at
+                .map(|started_at| (started_at.elapsed().as_millis() / 50) as u64)
+                .unwrap_or_default()
+        });
+        ActiveToolGroupState {
+            accepting_content,
+            started_at,
+            animations_enabled,
+            animation_tick,
+        }
     }
 
     #[cfg(test)]

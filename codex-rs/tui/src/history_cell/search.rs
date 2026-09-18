@@ -128,6 +128,15 @@ impl HistoryCell for WebSearchCell {
             ..ToolActivity::default()
         })
     }
+
+    fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
+        let detail = web_search_detail(self.action.as_ref(), &self.query);
+        let mut spans = vec!["Search".cyan(), " the web".into()];
+        if !detail.is_empty() {
+            spans.extend([" for ".into(), detail.into()]);
+        }
+        vec![spans.into()]
+    }
 }
 
 pub(crate) fn new_active_web_search_call(

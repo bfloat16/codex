@@ -237,6 +237,14 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         None
     }
 
+    /// Returns concise activity rows for an active collapsed tool group.
+    ///
+    /// These rows describe the action itself rather than its output. The viewport keeps only the
+    /// newest bounded subset while the group can still accept adjacent tool cells.
+    fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
+        self.raw_lines().into_iter().take(1).collect()
+    }
+
     /// Returns cached, physically wrapped rows for an interactive file-change cell.
     fn file_change_display_lines(&self, _width: u16) -> Option<FileChangeDisplayLines> {
         None

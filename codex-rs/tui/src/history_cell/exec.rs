@@ -102,6 +102,18 @@ impl HistoryCell for UnifiedExecInteractionCell {
             ..ToolActivity::default()
         })
     }
+
+    fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
+        let mut spans = vec!["Waited".cyan(), " for background terminal".into()];
+        if let Some(command) = self
+            .command_display
+            .as_ref()
+            .filter(|command| !command.is_empty())
+        {
+            spans.extend([" · ".dim(), command.clone().dim()]);
+        }
+        vec![spans.into()]
+    }
 }
 
 pub(crate) fn new_unified_exec_interaction(

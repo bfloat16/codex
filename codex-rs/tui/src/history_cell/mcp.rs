@@ -320,6 +320,12 @@ impl HistoryCell for McpToolCallCell {
         })
     }
 
+    fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
+        let mut line: Line<'static> = vec!["Call".cyan(), " ".into()].into();
+        line.extend(line_to_static(&format_mcp_invocation(&self.invocation)).spans);
+        vec![line]
+    }
+
     fn transcript_animation_tick(&self) -> Option<u64> {
         if !self.animations_enabled || self.result.is_some() {
             return None;

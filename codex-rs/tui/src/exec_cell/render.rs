@@ -288,6 +288,23 @@ impl HistoryCell for ExecCell {
         Some(activity)
     }
 
+    fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
+        if self.is_exploring_cell() {
+            self.exploring_activity_lines(u16::MAX)
+        } else {
+            let [call] = self.calls.as_slice() else {
+                return Vec::new();
+            };
+            let mut line: Line<'static> = vec!["Run".cyan(), " ".into()].into();
+            let command = strip_bash_lc_and_escape(&call.command);
+            let highlighted = highlight_bash_to_lines(&command);
+            if let Some(first) = highlighted.first() {
+                line.extend(first.spans.clone());
+            }
+            vec![line]
+        }
+    }
+
     fn tool_group_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.display_hyperlink_lines(width)
     }
@@ -318,8 +335,14 @@ impl ExecCell {
             },
         ]));
 
+        let out_indented = self.exploring_activity_lines(width);
+        out.extend(prefix_lines(out_indented, "  └ ".dim(), "    ".into()));
+        out
+    }
+
+    fn exploring_activity_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut calls = self.calls.as_slice();
-        let mut out_indented = Vec::new();
+        let mut lines = Vec::new();
         while let Some((call, remaining)) = calls.split_first() {
             let reads_only = call
                 .parsed
@@ -391,12 +414,10 @@ impl ExecCell {
                         .initial_indent(initial_indent)
                         .subsequent_indent(subsequent_indent),
                 );
-                push_owned_lines(&wrapped, &mut out_indented);
+                push_owned_lines(&wrapped, &mut lines);
             }
         }
-
-        out.extend(prefix_lines(out_indented, "  └ ".dim(), "    ".into()));
-        out
+        lines
     }
 
     fn command_display_lines(&self, width: u16) -> Vec<Line<'static>> {

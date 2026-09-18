@@ -14,9 +14,15 @@ use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 
 use super::ConversationViewport;
+use crate::chatwidget::ActiveToolDisplay;
+use crate::chatwidget::ActiveToolGroupState;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
 use crate::history_cell::ToolActivity;
+use crate::line_truncation::truncate_line_to_width;
+use crate::motion::MotionMode;
+use crate::motion::ReducedMotionIndicator;
+use crate::motion::activity_indicator;
 use crate::render::renderable::Renderable;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::HyperlinkParagraph;
@@ -29,17 +35,43 @@ use crate::wrapping::word_wrap_line;
 const MIN_GROUPED_TOOL_CALLS: usize = 1;
 const SUMMARY_TEXT_ALPHA: f32 = 0.68;
 const HOVERED_SUMMARY_TEXT_ALPHA: f32 = 0.86;
+const ACTIVE_PREVIEW_MAX_ROWS: usize = 2;
+
+#[derive(Clone, Copy, Default)]
+struct ToolGroupTail<'a> {
+    tool: Option<&'a ActiveToolDisplay>,
+    state: ActiveToolGroupState,
+}
+
+#[derive(Clone, Copy, Default)]
+struct CellRangeRenderState<'a> {
+    hovered_tool_group: Option<usize>,
+    expanded_tool_group: Option<usize>,
+    hovered_file_change: Option<usize>,
+    expanded_file_change: Option<usize>,
+    tail: ToolGroupTail<'a>,
+}
 
 impl ConversationViewport {
     pub(super) fn render_cell_range(&self, range: Range<usize>) -> Vec<Box<dyn Renderable>> {
-        Self::render_cell_range_from(
+        let tail = (range.end == self.cells.len()).then_some(ToolGroupTail {
+            tool: self
+                .live_display
+                .as_ref()
+                .and_then(|display| display.tool.as_ref()),
+            state: self.live_tool_group_state,
+        });
+        Self::render_cell_range_with_tail(
             &self.cells,
             self.render_mode,
             range,
-            self.hovered_tool_group,
-            self.expanded_tool_group,
-            self.hovered_file_change,
-            self.expanded_file_change,
+            CellRangeRenderState {
+                hovered_tool_group: self.hovered_tool_group,
+                expanded_tool_group: self.expanded_tool_group,
+                hovered_file_change: self.hovered_file_change,
+                expanded_file_change: self.expanded_file_change,
+                tail: tail.unwrap_or_default(),
+            },
         )
     }
 
@@ -51,6 +83,26 @@ impl ConversationViewport {
         expanded_tool_group: Option<usize>,
         hovered_file_change: Option<usize>,
         expanded_file_change: Option<usize>,
+    ) -> Vec<Box<dyn Renderable>> {
+        Self::render_cell_range_with_tail(
+            cells,
+            render_mode,
+            range,
+            CellRangeRenderState {
+                hovered_tool_group,
+                expanded_tool_group,
+                hovered_file_change,
+                expanded_file_change,
+                tail: ToolGroupTail::default(),
+            },
+        )
+    }
+
+    fn render_cell_range_with_tail(
+        cells: &[Arc<dyn HistoryCell>],
+        render_mode: HistoryRenderMode,
+        range: Range<usize>,
+        state: CellRangeRenderState<'_>,
     ) -> Vec<Box<dyn Renderable>> {
         let mut renderables = Vec::with_capacity(range.len());
         let mut index = range.start;
@@ -67,12 +119,20 @@ impl ConversationViewport {
                     merged.merge(activity);
                     index += 1;
                 }
+                let live_tool = (index == cells.len()).then_some(state.tail.tool).flatten();
+                if let Some(live_tool) = live_tool {
+                    merged.merge(live_tool.activity);
+                }
                 if merged.call_count >= MIN_GROUPED_TOOL_CALLS {
                     renderables.push(Box::new(ToolActivityGroupRenderable {
                         cells: cells[start..index].to_vec(),
+                        live_tool: live_tool.cloned(),
                         activity: merged,
-                        hovered: hovered_tool_group == Some(start),
-                        expanded: expanded_tool_group == Some(start),
+                        active: index == cells.len() && state.tail.state.accepting_content,
+                        active_started_at: state.tail.state.started_at,
+                        animations_enabled: state.tail.state.animations_enabled,
+                        hovered: state.hovered_tool_group == Some(start),
+                        expanded: state.expanded_tool_group == Some(start),
                         top_padding: Self::tool_group_top_padding(cells, start),
                         layout: RefCell::new(None),
                     }) as Box<dyn Renderable>);
@@ -87,8 +147,10 @@ impl ConversationViewport {
                         cell.clone(),
                         render_mode,
                         /*has_prior_cells*/ cell_index > 0,
-                        /*hovered_file_change*/ hovered_file_change == Some(cell_index),
-                        /*expanded_file_change*/ expanded_file_change == Some(cell_index),
+                        /*hovered_file_change*/
+                        state.hovered_file_change == Some(cell_index),
+                        /*expanded_file_change*/
+                        state.expanded_file_change == Some(cell_index),
                     ));
                 }
                 continue;
@@ -98,8 +160,8 @@ impl ConversationViewport {
                 cells[index].clone(),
                 render_mode,
                 /*has_prior_cells*/ index > 0,
-                /*hovered_file_change*/ hovered_file_change == Some(index),
-                /*expanded_file_change*/ expanded_file_change == Some(index),
+                /*hovered_file_change*/ state.hovered_file_change == Some(index),
+                /*expanded_file_change*/ state.expanded_file_change == Some(index),
             ));
             index += 1;
         }
@@ -128,6 +190,66 @@ impl ConversationViewport {
         (activity.call_count >= MIN_GROUPED_TOOL_CALLS).then_some(start..end)
     }
 
+    pub(super) fn trailing_cells_form_tool_group(&self) -> bool {
+        self.render_mode == HistoryRenderMode::Rich
+            && self
+                .cells
+                .last()
+                .is_some_and(|cell| cell.tool_activity().is_some())
+    }
+
+    pub(super) fn synthetic_live_tool_group_index(&self) -> Option<usize> {
+        (self.render_mode == HistoryRenderMode::Rich
+            && self
+                .live_display
+                .as_ref()
+                .and_then(|display| display.tool.as_ref())
+                .is_some()
+            && !self.trailing_cells_form_tool_group())
+        .then_some(self.cells.len())
+    }
+
+    pub(super) fn synthetic_live_tool_group_top_padding(&self) -> u16 {
+        u16::from(
+            !self.cells.is_empty()
+                && self
+                    .live_display
+                    .as_ref()
+                    .and_then(|display| display.tool.as_ref())
+                    .is_some_and(|tool| !tool.is_stream_continuation),
+        )
+    }
+
+    pub(super) fn synthetic_live_tool_group_renderable(&self) -> Option<Box<dyn Renderable>> {
+        let display = self.live_display.as_ref()?;
+        let tool = display.tool.as_ref()?.clone();
+        let start = self.cells.len();
+        Some(Box::new(ToolActivityGroupRenderable {
+            cells: Vec::new(),
+            activity: tool.activity,
+            live_tool: Some(tool),
+            active: self.live_tool_group_state.accepting_content,
+            active_started_at: self.live_tool_group_state.started_at,
+            animations_enabled: self.live_tool_group_state.animations_enabled,
+            hovered: self.hovered_tool_group == Some(start),
+            expanded: self.expanded_tool_group == Some(start),
+            top_padding: self.synthetic_live_tool_group_top_padding(),
+            layout: RefCell::new(None),
+        }))
+    }
+
+    pub(super) fn refresh_trailing_tool_group(&mut self, width: u16) {
+        let Some(last) = self.cells.len().checked_sub(1) else {
+            return;
+        };
+        let Some(range) = self.tool_group_at(last) else {
+            return;
+        };
+        let renderables = self.render_cell_range(range.clone());
+        self.content
+            .replace_range(range.start, range.len(), renderables, width);
+    }
+
     pub(super) fn tool_group_top_padding(cells: &[Arc<dyn HistoryCell>], start: usize) -> u16 {
         u16::from(start > 0 && !cells[start].is_stream_continuation())
     }
@@ -151,6 +273,13 @@ impl ConversationViewport {
         starts.sort_unstable();
         starts.dedup();
         for start in starts.into_iter().rev() {
+            if self.synthetic_live_tool_group_index() == Some(start) {
+                if let Some(renderable) = self.synthetic_live_tool_group_renderable() {
+                    self.content
+                        .replace_range(start, 1, vec![renderable], width);
+                }
+                continue;
+            }
             let Some(range) = self.tool_group_at(start) else {
                 continue;
             };
@@ -171,18 +300,27 @@ impl ConversationViewport {
     }
 
     pub(super) fn validate_tool_group_state(&mut self) {
-        self.hovered_tool_group = self
-            .hovered_tool_group
-            .and_then(|index| self.tool_group_at(index).map(|range| range.start));
-        self.expanded_tool_group = self
-            .expanded_tool_group
-            .and_then(|index| self.tool_group_at(index).map(|range| range.start));
+        let synthetic = self.synthetic_live_tool_group_index();
+        self.hovered_tool_group = self.hovered_tool_group.and_then(|index| {
+            (synthetic == Some(index))
+                .then_some(index)
+                .or_else(|| self.tool_group_at(index).map(|range| range.start))
+        });
+        self.expanded_tool_group = self.expanded_tool_group.and_then(|index| {
+            (synthetic == Some(index))
+                .then_some(index)
+                .or_else(|| self.tool_group_at(index).map(|range| range.start))
+        });
     }
 }
 
 pub(super) struct ToolActivityGroupRenderable {
     cells: Vec<Arc<dyn HistoryCell>>,
+    live_tool: Option<ActiveToolDisplay>,
     activity: ToolActivity,
+    active: bool,
+    active_started_at: Option<std::time::Instant>,
+    animations_enabled: bool,
     hovered: bool,
     expanded: bool,
     top_padding: u16,
@@ -249,23 +387,69 @@ impl ToolActivityGroupRenderable {
             }
         }
         let style = summary_text_style(self.hovered);
-        let line = Line::from(
-            spans
-                .into_iter()
-                .map(|span| span.patch_style(style))
-                .collect::<Vec<_>>(),
-        );
+        let marker = if self.active {
+            activity_indicator(
+                self.active_started_at,
+                MotionMode::from_animations_enabled(self.animations_enabled),
+                ReducedMotionIndicator::StaticBullet,
+            )
+            .map(|indicator| ratatui::text::Span::styled("●", indicator.style))
+            .unwrap_or_else(|| " ".into())
+        } else {
+            " ".into()
+        };
+        let mut line_spans = vec![marker, " ".into()];
+        line_spans.extend(spans.into_iter().map(|span| span.patch_style(style)));
+        let line = Line::from(line_spans);
         adaptive_wrap_lines(
             [line],
-            RtOptions::new(usize::from(width.max(1)))
-                .initial_indent("  ".into())
-                .subsequent_indent("  ".into()),
+            RtOptions::new(usize::from(width.max(1))).subsequent_indent("  ".into()),
         )
+    }
+
+    fn preview_lines(&self, width: u16) -> Vec<Line<'static>> {
+        if !self.active {
+            return Vec::new();
+        }
+        let mut lines = self
+            .cells
+            .iter()
+            .flat_map(|cell| cell.tool_group_preview_lines())
+            .collect::<Vec<_>>();
+        if let Some(live_tool) = &self.live_tool {
+            lines.extend(live_tool.preview_lines.clone());
+        }
+        let Some(latest) = lines.pop() else {
+            return Vec::new();
+        };
+        let width = usize::from(width.max(1));
+        let mut wrapped = adaptive_wrap_lines(
+            [latest],
+            RtOptions::new(width)
+                .initial_indent("  └ ".dim().into())
+                .subsequent_indent("    ".into()),
+        );
+        if wrapped.len() > ACTIVE_PREVIEW_MAX_ROWS {
+            wrapped.truncate(ACTIVE_PREVIEW_MAX_ROWS);
+            if let Some(last) = wrapped.last_mut() {
+                let truncated = truncate_line_to_width(last.clone(), width.saturating_sub(1));
+                let ellipsis_style = truncated
+                    .spans
+                    .last()
+                    .map(|span| span.style)
+                    .unwrap_or_default();
+                *last = truncated;
+                last.push_span(ratatui::text::Span::styled("…", ellipsis_style));
+            }
+        }
+        wrapped
     }
 
     fn unwrapped_content_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         if !self.expanded {
-            return plain_hyperlink_lines(self.summary_lines(width));
+            let mut lines = self.summary_lines(width);
+            lines.extend(self.preview_lines(width));
+            return plain_hyperlink_lines(lines);
         }
         let mut lines = Vec::new();
         for (index, cell) in self.cells.iter().enumerate() {
@@ -273,6 +457,12 @@ impl ToolActivityGroupRenderable {
                 lines.push(HyperlinkLine::from(""));
             }
             lines.extend(cell.tool_group_detail_lines(width));
+        }
+        if let Some(live_tool) = &self.live_tool {
+            if !lines.is_empty() && !live_tool.is_stream_continuation {
+                lines.push(HyperlinkLine::from(""));
+            }
+            lines.extend(live_tool.detail_lines.clone());
         }
         lines
     }

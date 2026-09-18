@@ -14,7 +14,9 @@ use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 
+use crate::chatwidget::ActiveCellDisplay;
 use crate::chatwidget::ActiveCellRenderKey;
+use crate::chatwidget::ActiveToolGroupState;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
 use crate::keymap::PagerKeymap;
@@ -34,6 +36,9 @@ pub(crate) struct ConversationViewport {
     cells: Vec<Arc<dyn HistoryCell>>,
     render_mode: HistoryRenderMode,
     live_tail_key: Option<LiveTailKey>,
+    live_display: Option<ActiveCellDisplay>,
+    live_tool_group_state: ActiveToolGroupState,
+    live_renderable_count: usize,
     hovered_tool_group: Option<usize>,
     expanded_tool_group: Option<usize>,
     hovered_file_change: Option<usize>,
@@ -46,6 +51,8 @@ struct LiveTailKey {
     revision: u64,
     is_stream_continuation: bool,
     animation_tick: Option<u64>,
+    tool_group_accepting_content: bool,
+    tool_group_animation_tick: Option<u64>,
 }
 
 impl ConversationViewport {
@@ -67,6 +74,9 @@ impl ConversationViewport {
             cells,
             render_mode,
             live_tail_key: None,
+            live_display: None,
+            live_tool_group_state: ActiveToolGroupState::default(),
+            live_renderable_count: 0,
             hovered_tool_group: None,
             expanded_tool_group: None,
             hovered_file_change: None,
@@ -127,6 +137,12 @@ impl ConversationViewport {
 
     fn tool_group_hit(&mut self, area: Rect, position: Position) -> Option<usize> {
         let (index, row) = self.content.renderable_at_position(area, position)?;
+        if self.synthetic_live_tool_group_index() == Some(index) {
+            if self.expanded_tool_group == Some(index) {
+                return Some(index);
+            }
+            return (row >= self.synthetic_live_tool_group_top_padding()).then_some(index);
+        }
         let range = self.tool_group_at(index)?;
         if self.expanded_tool_group == Some(range.start) {
             return Some(range.start);
@@ -137,8 +153,13 @@ impl ConversationViewport {
 
     pub(crate) fn push_cell(&mut self, cell: Arc<dyn HistoryCell>) {
         let follow_bottom = self.content.is_following_bottom();
-        let had_prior_cells = !self.cells.is_empty();
-        let tail_renderable = self.take_live_tail_renderable();
+        let inserted_before_synthetic = self.synthetic_live_tool_group_index()
+            == Some(self.cells.len())
+            && cell.tool_activity().is_none();
+        self.remove_live_renderables();
+        if inserted_before_synthetic {
+            self.shift_tool_group_state(self.cells.len(), /*inserted_count*/ 1);
+        }
         self.cells.push(cell);
         let mut rebuild_start = self.cells.len().saturating_sub(1);
         if self.render_mode == HistoryRenderMode::Rich
@@ -150,19 +171,7 @@ impl ConversationViewport {
         }
         let renderables = self.render_cell_range(rebuild_start..self.cells.len());
         self.content.replace_tail(rebuild_start, renderables);
-
-        if let Some(tail) = tail_renderable {
-            let tail = if !had_prior_cells
-                && self
-                    .live_tail_key
-                    .is_some_and(|key| !key.is_stream_continuation)
-            {
-                Self::with_leading_spacing(tail)
-            } else {
-                tail
-            };
-            self.content.push(tail);
-        }
+        self.append_live_renderables();
         if follow_bottom {
             self.content.scroll_to_bottom();
         }
@@ -170,8 +179,10 @@ impl ConversationViewport {
 
     pub(crate) fn replace_cells(&mut self, cells: Vec<Arc<dyn HistoryCell>>) {
         let follow_bottom = self.content.is_following_bottom();
-        self.take_live_tail_renderable();
+        self.remove_live_renderables();
         self.live_tail_key = None;
+        self.live_display = None;
+        self.live_tool_group_state = ActiveToolGroupState::default();
         self.hovered_tool_group = None;
         self.expanded_tool_group = None;
         self.hovered_file_change = None;
@@ -200,9 +211,8 @@ impl ConversationViewport {
             return;
         }
         let follow_bottom = self.content.is_following_bottom();
-        let had_prior_cells = !self.cells.is_empty();
         let index = index.min(self.cells.len());
-        let tail_renderable = self.take_live_tail_renderable();
+        self.remove_live_renderables();
         let inserted_count = cells.len();
         let mut rebuild_start = index;
         while rebuild_start > 0 && self.cells[rebuild_start - 1].tool_activity().is_some() {
@@ -230,19 +240,7 @@ impl ConversationViewport {
             renderables,
             width,
         );
-
-        if let Some(tail) = tail_renderable {
-            let tail = if !had_prior_cells
-                && self
-                    .live_tail_key
-                    .is_some_and(|key| !key.is_stream_continuation)
-            {
-                Self::with_leading_spacing(tail)
-            } else {
-                tail
-            };
-            self.content.push(tail);
-        }
+        self.append_live_renderables();
         if follow_bottom {
             self.content.scroll_to_bottom();
         }
@@ -253,8 +251,10 @@ impl ConversationViewport {
             return;
         }
         let follow_bottom = self.content.is_following_bottom();
-        self.take_live_tail_renderable();
+        self.remove_live_renderables();
         self.live_tail_key = None;
+        self.live_display = None;
+        self.live_tool_group_state = ActiveToolGroupState::default();
         self.hovered_tool_group = None;
         self.expanded_tool_group = None;
         self.hovered_file_change = None;
@@ -277,31 +277,36 @@ impl ConversationViewport {
         &mut self,
         width: u16,
         active_key: Option<ActiveCellRenderKey>,
-        compute_lines: impl FnOnce(u16) -> Option<Vec<HyperlinkLine>>,
+        tool_group_state: ActiveToolGroupState,
+        compute_display: impl FnOnce(u16) -> Option<ActiveCellDisplay>,
     ) {
-        let next_key = active_key.map(|key| LiveTailKey {
-            width,
-            revision: key.revision,
-            is_stream_continuation: key.is_stream_continuation,
-            animation_tick: key.animation_tick,
+        let next_key = (active_key.is_some() || tool_group_state.accepting_content).then(|| {
+            let active_key = active_key.unwrap_or(ActiveCellRenderKey {
+                revision: 0,
+                is_stream_continuation: false,
+                animation_tick: None,
+            });
+            LiveTailKey {
+                width,
+                revision: active_key.revision,
+                is_stream_continuation: active_key.is_stream_continuation,
+                animation_tick: active_key.animation_tick,
+                tool_group_accepting_content: tool_group_state.accepting_content,
+                tool_group_animation_tick: tool_group_state.animation_tick,
+            }
         });
         if self.live_tail_key == next_key {
             return;
         }
 
         let follow_bottom = self.content.is_following_bottom();
-        self.take_live_tail_renderable();
+        self.remove_live_renderables();
         self.live_tail_key = next_key;
-        if let Some(key) = next_key {
-            let lines = compute_lines(width).unwrap_or_default();
-            if !lines.is_empty() {
-                self.content.push(Self::live_tail_renderable(
-                    lines,
-                    !self.cells.is_empty(),
-                    key.is_stream_continuation,
-                ));
-            }
-        }
+        self.live_display = next_key.and_then(|_| compute_display(width));
+        self.live_tool_group_state = tool_group_state;
+        self.refresh_trailing_tool_group(width);
+        self.validate_tool_group_state();
+        self.append_live_renderables();
         if follow_bottom {
             self.content.scroll_to_bottom();
         }
@@ -379,8 +384,56 @@ impl ConversationViewport {
         ))
     }
 
-    fn take_live_tail_renderable(&mut self) -> Option<Box<dyn Renderable>> {
-        (self.content.len() > self.cells.len()).then(|| self.content.pop())?
+    fn remove_live_renderables(&mut self) {
+        for _ in 0..self.live_renderable_count {
+            self.content.pop();
+        }
+        self.live_renderable_count = 0;
+    }
+
+    fn append_live_renderables(&mut self) {
+        let Some(display) = self.live_display.as_ref() else {
+            return;
+        };
+        if self.render_mode == HistoryRenderMode::Raw {
+            if !display.lines.is_empty() {
+                let is_stream_continuation = self
+                    .live_tail_key
+                    .is_some_and(|key| key.is_stream_continuation);
+                self.content.push(Self::live_tail_renderable(
+                    display.lines.clone(),
+                    !self.cells.is_empty(),
+                    is_stream_continuation,
+                ));
+                self.live_renderable_count = 1;
+            }
+            return;
+        }
+
+        if display.tool.is_some()
+            && !self.trailing_cells_form_tool_group()
+            && let Some(renderable) = self.synthetic_live_tool_group_renderable()
+        {
+            self.content.push(renderable);
+            self.live_renderable_count = self.live_renderable_count.saturating_add(1);
+        }
+
+        let lines = if display.tool.is_some() {
+            &display.auxiliary_lines
+        } else {
+            &display.lines
+        };
+        if !lines.is_empty() {
+            self.content.push(Self::live_tail_renderable(
+                lines.clone(),
+                !self.cells.is_empty() || self.live_renderable_count > 0,
+                display.tool.is_none()
+                    && self
+                        .live_tail_key
+                        .is_some_and(|key| key.is_stream_continuation),
+            ));
+            self.live_renderable_count = self.live_renderable_count.saturating_add(1);
+        }
     }
 }
 
