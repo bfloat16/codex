@@ -73,6 +73,7 @@ mod multi_select_picker;
 mod question_tests;
 mod questions;
 mod request_user_input;
+mod rewind_view;
 mod status_line_setup;
 mod status_line_style;
 mod status_surface_preview;
@@ -98,6 +99,9 @@ pub(crate) use async_questions::QuestionSubmission;
 pub(crate) use mcp_server_elicitation::McpServerElicitationFormRequest;
 pub(crate) use mcp_server_elicitation::McpServerElicitationOverlay;
 pub(crate) use request_user_input::RequestUserInputOverlay;
+pub(crate) use rewind_view::RewindPromptItem;
+pub(crate) use rewind_view::RewindRestoreOption;
+pub(crate) use rewind_view::RewindViewParams;
 pub(crate) use status_line_style::status_line_from_segments;
 mod bottom_pane_view;
 mod effort_ignition;
@@ -1293,6 +1297,15 @@ impl BottomPane {
     ) {
         self.apply_standard_popup_hint(&mut params);
         let view = list_selection_view::ListSelectionView::new(
+            params,
+            self.app_event_tx.clone(),
+            self.keymap.list.clone(),
+        );
+        self.push_view(Box::new(view));
+    }
+
+    pub(crate) fn show_rewind_view(&mut self, params: rewind_view::RewindViewParams) {
+        let view = rewind_view::RewindView::new(
             params,
             self.app_event_tx.clone(),
             self.keymap.list.clone(),

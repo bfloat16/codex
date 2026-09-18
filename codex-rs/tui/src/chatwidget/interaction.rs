@@ -225,6 +225,11 @@ impl ChatWidget {
         self.request_redraw();
     }
 
+    pub(crate) fn show_rewind_view(&mut self, params: crate::bottom_pane::RewindViewParams) {
+        self.bottom_pane.show_rewind_view(params);
+        self.request_redraw();
+    }
+
     pub(crate) fn show_bottom_pane_view(&mut self, view: Box<dyn BottomPaneView>) {
         self.bottom_pane.show_view(view);
         self.request_redraw();

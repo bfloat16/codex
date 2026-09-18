@@ -1,0 +1,21 @@
+---
+source: tui/src/bottom_pane/rewind_view_tests.rs
+expression: "render_lines(&view, 72)"
+---
+
+  Rewind
+  Restore the code and/or conversation to the point before…
+
+
+    change the parser
+    Edited parser.rs (+3 -1)
+
+    add regression tests
+    No code changes
+
+  ❯ (current)
+
+
+
+
+  Press enter to continue or esc to cancel

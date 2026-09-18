@@ -1,0 +1,22 @@
+---
+source: tui/src/bottom_pane/rewind_view_tests.rs
+expression: "render_lines(&view, 72)"
+---
+
+  Rewind
+  Confirm you want to restore to the point before you sent this
+  message:
+  │ change the parser
+
+  The selected message and everything after it will be removed.
+  The code in 2 tracked files will be restored.
+
+  ❯ 1. Restore code and conversation
+    2. Restore conversation
+    3. Restore code
+    4. Never mind
+
+  ⚠ Only changes made through Codex apply_patch are restored; shell
+  and manual edits are left untouched.
+
+  Press enter to continue or esc to go back
