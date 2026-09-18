@@ -266,6 +266,132 @@ async fn ignores_captured_file_that_managed_tools_did_not_change() {
 }
 
 #[tokio::test]
+async fn restores_create_update_and_delete_changes_across_rewound_turns() {
+    let home = TempDir::new().expect("temp dir");
+    let workspace = TempDir::new().expect("temp dir");
+    let created = path_uri(&workspace.path().join("created.txt"));
+    let deleted = path_uri(&workspace.path().join("deleted.txt"));
+    let updated = path_uri(&workspace.path().join("updated.txt"));
+    write(&deleted, "original deleted\n").await;
+    write(&updated, "original updated\n").await;
+    let store = FileCheckpointStore::open(&absolute(home.path()), ThreadId::new())
+        .await
+        .expect("open checkpoint store");
+
+    store.begin_turn("turn-1").await.expect("begin turn one");
+    store
+        .capture_before_write(
+            "turn-1",
+            ENVIRONMENT_ID,
+            LOCAL_FS.as_ref(),
+            &[created.clone(), updated.clone()],
+        )
+        .await
+        .expect("capture turn one files");
+    write(&created, "created one\n").await;
+    write(&updated, "updated one\n").await;
+    store
+        .record_after_images(
+            ENVIRONMENT_ID,
+            &[
+                FileAfterImage {
+                    path: created.clone(),
+                    image: FileImage::Contents(b"created one\n".to_vec()),
+                },
+                FileAfterImage {
+                    path: updated.clone(),
+                    image: FileImage::Contents(b"updated one\n".to_vec()),
+                },
+            ],
+        )
+        .await
+        .expect("record turn one files");
+
+    store.begin_turn("turn-2").await.expect("begin turn two");
+    store
+        .capture_before_write(
+            "turn-2",
+            ENVIRONMENT_ID,
+            LOCAL_FS.as_ref(),
+            &[deleted.clone(), updated.clone()],
+        )
+        .await
+        .expect("capture turn two files");
+    tokio::fs::remove_file(deleted.to_path_buf())
+        .await
+        .expect("delete managed file");
+    write(&updated, "updated two\n").await;
+    store
+        .record_after_images(
+            ENVIRONMENT_ID,
+            &[
+                FileAfterImage {
+                    path: deleted.clone(),
+                    image: FileImage::Absent,
+                },
+                FileAfterImage {
+                    path: updated.clone(),
+                    image: FileImage::Contents(b"updated two\n".to_vec()),
+                },
+            ],
+        )
+        .await
+        .expect("record turn two files");
+
+    let preview = store
+        .preview("turn-1", &file_systems())
+        .await
+        .expect("preview restore");
+    assert_eq!(
+        preview
+            .files
+            .iter()
+            .map(|entry| {
+                (
+                    entry.path.as_str().to_string(),
+                    entry.change_kind,
+                    entry.disposition,
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                created.to_path_buf().to_string_lossy().into_owned(),
+                FileRestoreChangeKind::Delete,
+                FileRestoreDisposition::Restorable,
+            ),
+            (
+                deleted.to_path_buf().to_string_lossy().into_owned(),
+                FileRestoreChangeKind::Create,
+                FileRestoreDisposition::Restorable,
+            ),
+            (
+                updated.to_path_buf().to_string_lossy().into_owned(),
+                FileRestoreChangeKind::Update,
+                FileRestoreDisposition::Restorable,
+            ),
+        ]
+    );
+
+    let outcome = store
+        .restore("turn-1", &file_systems())
+        .await
+        .expect("restore files");
+    assert_eq!(outcome.restored, preview.files);
+    assert_eq!(outcome.skipped, Vec::new());
+    assert_eq!(outcome.failed, Vec::new());
+    assert!(!created.to_path_buf().exists());
+    assert_eq!(
+        std::fs::read_to_string(deleted.to_path_buf()).expect("read restored deleted file"),
+        "original deleted\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(updated.to_path_buf()).expect("read restored updated file"),
+        "original updated\n"
+    );
+}
+
+#[tokio::test]
 async fn reloads_journal_and_discards_rewound_turns() {
     let home = TempDir::new().expect("temp dir");
     let workspace = TempDir::new().expect("temp dir");
