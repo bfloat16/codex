@@ -119,10 +119,13 @@ impl OwnedScreen {
         self.viewport
             .set_render_mode(chat_widget.history_render_mode());
         let active_key = chat_widget.active_cell_render_key();
-        self.viewport
-            .sync_live_tail(conversation_area.width, active_key, |width| {
-                chat_widget.active_cell_display_hyperlink_lines(width)
-            });
+        let tool_group_state = chat_widget.active_tool_group_state();
+        self.viewport.sync_live_tail(
+            conversation_area.width,
+            active_key,
+            tool_group_state,
+            |width| chat_widget.active_cell_display(width),
+        );
         self.viewport.render(conversation_area, buffer);
         Self::extend_conversation_backgrounds(conversation_area, area.right(), buffer);
         if !self.viewport.is_following_bottom() {

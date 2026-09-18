@@ -6,8 +6,8 @@
 //! together with the replay behavior that consumes them.
 
 use super::*;
-use codex_app_server_protocol::Thread;
 use std::borrow::Cow;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
@@ -139,25 +139,38 @@ impl ThreadEventStore {
         self.active_turn_id = Some(turn_id);
     }
 
-    pub(super) fn apply_thread_history_replacement(&mut self, thread: &Thread) {
-        self.turns = thread.turns.clone();
-        self.buffer.clear();
-        self.pending_interactive_replay = PendingInteractiveReplayState::default();
-        self.active_turn_id = None;
-        self.pending_interrupt_turn_id = None;
-    }
-
     pub(super) fn truncate_before_turn(&mut self, before_turn_id: &str) -> bool {
         let Some(index) = self.turns.iter().position(|turn| turn.id == before_turn_id) else {
             return false;
         };
         self.turns.truncate(index);
+        self.reset_after_history_truncation();
+        true
+    }
+
+    pub(super) fn remove_reverted_turns(
+        &mut self,
+        before_turn_id: &str,
+        removed_turn_ids: &[String],
+    ) -> bool {
+        let boundary_loaded = self.turns.iter().any(|turn| turn.id == before_turn_id);
+        let removed_turn_ids = removed_turn_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        self.turns
+            .retain(|turn| !removed_turn_ids.contains(turn.id.as_str()));
+        self.reset_after_history_truncation();
+        boundary_loaded
+    }
+
+    fn reset_after_history_truncation(&mut self) {
         self.buffer.clear();
+        self.buffered_agent_message_delta_bytes = 0;
         self.pending_interactive_replay = PendingInteractiveReplayState::default();
         self.active_turn_id = None;
         self.latest_turn_id = self.turns.last().map(|turn| turn.id.clone());
         self.pending_interrupt_turn_id = None;
-        true
     }
 
     pub(super) fn push_notification(&mut self, notification: ServerNotification) {
@@ -886,5 +899,34 @@ mod tests {
         assert_eq!(store.latest_turn_id.as_deref(), Some("turn-1"));
         assert_eq!(store.active_turn_id, None);
         assert_eq!(store.pending_interrupt_turn_id, None);
+    }
+
+    #[test]
+    fn thread_event_store_removes_reverted_turns_from_partial_history() {
+        let turn = |id: &str| Turn {
+            id: id.to_string(),
+            items: Vec::new(),
+            items_view: codex_app_server_protocol::TurnItemsView::Full,
+            status: TurnStatus::Completed,
+            error: None,
+            started_at: None,
+            completed_at: None,
+            duration_ms: None,
+        };
+        let retained = turn("turn-1");
+        let mut store = ThreadEventStore::new(/*capacity*/ 8);
+        store.set_turns(vec![retained.clone(), turn("turn-3")]);
+        store.active_turn_id = Some("turn-3".to_string());
+        store.pending_interrupt_turn_id = Some("turn-3".to_string());
+        store.buffered_agent_message_delta_bytes = 512;
+
+        assert!(
+            !store.remove_reverted_turns("turn-2", &["turn-2".to_string(), "turn-3".to_string()],)
+        );
+        assert_eq!(store.turns, vec![retained]);
+        assert_eq!(store.latest_turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(store.active_turn_id, None);
+        assert_eq!(store.pending_interrupt_turn_id, None);
+        assert_eq!(store.buffered_agent_message_delta_bytes, 0);
     }
 }

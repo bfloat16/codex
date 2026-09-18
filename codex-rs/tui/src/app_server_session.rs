@@ -1637,7 +1637,7 @@ impl AppServerSession {
         thread_id: ThreadId,
         before_turn_id: String,
         legacy_num_turns: u32,
-    ) -> Result<Thread> {
+    ) -> Result<ThreadHistoryMode> {
         let history_mode = match self
             .history_pagination
             .get(&thread_id)
@@ -1674,11 +1674,14 @@ impl AppServerSession {
                     turns_backwards_cursor,
                     items_backwards_cursor,
                 );
-                Ok(thread)
+                Ok(ThreadHistoryMode::Paginated)
             }
             ThreadHistoryMode::Legacy => {
+                if legacy_num_turns == 0 {
+                    return Ok(ThreadHistoryMode::Legacy);
+                }
                 let request_id = self.next_request_id();
-                let response: ThreadRollbackResponse = self
+                let _: ThreadRollbackResponse = self
                     .client
                     .request_typed(ClientRequest::ThreadRollback {
                         request_id,
@@ -1689,7 +1692,7 @@ impl AppServerSession {
                     })
                     .await
                     .wrap_err("thread/rollback failed in TUI")?;
-                Ok(response.thread)
+                Ok(ThreadHistoryMode::Legacy)
             }
         }
     }

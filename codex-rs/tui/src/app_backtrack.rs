@@ -23,6 +23,10 @@
 //! both committed history and in-flight activity without changing flush or coalescing behavior.
 
 mod legacy_input;
+mod rollback_target;
+
+pub(crate) use rollback_target::backtrack_rollback_target;
+pub(crate) use rollback_target::is_hidden_nested_review_turn;
 
 use std::any::TypeId;
 use std::sync::Arc;
@@ -34,9 +38,7 @@ use crate::bottom_pane::LocalImageAttachment;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionRowDisplay;
 use crate::bottom_pane::SelectionViewParams;
-use crate::chatwidget::ChatWidget;
 use crate::chatwidget::UserMessage;
-use crate::chatwidget::mention_bindings_from_user_inputs;
 #[cfg(test)]
 use crate::history_cell::AgentMessageCell;
 use crate::history_cell::SessionInfoCell;
@@ -45,13 +47,9 @@ use crate::pager_overlay::Overlay;
 use crate::pager_overlay::TranscriptHistoryState;
 use crate::tui;
 use crate::tui::TuiEvent;
-use codex_app_server_protocol::ThreadItem;
-use codex_app_server_protocol::Turn;
-use codex_app_server_protocol::TurnStatus;
 use codex_protocol::ThreadId;
 use codex_protocol::models::local_image_label_text;
 use color_eyre::eyre::Result;
-use color_eyre::eyre::bail;
 
 const NO_PREVIOUS_MESSAGE_TO_EDIT: &str = "No previous message to edit.";
 const BACKTRACK_MESSAGE_VIEW_ID: &str = "backtrack-message";
@@ -89,6 +87,7 @@ pub(crate) struct PendingBacktrackRollback {
 pub(crate) struct BacktrackRollbackTarget {
     pub(crate) before_turn_id: String,
     pub(crate) legacy_num_turns: u32,
+    pub(crate) removed_turn_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -494,15 +493,6 @@ impl App {
         let selected = nth_user_position(&self.transcript_cells, nth_user_message)
             .and_then(|idx| self.transcript_cells.get(idx))
             .and_then(|cell| cell.as_any().downcast_ref::<UserHistoryCell>())?;
-        let local_images = selected
-            .local_image_paths
-            .iter()
-            .enumerate()
-            .map(|(index, path)| LocalImageAttachment {
-                placeholder: local_image_label_text(index + 1),
-                path: path.clone(),
-            })
-            .collect();
         let newer_user_messages = user_count(&self.transcript_cells)
             .checked_sub(nth_user_message.checked_add(/*rhs*/ 1)?)?;
 
@@ -510,133 +500,38 @@ impl App {
             thread_id: base_id,
             nth_user_message,
             newer_user_messages,
-            prompt: UserMessage {
-                text: selected.message.clone(),
-                local_images,
-                remote_image_urls: selected.remote_image_urls.clone(),
-                text_elements: selected.text_elements.clone(),
-                mention_bindings: Vec::new(),
-            },
+            prompt: user_message_from_history_cell(selected),
         })
     }
+
+    pub(crate) fn backtrack_transcript_prompts(&self) -> Vec<UserMessage> {
+        user_positions_iter(&self.transcript_cells)
+            .filter_map(|index| {
+                self.transcript_cells[index]
+                    .as_any()
+                    .downcast_ref::<UserHistoryCell>()
+                    .map(user_message_from_history_cell)
+            })
+            .collect()
+    }
 }
 
-/// Find the persisted turn that contains a selected transcript prompt and calculate the rollback.
-///
-/// Replay hides review prompts and other display-empty inputs, so the selected distance from the
-/// end must be resolved against the same visible projection before restoring its canonical mention
-/// bindings. Counting from the end keeps the selection stable when the TUI has loaded only a suffix
-/// of the persisted history or has inserted a newer session header.
-///
-/// A turn can contain multiple user messages when it was steered. Selecting a steer rolls back the
-/// containing turn, since app-server cannot roll back in the middle of a turn, and restores the
-/// selected prompt in the composer for editing.
-pub(crate) fn backtrack_rollback_target(
-    turns: &[Turn],
-    newer_user_messages: usize,
-    prompt: &mut UserMessage,
-) -> Result<BacktrackRollbackTarget> {
-    let mut visible_user_messages = Vec::new();
-    let mut review_mode = false;
-    for (turn_index, turn) in turns.iter().enumerate() {
-        let hidden_nested_review_turn = turn_index
-            .checked_sub(/*rhs*/ 1)
-            .and_then(|index| turns.get(index))
-            .is_some_and(|previous| is_hidden_nested_review_turn(previous, turn));
-        for item in &turn.items {
-            let content = match item {
-                ThreadItem::EnteredReviewMode { .. } => {
-                    review_mode = true;
-                    continue;
-                }
-                ThreadItem::ExitedReviewMode { .. } => {
-                    review_mode = false;
-                    continue;
-                }
-                ThreadItem::UserMessage { content, .. } => content,
-                _ => continue,
-            };
-            if review_mode {
-                continue;
-            }
-
-            let display = ChatWidget::user_message_display_from_inputs(content);
-            if hidden_nested_review_turn {
-                continue;
-            }
-            if display.message.trim().is_empty()
-                && display.text_elements.is_empty()
-                && display.local_images.is_empty()
-                && display.remote_image_urls.is_empty()
-            {
-                continue;
-            }
-            visible_user_messages.push((turn_index, content));
-        }
-    }
-
-    let Some(&(turn_index, content)) = visible_user_messages.iter().rev().nth(newer_user_messages)
-    else {
-        bail!("the selected prompt was not found in the persisted thread");
-    };
-    let turn = &turns[turn_index];
-    let display = ChatWidget::user_message_display_from_inputs(content);
-    let selected_local_images = prompt.local_images.iter().map(|image| &image.path);
-    if prompt.text != display.message
-        || prompt.text_elements != display.text_elements
-        || prompt.remote_image_urls != display.remote_image_urls
-        || !selected_local_images.eq(display.local_images.iter())
-    {
-        bail!("the selected transcript prompt no longer matches the persisted thread");
-    }
-    if matches!(turn.status, TurnStatus::InProgress) {
-        bail!("the selected prompt belongs to a turn that is still in progress");
-    }
-
-    prompt.mention_bindings = mention_bindings_from_user_inputs(content, &display.message);
-    let legacy_num_turns = turns[turn_index..]
-        .iter()
-        .flat_map(|turn| &turn.items)
-        .filter(|item| matches!(item, ThreadItem::UserMessage { .. }))
-        .count();
-    let Ok(legacy_num_turns) = u32::try_from(legacy_num_turns) else {
-        bail!("the selected prompt requires rolling back too many turns");
-    };
-    Ok(BacktrackRollbackTarget {
-        before_turn_id: turn.id.clone(),
-        legacy_num_turns,
-    })
-}
-
-/// Returns whether a turn is the reconstructed inline-review child with duplicated prompt inputs.
-pub(crate) fn is_hidden_nested_review_turn(previous: &Turn, turn: &Turn) -> bool {
-    if previous.status != TurnStatus::Completed
-        || turn.status != TurnStatus::Interrupted
-        || turn.completed_at.is_some()
-        || !previous
-            .items
+fn user_message_from_history_cell(cell: &UserHistoryCell) -> UserMessage {
+    UserMessage {
+        text: cell.message.clone(),
+        local_images: cell
+            .local_image_paths
             .iter()
-            .any(|item| matches!(item, ThreadItem::EnteredReviewMode { .. }))
-        || !previous
-            .items
-            .iter()
-            .any(|item| matches!(item, ThreadItem::ExitedReviewMode { .. }))
-    {
-        return false;
+            .enumerate()
+            .map(|(index, path)| LocalImageAttachment {
+                placeholder: local_image_label_text(index + 1),
+                path: path.clone(),
+            })
+            .collect(),
+        remote_image_urls: cell.remote_image_urls.clone(),
+        text_elements: cell.text_elements.clone(),
+        mention_bindings: Vec::new(),
     }
-
-    let mut user_messages = turn.items.iter().filter_map(|item| match item {
-        ThreadItem::UserMessage { content, .. } => Some(content),
-        _ => None,
-    });
-    matches!(
-        (
-            user_messages.next(),
-            user_messages.next(),
-            user_messages.next(),
-        ),
-        (Some(first), Some(second), None) if first == second
-    )
 }
 
 pub(crate) fn user_count(cells: &[Arc<dyn crate::history_cell::HistoryCell>]) -> usize {
@@ -706,13 +601,10 @@ fn agent_group_positions_iter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bottom_pane::MentionBinding;
     use crate::history_cell::AgentMessageCell;
     use crate::history_cell::HistoryCell;
-    use codex_app_server_protocol::UserInput;
     use pretty_assertions::assert_eq;
     use ratatui::prelude::Line;
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     fn render_lines(lines: &[Line<'static>]) -> Vec<String> {
@@ -725,370 +617,6 @@ mod tests {
                     .collect::<String>()
             })
             .collect()
-    }
-
-    fn turn(turn_id: &str, status: TurnStatus, user_messages: usize) -> Turn {
-        Turn {
-            id: turn_id.to_string(),
-            items: (0..user_messages)
-                .map(|index| ThreadItem::UserMessage {
-                    id: format!("user-{index}"),
-                    client_id: None,
-                    content: vec![UserInput::Text {
-                        text: format!("{turn_id}-prompt-{index}"),
-                        text_elements: Vec::new(),
-                    }],
-                })
-                .collect(),
-            items_view: codex_app_server_protocol::TurnItemsView::Full,
-            status,
-            error: None,
-            started_at: None,
-            completed_at: None,
-            duration_ms: None,
-        }
-    }
-
-    fn prompt(text: &str) -> UserMessage {
-        UserMessage {
-            text: text.to_string(),
-            local_images: Vec::new(),
-            remote_image_urls: Vec::new(),
-            text_elements: Vec::new(),
-            mention_bindings: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn backtrack_rollback_target_resolves_first_and_later_prompts() {
-        let turns = vec![
-            turn("turn-1", TurnStatus::Completed, /*user_messages*/ 1),
-            turn(
-                "turn-compaction",
-                TurnStatus::Completed,
-                /*user_messages*/ 0,
-            ),
-            turn("turn-2", TurnStatus::Completed, /*user_messages*/ 1),
-        ];
-
-        assert_eq!(
-            backtrack_rollback_target(
-                &turns,
-                /*newer_user_messages*/ 1,
-                &mut prompt("turn-1-prompt-0"),
-            )
-            .expect("first prompt should resolve"),
-            BacktrackRollbackTarget {
-                before_turn_id: "turn-1".to_string(),
-                legacy_num_turns: 2,
-            }
-        );
-        assert_eq!(
-            backtrack_rollback_target(
-                &turns,
-                /*newer_user_messages*/ 0,
-                &mut prompt("turn-2-prompt-0"),
-            )
-            .expect("later prompt should resolve"),
-            BacktrackRollbackTarget {
-                before_turn_id: "turn-2".to_string(),
-                legacy_num_turns: 1,
-            }
-        );
-    }
-
-    #[test]
-    fn backtrack_rollback_target_resolves_failed_compact_after_earlier_steers() {
-        let mut earlier_compact = turn(
-            "turn-earlier-compact",
-            TurnStatus::Completed,
-            /*user_messages*/ 1,
-        );
-        let ThreadItem::UserMessage { content, .. } = &mut earlier_compact.items[0] else {
-            panic!("expected user message")
-        };
-        *content = vec![UserInput::Text {
-            text: "/compact".to_string(),
-            text_elements: Vec::new(),
-        }];
-        let mut failed_compact = turn(
-            "turn-failed-compact",
-            TurnStatus::Failed,
-            /*user_messages*/ 1,
-        );
-        let ThreadItem::UserMessage { content, .. } = &mut failed_compact.items[0] else {
-            panic!("expected user message")
-        };
-        *content = vec![UserInput::Text {
-            text: "/compact".to_string(),
-            text_elements: Vec::new(),
-        }];
-        let turns = vec![
-            turn(
-                "turn-with-steers",
-                TurnStatus::Interrupted,
-                /*user_messages*/ 3,
-            ),
-            earlier_compact,
-            turn(
-                "turn-after-compact",
-                TurnStatus::Completed,
-                /*user_messages*/ 1,
-            ),
-            failed_compact,
-        ];
-
-        assert_eq!(
-            backtrack_rollback_target(
-                &turns,
-                /*newer_user_messages*/ 0,
-                &mut prompt("/compact"),
-            )
-            .expect("latest failed compact should resolve independently of the history prefix"),
-            BacktrackRollbackTarget {
-                before_turn_id: "turn-failed-compact".to_string(),
-                legacy_num_turns: 1,
-            }
-        );
-    }
-
-    #[test]
-    fn backtrack_rollback_target_resolves_mid_turn_steers_at_turn_boundary() {
-        let turns = vec![turn(
-            "turn-1",
-            TurnStatus::Completed,
-            /*user_messages*/ 2,
-        )];
-
-        assert_eq!(
-            backtrack_rollback_target(
-                &turns,
-                /*newer_user_messages*/ 0,
-                &mut prompt("turn-1-prompt-1"),
-            )
-            .expect("a steer should roll back at its containing turn boundary"),
-            BacktrackRollbackTarget {
-                before_turn_id: "turn-1".to_string(),
-                legacy_num_turns: 2,
-            }
-        );
-    }
-
-    #[test]
-    fn backtrack_rollback_target_rejects_in_progress_and_missing_prompts() {
-        let turns = vec![turn(
-            "turn-1",
-            TurnStatus::InProgress,
-            /*user_messages*/ 1,
-        )];
-
-        assert_eq!(
-            backtrack_rollback_target(
-                &turns,
-                /*newer_user_messages*/ 0,
-                &mut prompt("turn-1-prompt-0"),
-            )
-            .expect_err("in-progress prompt cannot be rolled back")
-            .to_string(),
-            "the selected prompt belongs to a turn that is still in progress"
-        );
-        assert_eq!(
-            backtrack_rollback_target(
-                &turns,
-                /*newer_user_messages*/ 1,
-                &mut prompt("missing prompt"),
-            )
-            .expect_err("missing prompt cannot be rolled back")
-            .to_string(),
-            "the selected prompt was not found in the persisted thread"
-        );
-
-        let completed_turns = vec![turn(
-            "turn-1",
-            TurnStatus::Completed,
-            /*user_messages*/ 1,
-        )];
-        assert_eq!(
-            backtrack_rollback_target(
-                &completed_turns,
-                /*newer_user_messages*/ 0,
-                &mut prompt("different prompt"),
-            )
-            .expect_err("a stale transcript prompt cannot be rolled back")
-            .to_string(),
-            "the selected transcript prompt no longer matches the persisted thread"
-        );
-    }
-
-    #[test]
-    fn backtrack_rollback_target_skips_hidden_review_prompts() {
-        let mut review_turn = turn(
-            "turn-review",
-            TurnStatus::Completed,
-            /*user_messages*/ 1,
-        );
-        review_turn.items.insert(
-            /*index*/ 0,
-            ThreadItem::EnteredReviewMode {
-                id: "review-start".to_string(),
-                review: "changes against main".to_string(),
-            },
-        );
-        review_turn.items.push(ThreadItem::ExitedReviewMode {
-            id: "review-end".to_string(),
-            review: "review complete".to_string(),
-        });
-        let turns = vec![
-            turn("turn-1", TurnStatus::Completed, /*user_messages*/ 1),
-            review_turn,
-            turn("turn-2", TurnStatus::Completed, /*user_messages*/ 1),
-        ];
-
-        assert_eq!(
-            backtrack_rollback_target(
-                &turns,
-                /*newer_user_messages*/ 0,
-                &mut prompt("turn-2-prompt-0"),
-            )
-            .expect("the visible prompt after review should resolve"),
-            BacktrackRollbackTarget {
-                before_turn_id: "turn-2".to_string(),
-                legacy_num_turns: 1,
-            }
-        );
-    }
-
-    #[test]
-    fn backtrack_rollback_target_skips_hidden_nested_review_prompts() {
-        let review_hint = "current changes";
-        let review_prompt =
-            "Review the current code changes (staged, unstaged, and untracked files).";
-        let review_turn = Turn {
-            items: vec![
-                ThreadItem::EnteredReviewMode {
-                    id: "review-start".to_string(),
-                    review: review_hint.to_string(),
-                },
-                ThreadItem::ExitedReviewMode {
-                    id: "review-end".to_string(),
-                    review: "review complete".to_string(),
-                },
-            ],
-            ..turn(
-                "turn-review",
-                TurnStatus::Completed,
-                /*user_messages*/ 0,
-            )
-        };
-        let review_child_turn = Turn {
-            items: (0..2)
-                .map(|index| ThreadItem::UserMessage {
-                    id: format!("review-prompt-{index}"),
-                    client_id: None,
-                    content: vec![UserInput::Text {
-                        text: review_prompt.to_string(),
-                        text_elements: Vec::new(),
-                    }],
-                })
-                .collect(),
-            ..turn(
-                "turn-review-child",
-                TurnStatus::Interrupted,
-                /*user_messages*/ 0,
-            )
-        };
-        let interrupted_steered_turn = Turn {
-            items: review_child_turn.items.clone(),
-            completed_at: Some(1),
-            ..turn(
-                "turn-interrupted-steer",
-                TurnStatus::Interrupted,
-                /*user_messages*/ 0,
-            )
-        };
-        assert!(!is_hidden_nested_review_turn(
-            &review_turn,
-            &interrupted_steered_turn,
-        ));
-        let turns = vec![
-            review_turn,
-            review_child_turn,
-            turn("turn-2", TurnStatus::Completed, /*user_messages*/ 1),
-        ];
-
-        assert_eq!(
-            backtrack_rollback_target(
-                &turns,
-                /*newer_user_messages*/ 0,
-                &mut prompt("turn-2-prompt-0"),
-            )
-            .expect("the visible prompt after a nested review should resolve"),
-            BacktrackRollbackTarget {
-                before_turn_id: "turn-2".to_string(),
-                legacy_num_turns: 1,
-            }
-        );
-    }
-
-    #[test]
-    fn backtrack_rollback_target_restores_canonical_mention_bindings() {
-        let mut selected_turn = turn("turn-2", TurnStatus::Completed, /*user_messages*/ 1);
-        selected_turn.items = vec![ThreadItem::UserMessage {
-            id: "selected-prompt".to_string(),
-            client_id: None,
-            content: vec![
-                UserInput::Text {
-                    text: "use $skill @sample $google-calendar".to_string(),
-                    text_elements: Vec::new(),
-                },
-                UserInput::Skill {
-                    name: "skill".to_string(),
-                    path: PathBuf::from("/tmp/skills/skill/SKILL.md"),
-                },
-                UserInput::Mention {
-                    name: "Sample Plugin".to_string(),
-                    path: "plugin://sample@test".to_string(),
-                },
-                UserInput::Mention {
-                    name: "Google Calendar".to_string(),
-                    path: "app://google_calendar".to_string(),
-                },
-            ],
-        }];
-        let turns = vec![
-            turn("turn-1", TurnStatus::Completed, /*user_messages*/ 1),
-            selected_turn,
-        ];
-        let mut selected_prompt = prompt("use $skill @sample $google-calendar");
-
-        assert_eq!(
-            backtrack_rollback_target(&turns, /*newer_user_messages*/ 0, &mut selected_prompt,)
-                .expect("the selected prompt should resolve"),
-            BacktrackRollbackTarget {
-                before_turn_id: "turn-2".to_string(),
-                legacy_num_turns: 1,
-            }
-        );
-        assert_eq!(
-            selected_prompt.mention_bindings,
-            vec![
-                MentionBinding {
-                    sigil: '$',
-                    mention: "skill".to_string(),
-                    path: "/tmp/skills/skill/SKILL.md".to_string(),
-                },
-                MentionBinding {
-                    sigil: '@',
-                    mention: "sample".to_string(),
-                    path: "plugin://sample@test".to_string(),
-                },
-                MentionBinding {
-                    sigil: '$',
-                    mention: "google-calendar".to_string(),
-                    path: "app://google_calendar".to_string(),
-                },
-            ]
-        );
     }
 
     #[test]
