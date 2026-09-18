@@ -85,11 +85,68 @@ install:
 # there should be no need to add `--all-features`.
 [unix]
 test *args:
+    #!/usr/bin/env bash
+    set -u
+    test_tmp_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+    codex_test_tmp="$(mktemp -d "$test_tmp_root/codex-tests.XXXXXX")"
+    case "$codex_test_tmp" in
+        "$test_tmp_root"/codex-tests.*) ;;
+        *) echo "refusing to clean unexpected test temp directory: $codex_test_tmp" >&2; exit 1 ;;
+    esac
+    cleanup_test_tmp() {
+        status=$?
+        rm -rf -- "$codex_test_tmp" || status=$?
+        trap - EXIT
+        exit "$status"
+    }
+    trap cleanup_test_tmp EXIT
+    export TMPDIR="$codex_test_tmp"
+    export TMP="$codex_test_tmp"
+    export TEMP="$codex_test_tmp"
     RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:
-    $env:RUST_MIN_STACK = "{{ rust_min_stack }}"; $env:NEXTEST_PROFILE = "local"; cargo nextest run --no-fail-fast @($args | Select-Object -Skip 1)
+    #!powershell.exe -File
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $testTemp = Join-Path $tempRoot ("codex-tests-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $testTemp -ErrorAction Stop | Out-Null
+    $testTemp = (Resolve-Path -LiteralPath $testTemp -ErrorAction Stop).Path
+    if ((Split-Path -Parent $testTemp).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) -ne $tempRoot) {
+        throw "refusing to clean unexpected test temp directory: $testTemp"
+    }
+
+    $env:TEMP = $testTemp
+    $env:TMP = $testTemp
+    $env:TMPDIR = $testTemp
+    $env:RUST_MIN_STACK = "{{ rust_min_stack }}"
+    $env:NEXTEST_PROFILE = "local"
+    $exitCode = 1
+    try {
+        cargo nextest run --no-fail-fast @args
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $cleanupError = $null
+        foreach ($attempt in 1..5) {
+            try {
+                Remove-Item -LiteralPath $testTemp -Recurse -Force -ErrorAction Stop
+                $cleanupError = $null
+                break
+            } catch {
+                $cleanupError = $_
+                if ($attempt -lt 5) {
+                    Start-Sleep -Milliseconds 200
+                }
+            }
+        }
+        if ($null -ne $cleanupError) {
+            Write-Error "failed to clean test temp directory ${testTemp}: $cleanupError"
+            if ($exitCode -eq 0) {
+                $exitCode = 1
+            }
+        }
+    }
+    exit $exitCode
 
 # Run from the repository root so scripts that resolve paths from `cwd` see
 # the same layout they use in GitHub Actions.
