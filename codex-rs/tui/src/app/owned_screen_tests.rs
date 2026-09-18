@@ -226,6 +226,105 @@ async fn patch_background_extends_past_the_reserved_wrap_width() {
 }
 
 #[tokio::test]
+async fn diff_panel_collapses_locks_and_navigates_file_changes() {
+    let (chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
+    let cwd = std::path::Path::new("/tmp/project");
+    let mut screen = OwnedScreen::new(&chat_widget, crate::keymap::RuntimeKeymap::defaults().pager);
+    let patch_a = diffy::create_patch("old\n", "new\n").to_string();
+    let patch_b = diffy::create_patch("before\n", "after\n").to_string();
+    for cell in crate::history_cell::new_patch_events(
+        std::collections::HashMap::from([
+            (
+                std::path::PathBuf::from("src/a.rs"),
+                crate::diff_model::FileChange::Update {
+                    unified_diff: patch_a,
+                    move_path: None,
+                },
+            ),
+            (
+                std::path::PathBuf::from("src/b.rs"),
+                crate::diff_model::FileChange::Update {
+                    unified_diff: patch_b,
+                    move_path: None,
+                },
+            ),
+        ]),
+        cwd,
+    ) {
+        screen.viewport.push_cell(Arc::new(cell));
+    }
+    let mut terminal =
+        Terminal::new(TestBackend::new(/*width*/ 120, /*height*/ 24)).expect("create terminal");
+    let render = |screen: &mut OwnedScreen, terminal: &mut Terminal<TestBackend>| {
+        terminal
+            .draw(|frame| {
+                screen.render(&chat_widget, frame.area(), frame.buffer_mut());
+            })
+            .expect("render owned screen");
+    };
+
+    render(&mut screen, &mut terminal);
+    assert!(screen.viewport.handle_left_click(
+        screen.last_conversation_area,
+        Position::new(/*x*/ 4, /*y*/ 0),
+    ));
+    render(&mut screen, &mut terminal);
+    assert!(screen.viewport.handle_left_click(
+        screen.last_conversation_area,
+        Position::new(/*x*/ 4, /*y*/ 5),
+    ));
+
+    let panel_width = crate::diff_panel::diff_panel_width(/*terminal_width*/ 120)
+        .expect("wide terminal supports panel");
+    let conversation_width = chat_widget.history_wrap_width(120_u16.saturating_sub(panel_width));
+    let generation = screen
+        .open_diff_panel(/*terminal_width*/ 120, conversation_width)
+        .expect("open diff panel");
+    assert!(screen.apply_diff_panel_result(
+        generation,
+        Ok((
+            true,
+            "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n\
+             diff --git a/src/b.rs b/src/b.rs\n--- a/src/b.rs\n+++ b/src/b.rs\n@@ -1 +1 @@\n-before\n+after\n"
+                .to_string(),
+        )),
+    ));
+    render(&mut screen, &mut terminal);
+    let opened = normalized_backend_snapshot(terminal.backend());
+
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftDown,
+            column: 4,
+            row: 2,
+        }),
+        OwnedScreenMouseAction::Redraw | OwnedScreenMouseAction::Ignored,
+    ));
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftUp,
+            column: 4,
+            row: 2,
+        }),
+        OwnedScreenMouseAction::Redraw,
+    ));
+    render(&mut screen, &mut terminal);
+    let jumped = normalized_backend_snapshot(terminal.backend());
+
+    screen.close_diff_panel();
+    assert!(screen.viewport.handle_left_click(
+        screen.last_conversation_area,
+        Position::new(/*x*/ 4, /*y*/ 0),
+    ));
+    render(&mut screen, &mut terminal);
+    let closed = normalized_backend_snapshot(terminal.backend());
+
+    assert_snapshot!(format!(
+        "opened:\n{opened}\njumped to b:\n{jumped}\nclosed and re-expanded:\n{closed}",
+    ));
+}
+
+#[tokio::test]
 async fn committed_cell_updates_viewport_without_queuing_terminal_history() {
     let mut app = super::super::test_support::make_test_app().await;
     app.owned_screen = App::owned_screen_for_behavior(

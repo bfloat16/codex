@@ -23,6 +23,9 @@ use ratatui::widgets::Widget;
 
 use super::*;
 use crate::AltScreenBehavior;
+use crate::diff_panel::DiffPanel;
+use crate::diff_panel::DiffPanelClick;
+use crate::diff_panel::diff_panel_width;
 use crate::tui::MouseInteractionEvent;
 use crate::tui::MouseInteractionKind;
 use crate::tui::MouseScrollDirection;
@@ -41,8 +44,11 @@ const COPY_NOTICE_DURATION: Duration = Duration::from_secs(2);
 
 pub(super) struct OwnedScreen {
     pub(super) viewport: ConversationViewport,
+    diff_panel: Option<DiffPanel>,
+    diff_panel_generation: u64,
     replay_in_progress: bool,
     last_conversation_area: Rect,
+    last_diff_panel_area: Rect,
     last_selection_area: Rect,
     scroll_acceleration: ScrollAcceleration,
     selection: ScreenTextSelection,
@@ -64,6 +70,7 @@ struct CopyNotice {
 enum OwnedScreenMouseAction {
     Ignored,
     Redraw,
+    CloseDiffPanel,
     Copy(String),
 }
 
@@ -80,8 +87,11 @@ impl OwnedScreen {
                 chat_widget.history_render_mode(),
                 keymap,
             ),
+            diff_panel: None,
+            diff_panel_generation: 0,
             replay_in_progress: false,
             last_conversation_area: Rect::default(),
+            last_diff_panel_area: Rect::default(),
             last_selection_area: Rect::default(),
             scroll_acceleration: ScrollAcceleration::default(),
             selection: ScreenTextSelection::default(),
@@ -98,13 +108,29 @@ impl OwnedScreen {
     ) -> RenderedOwnedScreen {
         Clear.render(area, buffer);
 
+        if self.diff_panel.is_some() && diff_panel_width(area.width).is_none() {
+            self.close_diff_panel();
+        }
+
         let bottom_pane = chat_widget.bottom_pane_renderable();
         let bottom_height = bottom_pane.desired_height(area.width).min(area.height);
         let conversation_height = area.height.saturating_sub(bottom_height);
+        let panel_width = self
+            .diff_panel
+            .as_ref()
+            .and_then(|_| diff_panel_width(area.width))
+            .unwrap_or(0);
+        let conversation_slot_width = area.width.saturating_sub(panel_width);
         let conversation_area = Rect::new(
             area.x,
             area.y,
-            chat_widget.history_wrap_width(area.width),
+            chat_widget.history_wrap_width(conversation_slot_width),
+            conversation_height,
+        );
+        let diff_panel_area = Rect::new(
+            area.right().saturating_sub(panel_width),
+            area.y,
+            panel_width,
             conversation_height,
         );
         let bottom_area = Rect::new(
@@ -114,6 +140,7 @@ impl OwnedScreen {
             bottom_height,
         );
         self.last_conversation_area = conversation_area;
+        self.last_diff_panel_area = diff_panel_area;
         self.last_selection_area = area;
 
         self.viewport
@@ -127,9 +154,12 @@ impl OwnedScreen {
             |width| chat_widget.active_cell_display(width),
         );
         self.viewport.render(conversation_area, buffer);
-        Self::extend_conversation_backgrounds(conversation_area, area.right(), buffer);
+        Self::extend_conversation_backgrounds(conversation_area, diff_panel_area.x, buffer);
         if !self.viewport.is_following_bottom() {
             Self::render_jump_to_bottom_hint(conversation_area, buffer);
+        }
+        if let Some(diff_panel) = self.diff_panel.as_mut() {
+            diff_panel.render(diff_panel_area, buffer);
         }
         bottom_pane.render(bottom_area, buffer);
         let cursor = bottom_pane.cursor_pos(bottom_area);
@@ -169,10 +199,15 @@ impl OwnedScreen {
     }
 
     fn handle_mouse_scroll(&mut self, event: MouseScrollEvent) -> bool {
-        if !self
-            .last_conversation_area
-            .contains(Position::new(event.column, event.row))
+        let position = Position::new(event.column, event.row);
+        if self
+            .diff_panel
+            .as_mut()
+            .is_some_and(|panel| panel.handle_mouse_scroll(position, event.direction))
         {
+            return true;
+        }
+        if !self.last_conversation_area.contains(position) {
             return false;
         }
         self.selection.clear();
@@ -185,6 +220,9 @@ impl OwnedScreen {
         let position = Position::new(event.column, event.row);
         match event.kind {
             MouseInteractionKind::Move => {
+                if self.last_diff_panel_area.contains(position) {
+                    return OwnedScreenMouseAction::Ignored;
+                }
                 if self
                     .viewport
                     .handle_mouse_move(self.last_conversation_area, position)
@@ -195,6 +233,15 @@ impl OwnedScreen {
                 }
             }
             MouseInteractionKind::LeftDown => {
+                if let Some(panel) = self.diff_panel.as_mut()
+                    && self.last_diff_panel_area.contains(position)
+                {
+                    return match panel.handle_left_click(position) {
+                        DiffPanelClick::Ignored => OwnedScreenMouseAction::Ignored,
+                        DiffPanelClick::Handled => OwnedScreenMouseAction::Redraw,
+                        DiffPanelClick::Close => OwnedScreenMouseAction::CloseDiffPanel,
+                    };
+                }
                 if self.selection.left_down(self.last_selection_area, position) {
                     OwnedScreenMouseAction::Redraw
                 } else {
@@ -212,6 +259,17 @@ impl OwnedScreen {
                 match self.selection.left_up(self.last_selection_area, position) {
                     SelectionRelease::Ignored => OwnedScreenMouseAction::Ignored,
                     SelectionRelease::Click(position) => {
+                        if self.diff_panel.is_some()
+                            && let Some(path) = self
+                                .viewport
+                                .file_change_path_at(self.last_conversation_area, position)
+                            && self
+                                .diff_panel
+                                .as_mut()
+                                .is_some_and(|panel| panel.jump_to_path(path.as_path()))
+                        {
+                            return OwnedScreenMouseAction::Redraw;
+                        }
                         let now = Instant::now();
                         let click_count = self
                             .last_click
@@ -325,6 +383,53 @@ impl OwnedScreen {
             }
         }
     }
+
+    pub(super) fn open_diff_panel(
+        &mut self,
+        terminal_width: u16,
+        conversation_width: u16,
+    ) -> Option<u64> {
+        diff_panel_width(terminal_width)?;
+        self.diff_panel = Some(DiffPanel::loading());
+        self.viewport
+            .set_file_changes_locked(/*locked*/ true, conversation_width);
+        Some(self.begin_diff_panel_refresh())
+    }
+
+    pub(super) fn close_diff_panel(&mut self) {
+        self.diff_panel = None;
+        self.viewport.set_file_changes_locked(
+            /*locked*/ false,
+            self.last_conversation_area.width.max(1),
+        );
+    }
+
+    pub(super) fn begin_diff_panel_refresh(&mut self) -> u64 {
+        self.diff_panel_generation = self.diff_panel_generation.wrapping_add(1);
+        if let Some(panel) = self.diff_panel.as_mut() {
+            panel.set_loading();
+        }
+        self.diff_panel_generation
+    }
+
+    pub(super) fn apply_diff_panel_result(
+        &mut self,
+        generation: u64,
+        result: Result<(bool, String), String>,
+    ) -> bool {
+        if generation != self.diff_panel_generation {
+            return false;
+        }
+        let Some(panel) = self.diff_panel.as_mut() else {
+            return false;
+        };
+        panel.set_result(result);
+        true
+    }
+
+    pub(super) fn is_diff_panel_open(&self) -> bool {
+        self.diff_panel.is_some()
+    }
 }
 
 impl App {
@@ -434,6 +539,13 @@ impl App {
         match action {
             OwnedScreenMouseAction::Ignored => false,
             OwnedScreenMouseAction::Redraw => {
+                tui.frame_requester().schedule_frame();
+                true
+            }
+            OwnedScreenMouseAction::CloseDiffPanel => {
+                if let Some(screen) = self.owned_screen.as_mut() {
+                    screen.close_diff_panel();
+                }
                 tui.frame_requester().schedule_frame();
                 true
             }

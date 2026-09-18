@@ -44,6 +44,7 @@ pub(crate) struct ConversationViewport {
     expanded_tool_group: Option<usize>,
     hovered_file_change: Option<usize>,
     expanded_file_changes: BTreeSet<usize>,
+    file_changes_locked: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -82,6 +83,7 @@ impl ConversationViewport {
             expanded_tool_group: None,
             hovered_file_change: None,
             expanded_file_changes: BTreeSet::new(),
+            file_changes_locked: false,
         }
     }
 

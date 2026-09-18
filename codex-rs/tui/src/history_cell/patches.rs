@@ -102,6 +102,10 @@ impl HistoryCell for PatchHistoryCell {
     fn is_file_change(&self) -> bool {
         true
     }
+
+    fn file_change_path(&self) -> Option<&Path> {
+        Some(self.path.as_path())
+    }
 }
 /// Create one independently collapsible history cell per changed file.
 pub(crate) fn new_patch_events(

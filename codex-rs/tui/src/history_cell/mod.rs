@@ -258,6 +258,10 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         false
     }
 
+    fn file_change_path(&self) -> Option<&Path> {
+        None
+    }
+
     /// Returns the detailed representation used when an owned-screen tool group is expanded.
     fn tool_group_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.transcript_hyperlink_lines(width)
