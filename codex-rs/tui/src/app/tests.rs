@@ -7257,6 +7257,7 @@ async fn double_esc_opens_backtrack_picker_below_composer() -> Result<()> {
         BacktrackRollbackTarget {
             before_turn_id: "turn-2".to_string(),
             legacy_num_turns: 1,
+            removed_turn_ids: vec!["turn-2".to_string()],
         },
         BacktrackFileRestoreSummary {
             restorable: 1,
@@ -7808,53 +7809,282 @@ async fn remembered_current_cwd_stays_at_launch_across_in_app_resumes() -> Resul
     Ok(())
 }
 
-#[tokio::test]
-async fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<()> {
-    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
-    let config = app.chat_widget.config_ref().clone();
-    let filename_ts = "2025-01-05T12-00-00";
-    let source_thread_id = app_test_support::create_fake_rollout(
-        config.codex_home.as_path(),
-        filename_ts,
-        "2025-01-05T12:00:00Z",
-        "unused preview",
-        Some("test-provider"),
-        /*git_info*/ None,
-    )
-    .expect("materialized rollout should be created");
-    let source_path =
-        app_test_support::rollout_path(config.codex_home.as_path(), filename_ts, &source_thread_id);
-    let session_meta = std::fs::read_to_string(&source_path)?
-        .lines()
-        .next()
-        .expect("fake rollout should have session metadata")
-        .to_string();
-    std::fs::write(&source_path, format!("{session_meta}\n"))?;
-    for (turn_id, message, images, local_images) in [
-        ("turn-1", "retained prompt", None, Vec::new()),
-        (
-            "turn-2",
-            "selected prompt [Image #1]",
-            Some(vec!["https://example.com/backtrack.png".to_string()]),
-            vec![PathBuf::from("/tmp/fake-image.png")],
-        ),
-    ] {
+fn rewind_test_runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(/*val*/ 2)
+        // Match the production Codex runtime stack budget for embedded app-server rewind tests.
+        .thread_stack_size(16 * 1024 * 1024)
+        .enable_all()
+        .build()?)
+}
+
+#[test]
+fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<()> {
+    let runtime = rewind_test_runtime()?;
+    runtime.block_on(Box::pin(async {
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let config = app.chat_widget.config_ref().clone();
+        let filename_ts = "2025-01-05T12-00-00";
+        let source_thread_id = app_test_support::create_fake_rollout(
+            config.codex_home.as_path(),
+            filename_ts,
+            "2025-01-05T12:00:00Z",
+            "unused preview",
+            Some("test-provider"),
+            /*git_info*/ None,
+        )
+        .expect("materialized rollout should be created");
+        let source_path = app_test_support::rollout_path(
+            config.codex_home.as_path(),
+            filename_ts,
+            &source_thread_id,
+        );
+        let session_meta = std::fs::read_to_string(&source_path)?
+            .lines()
+            .next()
+            .expect("fake rollout should have session metadata")
+            .to_string();
+        std::fs::write(&source_path, format!("{session_meta}\n"))?;
+        for (turn_id, message, images, local_images) in [
+            ("turn-1", "retained prompt", None, Vec::new()),
+            (
+                "turn-2",
+                "selected prompt [Image #1]",
+                Some(vec!["https://example.com/backtrack.png".to_string()]),
+                vec![PathBuf::from("/tmp/fake-image.png")],
+            ),
+        ] {
+            for item in [
+                RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+                    turn_id: turn_id.to_string(),
+                    trace_id: None,
+                    started_at: None,
+                    model_context_window: None,
+                    collaboration_mode_kind: ModeKind::default(),
+                })),
+                RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                    message: message.to_string(),
+                    images,
+                    local_images,
+                    ..Default::default()
+                })),
+                RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                    turn_id: turn_id.to_string(),
+                    last_agent_message: None,
+                    error: None,
+                    started_at: None,
+                    completed_at: None,
+                    duration_ms: None,
+                    time_to_first_token_ms: None,
+                })),
+            ] {
+                codex_rollout::append_rollout_item_to_path(&source_path, &item).await?;
+            }
+        }
+
+        let source_thread_id = ThreadId::from_string(&source_thread_id)?;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
+        let started = app_server
+            .resume_thread(
+                &crate::local_settings::LocalSettings::from(&config),
+                config.clone(),
+                source_thread_id,
+                crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig,
+            )
+            .await?;
+        let selected_turn = started.turns[1].clone();
+        app.enqueue_primary_thread_session(started.session, started.turns)
+            .await?;
+        {
+            let mut store = app
+                .thread_event_channels
+                .get(&source_thread_id)
+                .expect("source thread event channel")
+                .store
+                .lock()
+                .await;
+            store.turns.pop();
+            // Model streaming can evict the selected prompt's item notification from the bounded
+            // replay buffer before an interrupted turn is rolled back.
+            store.capacity = 1;
+            store.push_notification(turn_started_notification(
+                source_thread_id,
+                &selected_turn.id,
+            ));
+            for item in selected_turn.items {
+                store.push_notification(ServerNotification::ItemCompleted(
+                    codex_app_server_protocol::ItemCompletedNotification {
+                        thread_id: source_thread_id.to_string(),
+                        turn_id: selected_turn.id.clone(),
+                        completed_at_ms: 0,
+                        item,
+                    },
+                ));
+            }
+            store.push_notification(turn_completed_notification(
+                source_thread_id,
+                &selected_turn.id,
+                TurnStatus::Interrupted,
+            ));
+        }
+        while let Ok(event) = app_event_rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                app.transcript_cells.push(cell.into());
+            }
+        }
+        assert_eq!(user_count(&app.transcript_cells), 2);
+        let source_before = std::fs::read_to_string(&source_path)?;
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        let prompt = crate::chatwidget::UserMessage {
+            text: "selected prompt [Image #1]".to_string(),
+            local_images: vec![crate::bottom_pane::LocalImageAttachment {
+                placeholder: "[Image #1]".to_string(),
+                path: PathBuf::from("/tmp/fake-image.png"),
+            }],
+            remote_image_urls: vec!["https://example.com/backtrack.png".to_string()],
+            text_elements: Vec::new(),
+            mention_bindings: Vec::new(),
+        };
+        let control = Box::pin(app.handle_event(
+            &mut tui,
+            &mut app_server,
+            AppEvent::RollbackSessionForPromptEdit {
+                thread_id: source_thread_id,
+                nth_user_message: 1,
+                newer_user_messages: 0,
+                prompt: prompt.clone(),
+            },
+        ))
+        .await?;
+
+        assert!(matches!(control, AppRunControl::Continue));
+        app.chat_widget
+            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let apply_event = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+            .find(|event| matches!(event, AppEvent::ApplyBacktrackRestore { .. }))
+            .expect("restore selection should request conversation rewind");
+        assert_matches!(
+            &apply_event,
+            AppEvent::ApplyBacktrackRestore { target, .. }
+                if target.before_turn_id == "turn-2"
+                    && target.legacy_num_turns == 1
+                    && target.removed_turn_ids == ["turn-2"]
+        );
+        let control = Box::pin(app.handle_event(&mut tui, &mut app_server, apply_event)).await?;
+        assert!(matches!(control, AppRunControl::Continue));
+        let rolled_back_thread_id = app
+            .chat_widget
+            .thread_id()
+            .expect("prompt edit should keep the current thread");
+        assert_eq!(rolled_back_thread_id, source_thread_id);
+        assert_eq!(app.chat_widget.composer_text_with_pending(), prompt.text);
+        assert_eq!(
+            app.chat_widget.remote_image_urls(),
+            prompt.remote_image_urls
+        );
+        assert_app_snapshot!(
+            "backtrack_rollback_success_restores_selected_prompt",
+            render_bottom_popup(&app.chat_widget, /*width*/ 80)
+        );
+        let source_after = std::fs::read_to_string(&source_path)?;
+        assert_ne!(source_after, source_before);
+        let persisted_items = source_after
+            .lines()
+            .map(codex_rollout::parse_rollout_line)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let persisted_turn_ids = persisted_items
+            .iter()
+            .filter_map(|line| match &line.item {
+                RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => Some(event.turn_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(persisted_turn_ids, vec!["turn-1", "turn-2"]);
+        let persisted_rollbacks = persisted_items
+            .iter()
+            .filter_map(|line| match &line.item {
+                RolloutItem::EventMsg(EventMsg::ThreadRolledBack(event)) => Some(event.num_turns),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(persisted_rollbacks, vec![1]);
+        assert_eq!(
+            app_server
+                .thread_read(source_thread_id, /*include_turns*/ true)
+                .await?
+                .turns
+                .iter()
+                .map(|turn| turn.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["turn-1"]
+        );
+        assert_eq!(user_count(&app.transcript_cells), 1);
+        assert!(app.transcript_cells.iter().any(|cell| {
+            lines_to_single_string(&cell.display_lines(/*width*/ 120)).contains("retained prompt")
+        }));
+        app_server.shutdown().await?;
+
+        Ok(())
+    }))
+}
+
+#[test]
+fn prompt_edit_rewinds_hook_blocked_prompt_with_partial_paginated_store() -> Result<()> {
+    let runtime = rewind_test_runtime()?;
+    runtime.block_on(Box::pin(async {
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let config = app.chat_widget.config_ref().clone();
+        let filename_ts = "2025-01-05T12-00-00";
+        let source_thread_id = app_test_support::create_fake_paginated_rollout(
+            config.codex_home.as_path(),
+            filename_ts,
+            "2025-01-05T12:00:00Z",
+            "unused preview",
+            Some("test-provider"),
+            /*git_info*/ None,
+        )
+        .expect("paginated rollout should be created");
+        let source_path = app_test_support::rollout_path(
+            config.codex_home.as_path(),
+            filename_ts,
+            &source_thread_id,
+        );
+        let session_meta = std::fs::read_to_string(&source_path)?
+            .lines()
+            .next()
+            .expect("fake rollout should have session metadata")
+            .to_string();
+        std::fs::write(&source_path, format!("{session_meta}\n"))?;
         for item in [
             RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
-                turn_id: turn_id.to_string(),
+                turn_id: "turn-1".to_string(),
                 trace_id: None,
                 started_at: None,
                 model_context_window: None,
                 collaboration_mode_kind: ModeKind::default(),
             })),
             RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
-                message: message.to_string(),
-                images,
-                local_images,
+                message: "retained prompt".to_string(),
                 ..Default::default()
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                turn_id: turn_id.to_string(),
+                turn_id: "turn-1".to_string(),
+                last_agent_message: None,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+                time_to_first_token_ms: None,
+            })),
+            RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: "turn-hook-blocked".to_string(),
+                trace_id: None,
+                started_at: None,
+                model_context_window: None,
+                collaboration_mode_kind: ModeKind::default(),
+            })),
+            RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                turn_id: "turn-hook-blocked".to_string(),
                 last_agent_message: None,
                 error: None,
                 started_at: None,
@@ -7865,141 +8095,127 @@ async fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<
         ] {
             codex_rollout::append_rollout_item_to_path(&source_path, &item).await?;
         }
-    }
 
-    let source_thread_id = ThreadId::from_string(&source_thread_id)?;
-    let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
-    let started = app_server
-        .resume_thread(
-            &crate::local_settings::LocalSettings::from(&config),
-            config.clone(),
-            source_thread_id,
-            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig,
-        )
-        .await?;
-    let selected_turn = started.turns[1].clone();
-    app.enqueue_primary_thread_session(started.session, started.turns)
-        .await?;
-    {
-        let mut store = app
-            .thread_event_channels
-            .get(&source_thread_id)
-            .expect("source thread event channel")
-            .store
-            .lock()
-            .await;
-        store.turns.pop();
-        // Model streaming can evict the selected prompt's item notification from the bounded
-        // replay buffer before an interrupted turn is rolled back.
-        store.capacity = 1;
-        store.push_notification(turn_started_notification(
-            source_thread_id,
-            &selected_turn.id,
-        ));
-        for item in selected_turn.items {
-            store.push_notification(ServerNotification::ItemCompleted(
-                codex_app_server_protocol::ItemCompletedNotification {
-                    thread_id: source_thread_id.to_string(),
-                    turn_id: selected_turn.id.clone(),
-                    completed_at_ms: 0,
-                    item,
-                },
-            ));
+        let source_thread_id = ThreadId::from_string(&source_thread_id)?;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
+        let started = app_server
+            .resume_thread(
+                &crate::local_settings::LocalSettings::from(&config),
+                config,
+                source_thread_id,
+                crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig,
+            )
+            .await?;
+        app.enqueue_primary_thread_session(started.session, started.turns)
+            .await?;
+        while let Ok(event) = app_event_rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                app.transcript_cells.push(cell.into());
+            }
         }
-        store.push_notification(turn_completed_notification(
-            source_thread_id,
-            &selected_turn.id,
-            TurnStatus::Interrupted,
-        ));
-    }
-    while let Ok(event) = app_event_rx.try_recv() {
-        if let AppEvent::InsertHistoryCell(cell) = event {
-            app.transcript_cells.push(cell.into());
+        app.transcript_cells = vec![
+            Arc::new(UserHistoryCell {
+                message: "retained prompt".to_string(),
+                text_elements: Vec::new(),
+                local_image_paths: Vec::new(),
+                remote_image_urls: Vec::new(),
+            }),
+            Arc::new(UserHistoryCell {
+                message: "123456 example".to_string(),
+                text_elements: Vec::new(),
+                local_image_paths: Vec::new(),
+                remote_image_urls: Vec::new(),
+            }),
+        ];
+        {
+            let mut store = app
+                .thread_event_channels
+                .get(&source_thread_id)
+                .expect("source thread event channel")
+                .store
+                .lock()
+                .await;
+            assert_eq!(
+                store
+                    .turns
+                    .iter()
+                    .map(|turn| turn.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["turn-1", "turn-hook-blocked"]
+            );
+            store.turns.pop();
+            store.buffer.clear();
         }
-    }
-    assert_eq!(user_count(&app.transcript_cells), 2);
-    let source_before = std::fs::read_to_string(&source_path)?;
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    let prompt = crate::chatwidget::UserMessage {
-        text: "selected prompt [Image #1]".to_string(),
-        local_images: vec![crate::bottom_pane::LocalImageAttachment {
-            placeholder: "[Image #1]".to_string(),
-            path: PathBuf::from("/tmp/fake-image.png"),
-        }],
-        remote_image_urls: vec!["https://example.com/backtrack.png".to_string()],
-        text_elements: Vec::new(),
-        mention_bindings: Vec::new(),
-    };
-    let control = Box::pin(app.handle_event(
-        &mut tui,
-        &mut app_server,
-        AppEvent::RollbackSessionForPromptEdit {
-            thread_id: source_thread_id,
-            nth_user_message: 1,
-            newer_user_messages: 0,
-            prompt: prompt.clone(),
-        },
-    ))
-    .await?;
+        assert_eq!(user_count(&app.transcript_cells), 2);
 
-    assert!(matches!(control, AppRunControl::Continue));
-    let rolled_back_thread_id = app
-        .chat_widget
-        .thread_id()
-        .expect("prompt edit should keep the current thread");
-    assert_eq!(rolled_back_thread_id, source_thread_id);
-    assert_eq!(app.chat_widget.composer_text_with_pending(), prompt.text);
-    assert_eq!(
-        app.chat_widget.remote_image_urls(),
-        prompt.remote_image_urls
-    );
-    assert_app_snapshot!(
-        "backtrack_rollback_success_restores_selected_prompt",
-        render_bottom_popup(&app.chat_widget, /*width*/ 80)
-    );
-    let source_after = std::fs::read_to_string(&source_path)?;
-    assert_ne!(source_after, source_before);
-    let persisted_items = source_after
-        .lines()
-        .map(codex_rollout::parse_rollout_line)
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    let persisted_turn_ids = persisted_items
-        .iter()
-        .filter_map(|line| match &line.item {
-            RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => Some(event.turn_id.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(persisted_turn_ids, vec!["turn-1", "turn-2"]);
-    let persisted_rollbacks = persisted_items
-        .iter()
-        .filter_map(|line| match &line.item {
-            RolloutItem::EventMsg(EventMsg::ThreadRolledBack(event)) => Some(event.num_turns),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(persisted_rollbacks, vec![1]);
-    assert_eq!(
-        app_server
-            .thread_read(source_thread_id, /*include_turns*/ true)
-            .await?
-            .turns
-            .iter()
-            .map(|turn| turn.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["turn-1"]
-    );
-    assert_eq!(user_count(&app.transcript_cells), 1);
-    assert!(app.transcript_cells.iter().any(|cell| {
-        lines_to_single_string(&cell.display_lines(/*width*/ 120)).contains("retained prompt")
-    }));
-    app_server.shutdown().await?;
+        let prompt = crate::chatwidget::UserMessage::from("123456 example");
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        let control = Box::pin(app.handle_event(
+            &mut tui,
+            &mut app_server,
+            AppEvent::RollbackSessionForPromptEdit {
+                thread_id: source_thread_id,
+                nth_user_message: 1,
+                newer_user_messages: 0,
+                prompt: prompt.clone(),
+            },
+        ))
+        .await?;
+        assert!(matches!(control, AppRunControl::Continue));
 
-    Ok(())
+        app.chat_widget
+            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let apply_event = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+            .find(|event| matches!(event, AppEvent::ApplyBacktrackRestore { .. }))
+            .expect("restore selection should request conversation rewind");
+        assert_matches!(
+            &apply_event,
+            AppEvent::ApplyBacktrackRestore { target, .. }
+                if target.before_turn_id == "turn-hook-blocked"
+                    && target.legacy_num_turns == 0
+                    && target.removed_turn_ids == ["turn-hook-blocked"]
+        );
+        let control = Box::pin(app.handle_event(&mut tui, &mut app_server, apply_event)).await?;
+        assert!(matches!(control, AppRunControl::Continue));
+        assert_eq!(app.chat_widget.composer_text_with_pending(), prompt.text);
+        assert_eq!(user_count(&app.transcript_cells), 1);
+        {
+            let store = app
+                .thread_event_channels
+                .get(&source_thread_id)
+                .expect("source thread event channel")
+                .store
+                .lock()
+                .await;
+            assert_eq!(
+                store
+                    .turns
+                    .iter()
+                    .map(|turn| turn.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["turn-1"]
+            );
+        }
+        let persisted_turn_ids = std::fs::read_to_string(&source_path)?
+            .lines()
+            .map(codex_rollout::parse_rollout_line)
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter_map(|line| match line.item {
+                RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => Some(event.turn_id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(persisted_turn_ids, vec!["turn-1".to_string()]);
+        app_server.shutdown().await?;
+        Ok(())
+    }))
 }
 
-#[tokio::test]
-async fn prompt_edit_before_first_prompt_clears_thread_history() -> Result<()> {
+#[test]
+fn prompt_edit_before_first_prompt_clears_thread_history() -> Result<()> {
+    let runtime = rewind_test_runtime()?;
+    runtime.block_on(Box::pin(async {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let config = app.chat_widget.config_ref().clone();
     let source_thread_id = app_test_support::create_fake_rollout(
@@ -8054,6 +8270,18 @@ async fn prompt_edit_before_first_prompt_clears_thread_history() -> Result<()> {
     .await?;
 
     assert!(matches!(control, AppRunControl::Continue));
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let apply_event = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::ApplyBacktrackRestore { .. }))
+        .expect("restore selection should request conversation rewind");
+    let control = Box::pin(app.handle_event(
+        &mut tui,
+        &mut app_server,
+        apply_event,
+    ))
+    .await?;
+    assert!(matches!(control, AppRunControl::Continue));
     let rolled_back_thread_id = app
         .chat_widget
         .thread_id()
@@ -8078,7 +8306,8 @@ async fn prompt_edit_before_first_prompt_clears_thread_history() -> Result<()> {
         .collect::<Vec<_>>();
     app_server.shutdown().await?;
 
-    Ok(())
+        Ok(())
+    }))
 }
 
 #[tokio::test]
