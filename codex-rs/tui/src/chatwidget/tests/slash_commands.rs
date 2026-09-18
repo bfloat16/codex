@@ -764,6 +764,15 @@ async fn bare_slash_command_is_available_from_local_recall_after_dispatch() {
 }
 
 #[tokio::test]
+async fn slash_diff_requests_panel_toggle() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    submit_composer_text(&mut chat, "/diff");
+
+    assert_matches!(rx.try_recv(), Ok(AppEvent::ToggleDiffPanel));
+}
+
+#[tokio::test]
 async fn inline_slash_command_is_available_from_local_recall_after_dispatch() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 

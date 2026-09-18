@@ -482,6 +482,7 @@ impl App {
                 self.chat_widget.open_hooks_browser(hooks);
             }
         }
+        self.refresh_diff_panel();
         tui.frame_requester().schedule_frame();
     }
 }

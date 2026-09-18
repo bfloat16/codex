@@ -711,8 +711,18 @@ pub(crate) enum AppEvent {
         result: Result<ConnectorsSnapshot, String>,
     },
 
-    /// Result of computing a `/diff` command.
-    DiffResult(PathBuf, String),
+    /// Toggle the persistent `/diff` panel, or use the legacy pager outside owned mode.
+    ToggleDiffPanel,
+
+    /// Refresh the diff panel after the workspace may have changed.
+    RefreshDiffPanel,
+
+    /// Result of computing a `/diff` request.
+    DiffResult {
+        cwd: PathBuf,
+        panel_generation: Option<u64>,
+        result: Result<(bool, String), String>,
+    },
 
     /// Open the app link view in the bottom pane.
     OpenAppLink {

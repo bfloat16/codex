@@ -3663,7 +3663,11 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     let skills = AppEvent::SkillsListLoaded { cwd, result };
     let (cwd, plugins) = (current.clone(), Some(vec![]));
     let plugins = AppEvent::PluginMentionsLoaded { cwd, plugins };
-    let diff = AppEvent::DiffResult(current.clone(), "stale diff".to_string());
+    let diff = AppEvent::DiffResult {
+        cwd: current.clone(),
+        panel_generation: None,
+        result: Ok((true, "stale diff".to_string())),
+    };
     let branch = AppEvent::SyncThreadGitBranch {
         thread_id: original,
         branch: "stale".to_string(),

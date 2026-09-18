@@ -220,6 +220,7 @@ mod background_requests;
 mod backtrack_events;
 mod config_persistence;
 mod connector_mentions;
+mod diff_panel;
 mod event_dispatch;
 mod exit_summary;
 mod experimental_features;
