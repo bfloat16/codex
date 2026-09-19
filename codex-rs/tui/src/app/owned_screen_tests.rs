@@ -226,7 +226,7 @@ async fn patch_background_extends_past_the_reserved_wrap_width() {
 }
 
 #[tokio::test]
-async fn diff_panel_collapses_locks_and_navigates_file_changes() {
+async fn diff_panel_preserves_independent_file_change_expansion() {
     let (chat_widget, _app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
     let cwd = std::path::Path::new("/tmp/project");
     let mut screen = OwnedScreen::new(&chat_widget, crate::keymap::RuntimeKeymap::defaults().pager);
@@ -274,19 +274,12 @@ async fn diff_panel_collapses_locks_and_navigates_file_changes() {
         Position::new(/*x*/ 4, /*y*/ 5),
     ));
 
-    let panel_width = crate::diff_panel::diff_panel_width(/*terminal_width*/ 120)
-        .expect("wide terminal supports panel");
-    let conversation_width = chat_widget.history_wrap_width(
-        120_u16
-            .saturating_sub(panel_width)
-            .saturating_sub(crate::diff_panel::DIFF_PANEL_GAP),
-    );
     let panel_diff =
         "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n\
          diff --git a/src/b.rs b/src/b.rs\n--- a/src/b.rs\n+++ b/src/b.rs\n@@ -1 +1 @@\n-before\n+after\n"
             .to_string();
     let generation = screen
-        .open_diff_panel(/*terminal_width*/ 120, conversation_width)
+        .open_diff_panel(/*terminal_width*/ 120)
         .expect("open diff panel");
     assert!(screen.apply_diff_panel_result(generation, Ok((true, panel_diff.clone())),));
     render(&mut screen, &mut terminal);
@@ -296,7 +289,7 @@ async fn diff_panel_collapses_locks_and_navigates_file_changes() {
         screen.handle_mouse_interaction(MouseInteractionEvent {
             kind: MouseInteractionKind::LeftDown,
             column: 4,
-            row: 2,
+            row: 0,
         }),
         OwnedScreenMouseAction::Redraw | OwnedScreenMouseAction::Ignored,
     ));
@@ -304,30 +297,46 @@ async fn diff_panel_collapses_locks_and_navigates_file_changes() {
         screen.handle_mouse_interaction(MouseInteractionEvent {
             kind: MouseInteractionKind::LeftUp,
             column: 4,
-            row: 2,
+            row: 0,
         }),
         OwnedScreenMouseAction::Redraw | OwnedScreenMouseAction::Ignored,
     ));
     render(&mut screen, &mut terminal);
-    let jumped = normalized_backend_snapshot(terminal.backend());
+    let collapsed = normalized_backend_snapshot(terminal.backend());
+
+    screen.last_click = None;
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftDown,
+            column: 4,
+            row: 0,
+        }),
+        OwnedScreenMouseAction::Redraw | OwnedScreenMouseAction::Ignored,
+    ));
+    assert!(matches!(
+        screen.handle_mouse_interaction(MouseInteractionEvent {
+            kind: MouseInteractionKind::LeftUp,
+            column: 4,
+            row: 0,
+        }),
+        OwnedScreenMouseAction::Redraw | OwnedScreenMouseAction::Ignored,
+    ));
+    render(&mut screen, &mut terminal);
+    let reexpanded = normalized_backend_snapshot(terminal.backend());
 
     let refresh_generation = screen.begin_diff_panel_refresh();
     render(&mut screen, &mut terminal);
-    assert_eq!(normalized_backend_snapshot(terminal.backend()), jumped);
+    assert_eq!(normalized_backend_snapshot(terminal.backend()), reexpanded);
     assert!(screen.apply_diff_panel_result(refresh_generation, Ok((true, panel_diff)),));
     render(&mut screen, &mut terminal);
-    assert_eq!(normalized_backend_snapshot(terminal.backend()), jumped);
+    assert_eq!(normalized_backend_snapshot(terminal.backend()), reexpanded);
 
     screen.close_diff_panel();
-    assert!(screen.viewport.handle_left_click(
-        screen.last_conversation_area,
-        Position::new(/*x*/ 4, /*y*/ 0),
-    ));
     render(&mut screen, &mut terminal);
     let closed = normalized_backend_snapshot(terminal.backend());
 
     assert_snapshot!(format!(
-        "opened:\n{opened}\njumped to b:\n{jumped}\nclosed and re-expanded:\n{closed}",
+        "opened with expanded changes:\n{opened}\ncollapsed while open:\n{collapsed}\nre-expanded while open:\n{reexpanded}\nclosed with expansion preserved:\n{closed}",
     ));
 }
 

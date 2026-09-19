@@ -23,19 +23,14 @@ impl App {
                 return;
             }
         };
-        let Some(panel_width) = crate::diff_panel::diff_panel_width(terminal_width) else {
+        if crate::diff_panel::diff_panel_width(terminal_width).is_none() {
             self.chat_widget.add_error_message(format!(
                 "Resize the terminal to at least {} columns to show the diff panel.",
                 crate::diff_panel::MIN_DIFF_PANEL_TERMINAL_WIDTH,
             ));
             return;
-        };
-        let conversation_width = self.chat_widget.history_wrap_width(
-            terminal_width
-                .saturating_sub(panel_width)
-                .saturating_sub(crate::diff_panel::DIFF_PANEL_GAP),
-        );
-        let Some(generation) = screen.open_diff_panel(terminal_width, conversation_width) else {
+        }
+        let Some(generation) = screen.open_diff_panel(terminal_width) else {
             return;
         };
         self.request_diff(Some(generation));

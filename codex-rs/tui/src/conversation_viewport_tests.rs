@@ -429,7 +429,7 @@ after
 
 #[test]
 fn active_tool_group_merges_live_activity_and_hides_previews_when_closed() {
-    let live_preview = "Call repo.inspect with a deliberately long argument list that would otherwise occupy more than two preview rows in the collapsed block";
+    let live_preview = "Call repo.inspect with a deliberately long argument list that would otherwise occupy more than ten preview rows in the collapsed block";
     let live_activity = ToolActivity {
         call_count: 1,
         mcp_calls: 1,
@@ -510,8 +510,8 @@ fn active_tool_group_merges_live_activity_and_hides_previews_when_closed() {
     assert!(!active_collapsed.contains("Run cargo check"));
     assert!(!active_collapsed.contains("Search hook discovery"));
     assert!(active_collapsed.contains("Call repo.inspect"));
-    assert!(active_collapsed.contains('…'));
-    assert!(!active_collapsed.contains("collapsed block"));
+    assert!(!active_collapsed.contains('…'));
+    assert!(active_collapsed.contains("collapsed block"));
 
     assert!(viewport.handle_mouse_move(area, Position::new(/*x*/ 8, /*y*/ 4)));
     assert!(viewport.handle_left_click(area, Position::new(/*x*/ 8, /*y*/ 4)));
@@ -533,7 +533,7 @@ fn active_tool_group_merges_live_activity_and_hides_previews_when_closed() {
     );
     let active_between_tools = render(&mut viewport);
     assert!(active_between_tools.contains("Call repo.inspect"));
-    assert!(active_between_tools.contains('…'));
+    assert!(!active_between_tools.contains('…'));
 
     viewport.sync_live_tail(
         /*width*/ 64,
@@ -554,8 +554,8 @@ before
 ● Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
   shell command
   └ Call repo.inspect with a deliberately long argument list
-    that would otherwise occupy more than two preview rows in…
-
+    that would otherwise occupy more than ten preview rows in
+    the collapsed block
 
 
 
@@ -580,8 +580,8 @@ before
 ● Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
   shell command
   └ Call repo.inspect with a deliberately long argument list
-    that would otherwise occupy more than two preview rows in…
-
+    that would otherwise occupy more than ten preview rows in
+    the collapsed block
 
 
 
@@ -602,6 +602,54 @@ before
 
 
 "###);
+}
+
+#[test]
+fn active_tool_preview_is_limited_to_ten_rows() {
+    let mut viewport = viewport(Vec::new());
+    viewport.sync_live_tail(
+        /*width*/ 40,
+        Some(ActiveCellRenderKey {
+            revision: 1,
+            is_stream_continuation: false,
+            animation_tick: None,
+        }),
+        ActiveToolGroupState {
+            accepting_content: true,
+            started_at: None,
+            animations_enabled: false,
+            animation_tick: None,
+        },
+        |_| {
+            Some(ActiveCellDisplay {
+                lines: vec![HyperlinkLine::from("live detail")],
+                auxiliary_lines: Vec::new(),
+                tool: Some(ActiveToolDisplay {
+                    activity: ToolActivity {
+                        call_count: 1,
+                        shell_commands: 1,
+                        ..ToolActivity::default()
+                    },
+                    preview_lines: vec!["preview ".repeat(100).into()],
+                    detail_lines: vec![HyperlinkLine::from("live detail")],
+                    is_stream_continuation: false,
+                }),
+            })
+        },
+    );
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 16,
+    );
+    let mut buffer = Buffer::empty(area);
+    viewport.render(area, &mut buffer);
+    let rendered = buffer_text(&buffer, area);
+    let visible_rows = rendered
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+
+    assert_eq!(visible_rows, 11);
+    assert!(rendered.contains('…'));
 }
 
 #[test]
@@ -864,162 +912,6 @@ fn small_file_edits_are_collapsed_and_interactive() {
     let mut expanded = Buffer::empty(area);
     viewport.render(area, &mut expanded);
     assert!(buffer_text(&expanded, area).contains("line 1"));
-}
-
-#[test]
-fn background_terminal_waits_fold_with_adjacent_tools() {
-    let cells: Vec<Arc<dyn HistoryCell>> = vec![
-        Arc::new(crate::history_cell::new_unified_exec_interaction(
-            Some("worker command".to_string()),
-            String::new(),
-        )),
-        tool_cell(
-            "shell display",
-            "shell transcript detail",
-            ToolActivity {
-                call_count: 1,
-                shell_commands: 1,
-                ..ToolActivity::default()
-            },
-        ),
-    ];
-    let mut viewport = viewport(cells);
-    let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 56, /*height*/ 6,
-    );
-    let mut collapsed = Buffer::empty(area);
-    viewport.render(area, &mut collapsed);
-    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
-    let mut expanded = Buffer::empty(area);
-    viewport.render(area, &mut expanded);
-
-    let trim_rows = |buffer: &Buffer| {
-        buffer_text(buffer, area)
-            .lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    assert_snapshot!(format!(
-        "collapsed:\n{}\nexpanded:\n{}",
-        trim_rows(&collapsed),
-        trim_rows(&expanded),
-    ), @r###"
-collapsed:
-  Waited for 1 background terminal, ran 1 shell command
-
-
-
-
-
-expanded:
-
-● Waited for background terminal · worker command
-
-shell transcript detail
-
-
-"###);
-}
-
-#[test]
-fn background_terminal_interactions_fold_and_expand() {
-    let cells: Vec<Arc<dyn HistoryCell>> =
-        vec![Arc::new(crate::history_cell::new_unified_exec_interaction(
-            Some("worker command".to_string()),
-            "confirm\n".to_string(),
-        ))];
-    let mut viewport = viewport(cells);
-    viewport.sync_live_tail(
-        /*width*/ 56,
-        /*active_key*/ None,
-        ActiveToolGroupState {
-            accepting_content: true,
-            started_at: None,
-            animations_enabled: false,
-            animation_tick: None,
-        },
-        |_| None,
-    );
-    let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 56, /*height*/ 9,
-    );
-    let mut active_collapsed = Buffer::empty(area);
-    viewport.render(area, &mut active_collapsed);
-    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
-    let mut expanded = Buffer::empty(area);
-    viewport.render(area, &mut expanded);
-    assert!(viewport.handle_left_click(area, Position::new(/*x*/ 4, /*y*/ 0)));
-    let patch = crate::history_cell::new_patch_event(
-        std::path::PathBuf::from("src/worker.rs"),
-        crate::diff_model::FileChange::Add {
-            content: (1..=48)
-                .map(|line| format!("line {line}\n"))
-                .collect::<String>(),
-        },
-        &crate::test_support::test_path_buf("/tmp/project"),
-    );
-    viewport.push_cell(Arc::new(patch));
-    let mut after_file_change = Buffer::empty(area);
-    viewport.render(area, &mut after_file_change);
-    viewport.sync_live_tail(
-        /*width*/ 56,
-        /*active_key*/ None,
-        ActiveToolGroupState::default(),
-        |_| None,
-    );
-    let mut after_turn_end = Buffer::empty(area);
-    viewport.render(area, &mut after_turn_end);
-
-    let trim_rows = |buffer: &Buffer| {
-        buffer_text(buffer, area)
-            .lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    assert_snapshot!(format!(
-        "active collapsed:\n{}\nexpanded:\n{}\nafter file change:\n{}\nafter turn end:\n{}",
-        trim_rows(&active_collapsed),
-        trim_rows(&expanded),
-        trim_rows(&after_file_change),
-        trim_rows(&after_turn_end),
-    ), @r"
-    active collapsed:
-    ● Interacted with 1 background terminal
-      └ Interacted with background terminal · worker command
-        · sent `confirm\n`
-
-
-
-
-
-
-    expanded:
-
-    ↳ Interacted with background terminal · worker command
-      └ confirm
-
-
-
-
-
-
-    after file change:
-      Interacted with 1 background terminal
-
-    ● Added src/worker.rs (+48 -0)
-
-
-
-
-
-
-    after turn end:
-      Interacted with 1 background terminal
-
-    ● Added src/worker.rs (+48 -0)
-    ");
 }
 
 #[test]

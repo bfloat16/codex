@@ -80,7 +80,7 @@ fn renders_file_navigation_and_continuous_diff() {
         panel.handle_left_click(Position::new(/*x*/ 47, /*y*/ 1)),
         DiffPanelClick::Close,
     );
-    assert!(panel.jump_to_path(Path::new("src/b.rs")));
+    panel.jump_to_file(/*index*/ 1);
     let second = render(&mut panel);
 
     assert_snapshot!(format!(
@@ -174,7 +174,7 @@ fn refresh_preserves_selected_file_scroll_and_last_ready_diff() {
     let mut panel = DiffPanel::loading();
     panel.set_result(Ok((true, sample_diff())));
     panel.render(area, &mut Buffer::empty(area));
-    assert!(panel.jump_to_path(Path::new("src/b.rs")));
+    panel.jump_to_file(/*index*/ 1);
     let selected_offset = panel
         .body_layout(panel.body_area.width)
         .and_then(|layout| layout.file_offsets.get(1))
@@ -217,14 +217,6 @@ fn refresh_preserves_selected_file_scroll_and_last_ready_diff() {
         buffer_text(&after_failure, area),
         buffer_text(&before_failure, area),
     );
-}
-
-#[test]
-fn path_matching_accepts_absolute_history_paths() {
-    assert!(paths_match(
-        Path::new("src/parser.rs"),
-        Path::new(r"H:\Project\Software\codex\src\parser.rs"),
-    ));
 }
 
 #[test]

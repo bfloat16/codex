@@ -269,17 +269,6 @@ impl OwnedScreen {
                         DiffPanelClick::Close => OwnedScreenMouseAction::CloseDiffPanel,
                     };
                 }
-                if self.diff_panel.is_some()
-                    && let Some(path) = self
-                        .viewport
-                        .file_change_path_at(self.last_conversation_area, position)
-                    && self
-                        .diff_panel
-                        .as_mut()
-                        .is_some_and(|panel| panel.jump_to_path(path.as_path()))
-                {
-                    return OwnedScreenMouseAction::Redraw;
-                }
                 if self.selection.left_down(self.last_selection_area, position) {
                     OwnedScreenMouseAction::Redraw
                 } else {
@@ -297,17 +286,6 @@ impl OwnedScreen {
                 match self.selection.left_up(self.last_selection_area, position) {
                     SelectionRelease::Ignored => OwnedScreenMouseAction::Ignored,
                     SelectionRelease::Click(position) => {
-                        if self.diff_panel.is_some()
-                            && let Some(path) = self
-                                .viewport
-                                .file_change_path_at(self.last_conversation_area, position)
-                            && self
-                                .diff_panel
-                                .as_mut()
-                                .is_some_and(|panel| panel.jump_to_path(path.as_path()))
-                        {
-                            return OwnedScreenMouseAction::Redraw;
-                        }
                         let now = Instant::now();
                         let click_count = self
                             .last_click
@@ -422,24 +400,14 @@ impl OwnedScreen {
         }
     }
 
-    pub(super) fn open_diff_panel(
-        &mut self,
-        terminal_width: u16,
-        conversation_width: u16,
-    ) -> Option<u64> {
+    pub(super) fn open_diff_panel(&mut self, terminal_width: u16) -> Option<u64> {
         diff_panel_width(terminal_width)?;
         self.diff_panel = Some(DiffPanel::loading());
-        self.viewport
-            .set_file_changes_locked(/*locked*/ true, conversation_width);
         Some(self.begin_diff_panel_refresh())
     }
 
     pub(super) fn close_diff_panel(&mut self) {
         self.diff_panel = None;
-        self.viewport.set_file_changes_locked(
-            /*locked*/ false,
-            self.last_conversation_area.width.max(1),
-        );
     }
 
     pub(super) fn begin_diff_panel_refresh(&mut self) -> u64 {

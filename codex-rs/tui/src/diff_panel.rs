@@ -15,7 +15,6 @@ use ratatui::widgets::Block;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
-use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) const MIN_DIFF_PANEL_TERMINAL_WIDTH: u16 = 110;
@@ -27,7 +26,6 @@ mod parser;
 mod render;
 
 use parser::parse_git_diff;
-use parser::paths_match;
 pub(crate) use render::DIFF_PANEL_GAP;
 pub(crate) use render::diff_panel_width;
 use render::summary_line;
@@ -165,20 +163,6 @@ impl DiffPanel {
             .copied()
             .unwrap_or(0)
             .saturating_add(selected_relative_scroll);
-    }
-
-    pub(crate) fn jump_to_path(&mut self, path: &Path) -> bool {
-        let Some(files) = self.files() else {
-            return false;
-        };
-        let Some(index) = files
-            .iter()
-            .position(|file| paths_match(file.path.as_path(), path))
-        else {
-            return false;
-        };
-        self.jump_to_file(index);
-        true
     }
 
     pub(crate) fn render(&mut self, area: Rect, buffer: &mut Buffer) {

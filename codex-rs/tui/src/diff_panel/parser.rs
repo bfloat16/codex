@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::path::PathBuf;
 
 use super::DiffPanelFile;
@@ -52,25 +51,4 @@ pub(super) fn parse_git_diff(text: &str) -> Vec<DiffPanelFile> {
             })
         })
         .collect()
-}
-
-pub(super) fn paths_match(left: &Path, right: &Path) -> bool {
-    let left = normalize_path(left);
-    let right = normalize_path(right);
-    left == right
-        || left
-            .strip_suffix(&right)
-            .is_some_and(|prefix| prefix.ends_with('/'))
-        || right
-            .strip_suffix(&left)
-            .is_some_and(|prefix| prefix.ends_with('/'))
-}
-
-fn normalize_path(path: &Path) -> String {
-    let path = path.to_string_lossy().replace('\\', "/");
-    if cfg!(windows) {
-        path.to_lowercase()
-    } else {
-        path
-    }
 }

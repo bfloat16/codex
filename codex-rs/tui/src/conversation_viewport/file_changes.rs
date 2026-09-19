@@ -5,7 +5,6 @@ use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
-use std::path::PathBuf;
 
 use super::ConversationCellRenderable;
 use super::ConversationViewport;
@@ -35,9 +34,6 @@ impl ConversationViewport {
     }
 
     pub(super) fn toggle_file_change_at(&mut self, area: Rect, position: Position) -> bool {
-        if self.file_changes_locked {
-            return false;
-        }
         let Some(index) = self.file_change_hit(area, position) else {
             return false;
         };
@@ -46,27 +42,6 @@ impl ConversationViewport {
         }
         self.refresh_file_changes([index], area.width);
         true
-    }
-
-    pub(crate) fn file_change_path_at(
-        &mut self,
-        area: Rect,
-        position: Position,
-    ) -> Option<PathBuf> {
-        let index = self.file_change_hit(area, position)?;
-        self.cells.get(index)?.file_change_path().map(PathBuf::from)
-    }
-
-    pub(crate) fn set_file_changes_locked(&mut self, locked: bool, width: u16) {
-        if self.file_changes_locked == locked {
-            return;
-        }
-        self.file_changes_locked = locked;
-        if !locked || self.expanded_file_changes.is_empty() {
-            return;
-        }
-        let expanded = std::mem::take(&mut self.expanded_file_changes);
-        self.refresh_file_changes(expanded, width);
     }
 
     pub(super) fn set_hovered_file_change(&mut self, next: Option<usize>, width: u16) -> bool {
