@@ -341,6 +341,24 @@ pub(crate) enum AppEvent {
         op: AppCommand,
     },
 
+    /// Confirm retrying a safety-buffered turn with the server-selected model.
+    ConfirmSafetyBufferedRetry {
+        thread_id: ThreadId,
+        turn_id: String,
+        model: String,
+        turn: AppCommand,
+        prompt: UserMessage,
+    },
+
+    /// Interrupt, fork, and retry a safety-buffered turn with the server-selected model.
+    RetrySafetyBufferedTurn {
+        thread_id: ThreadId,
+        turn_id: String,
+        model: String,
+        turn: AppCommand,
+        prompt: UserMessage,
+    },
+
     /// Deliver a synthetic history lookup response to a specific thread channel.
     ThreadHistoryEntryResponse {
         thread_id: ThreadId,

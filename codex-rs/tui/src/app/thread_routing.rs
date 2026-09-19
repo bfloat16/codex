@@ -800,7 +800,7 @@ impl App {
                             .as_ref()
                             .and_then(RuntimePermissionProfileOverride::turn_permission_profile),
                     );
-                    app_server
+                    let response = app_server
                         .turn_start(
                             thread_id,
                             client_user_message_id.clone(),
@@ -819,6 +819,12 @@ impl App {
                             final_output_json_schema.clone(),
                         )
                         .await?;
+                    if self.active_thread_id == Some(thread_id)
+                        && self.chat_widget.thread_id() == Some(thread_id)
+                    {
+                        self.chat_widget
+                            .record_safety_buffering_turn(response.turn.id, op);
+                    }
                 }
                 Ok(true)
             }

@@ -98,8 +98,6 @@ impl ChatWidget {
         self.status_state.retry_status_header = None;
         self.clear_active_hook_cell();
         self.status_state.pending_status_indicator_restore = false;
-        self.bottom_pane
-            .set_interrupt_hint_visible(/*visible*/ true);
         self.status_state.terminal_title_status_kind = TerminalTitleStatusKind::Working;
         if self.mcp_startup_status.is_none() || !self.status_header_is_mcp_startup_owned() {
             let header = self
@@ -407,6 +405,7 @@ impl ChatWidget {
     }
 
     pub(super) fn on_cyber_policy_error(&mut self) {
+        let from_replay = self.thread_usage.replaying_turn_completion;
         let notice = if self.config.model_provider_id == "openai" {
             self.cyber_policy_notice
                 .get()
@@ -416,8 +415,13 @@ impl ChatWidget {
         } else {
             crate::daybreak::Notice::Limited
         };
-        self.add_to_history(history_cell::new_cyber_policy_error_event(notice));
+        self.input_queue.submit_pending_steers_after_interrupt = false;
+        self.finalize_turn();
+        if !from_replay {
+            self.add_to_history(history_cell::new_cyber_policy_error_event(notice));
+        }
         self.request_redraw();
+        self.maybe_send_next_queued_input();
     }
 
     pub(super) fn on_rate_limit_error(&mut self, error_kind: RateLimitErrorKind, message: String) {
