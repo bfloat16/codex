@@ -331,10 +331,8 @@ use self::connectors::ConnectorsState;
 mod exec_state;
 use self::exec_state::RunningCommand;
 use self::exec_state::UnifiedExecProcessSummary;
-use self::exec_state::UnifiedExecWaitState;
 use self::exec_state::UnifiedExecWaitStreak;
 use self::exec_state::command_execution_command_and_parsed;
-use self::exec_state::is_standard_tool_call;
 use self::exec_state::is_unified_exec_source;
 mod goal_status;
 use self::goal_status::GoalStatusState;
@@ -629,7 +627,6 @@ pub(crate) struct ChatWidget {
     interrupted_unified_exec_calls: HashSet<String>,
     skills_all: Vec<SkillMetadata>,
     skills_initial_state: Option<HashMap<AbsolutePathBuf, bool>>,
-    last_unified_wait: Option<UnifiedExecWaitState>,
     unified_exec_wait_streak: Option<UnifiedExecWaitStreak>,
     turn_lifecycle: TurnLifecycleState,
     safety_buffering: SafetyBufferingState,
@@ -1484,9 +1481,8 @@ impl ChatWidget {
         self.submit_op(AppCommand::clean_background_terminals());
         self.unified_exec_processes.clear();
         self.interrupted_unified_exec_calls.clear();
-        self.sync_unified_exec_footer();
         self.add_info_message(
-            "Stopping all background terminals.".to_string(),
+            "Stopping all running terminals.".to_string(),
             /*hint*/ None,
         );
     }

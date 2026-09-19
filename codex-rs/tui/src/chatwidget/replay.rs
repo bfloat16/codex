@@ -192,23 +192,13 @@ impl ChatWidget {
                 ..
             } => self.on_command_execution_started(item),
             ThreadItem::CommandExecution {
-                command,
                 source: ExecCommandSource::UnifiedExecInteraction,
                 status:
                     codex_app_server_protocol::CommandExecutionStatus::Completed
                     | codex_app_server_protocol::CommandExecutionStatus::Failed
                     | codex_app_server_protocol::CommandExecutionStatus::Declined,
                 ..
-            } if from_replay => {
-                self.flush_answer_stream_with_separator();
-                self.flush_active_cell();
-                let command_display = strip_bash_lc_and_escape(&split_command_string(&command));
-                self.add_to_history(history_cell::new_unified_exec_interaction(
-                    (!command_display.is_empty()).then_some(command_display),
-                    String::new(),
-                ));
-                self.transcript.had_work_activity = true;
-            }
+            } if from_replay => {}
             item @ ThreadItem::CommandExecution {
                 source: ExecCommandSource::Agent | ExecCommandSource::UnifiedExecStartup,
                 status:

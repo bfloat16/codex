@@ -306,12 +306,15 @@ impl ChatWidget {
         self.status_state.remember_retry_status_header();
         self.bottom_pane.ensure_status_indicator();
         self.status_state.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
-        self.set_status(
+        if self.set_status(
             message,
             additional_details,
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
-        );
+        ) {
+            self.bottom_pane
+                .reset_api_error_animation(Duration::from_secs(180));
+        }
     }
 
     /// Handle completion of an `AgentMessage` turn item.

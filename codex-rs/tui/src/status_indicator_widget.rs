@@ -65,8 +65,6 @@ pub(crate) struct StatusIndicatorWidget {
     header: String,
     details: Option<String>,
     details_max_lines: usize,
-    /// Optional suffix rendered after the elapsed segment.
-    inline_message: Option<String>,
     model_transfer: Option<ModelTransferStatus>,
     /// Hook activity may move below the status row when it cannot fit in full.
     hook_status_message: Option<String>,
@@ -75,6 +73,7 @@ pub(crate) struct StatusIndicatorWidget {
     animations_enabled: bool,
     waiting_animation_started_at: Option<Instant>,
     waiting_animation_duration: Duration,
+    api_error: bool,
 }
 
 // Format elapsed seconds into a compact human-friendly form used by the status line.
@@ -104,7 +103,6 @@ impl StatusIndicatorWidget {
             header: String::from("Working"),
             details: None,
             details_max_lines: STATUS_DETAILS_DEFAULT_MAX_LINES,
-            inline_message: None,
             model_transfer: None,
             hook_status_message: None,
             app_event_tx,
@@ -112,6 +110,7 @@ impl StatusIndicatorWidget {
             animations_enabled,
             waiting_animation_started_at: None,
             waiting_animation_duration: Duration::from_secs(30),
+            api_error: false,
         }
     }
 
@@ -121,6 +120,7 @@ impl StatusIndicatorWidget {
 
     /// Update the animated header label (left of the brackets).
     pub(crate) fn update_header(&mut self, header: String) {
+        self.api_error = false;
         if header != "Waiting" && !header.starts_with("Waiting ") {
             self.waiting_animation_started_at = None;
         }
@@ -128,6 +128,13 @@ impl StatusIndicatorWidget {
     }
 
     pub(crate) fn reset_waiting_animation(&mut self, duration: Duration) {
+        self.waiting_animation_duration = duration;
+        self.waiting_animation_started_at = Some(Instant::now());
+        self.frame_requester.schedule_frame();
+    }
+
+    pub(crate) fn reset_api_error_animation(&mut self, duration: Duration) {
+        self.api_error = true;
         self.waiting_animation_duration = duration;
         self.waiting_animation_started_at = Some(Instant::now());
         self.frame_requester.schedule_frame();
@@ -150,17 +157,6 @@ impl StatusIndicatorWidget {
                     StatusDetailsCapitalization::Preserve => trimmed.to_string(),
                 }
             });
-    }
-
-    /// Update the inline suffix text shown after the elapsed time.
-    ///
-    /// Callers should provide plain, already-contextualized text. Passing
-    /// verbose status prose here can cause frequent width truncation and hide
-    /// the elapsed time.
-    pub(crate) fn update_inline_message(&mut self, message: Option<String>) {
-        self.inline_message = message
-            .map(|message| message.trim().to_string())
-            .filter(|message| !message.is_empty());
     }
 
     pub(crate) fn update_model_transfer(&mut self, status: Option<ModelTransferStatus>) {
@@ -236,10 +232,15 @@ impl StatusIndicator<'_> {
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
         let motion_mode = MotionMode::from_animations_enabled(row.animations_enabled);
         let waiting = row.header == "Waiting" || row.header.starts_with("Waiting ");
-        let waiting_animation_active = waiting
+        let attention_animation_active = (waiting || row.api_error)
             && row.waiting_animation_started_at.is_none_or(|started_at| {
                 now.saturating_duration_since(started_at) < row.waiting_animation_duration
             });
+        let attention_color = if row.api_error {
+            Color::LightRed
+        } else {
+            Color::Yellow
+        };
 
         let mut spans = Vec::with_capacity(9);
         if let Some(indicator) = activity_indicator(
@@ -248,20 +249,23 @@ impl StatusIndicator<'_> {
             ReducedMotionIndicator::Hidden,
         ) {
             let indicator = Span::styled("●", indicator.style);
-            spans.push(if waiting_animation_active {
-                waiting_span(indicator)
+            spans.push(if attention_animation_active || row.api_error {
+                attention_span(indicator, attention_color)
             } else {
                 indicator
             });
             spans.push(" ".into());
         }
-        let header_spans = if waiting_animation_active {
-            waiting_header_spans(
+        let header_spans = if attention_animation_active {
+            attention_header_spans(
                 &row.header,
                 row.waiting_animation_started_at,
                 row.waiting_animation_duration,
                 now,
+                attention_color,
             )
+        } else if row.api_error {
+            vec![row.header.clone().light_red()]
         } else {
             shimmer_text(&row.header, motion_mode)
         };
@@ -289,12 +293,6 @@ impl StatusIndicator<'_> {
         } else {
             spans.push(")".dim());
         }
-        if let Some(message) = &row.inline_message {
-            // Keep optional context after elapsed text so the status layout stays stable.
-            spans.push(" · ".dim());
-            spans.push(message.clone().dim());
-        }
-
         let mut header = Line::from(spans);
         let mut hook_overflow = None;
         if let Some(message) = &row.hook_status_message {
@@ -320,16 +318,17 @@ impl StatusIndicator<'_> {
     }
 }
 
-fn waiting_span(mut span: Span<'static>) -> Span<'static> {
-    span.style = span.style.fg(Color::Yellow);
+fn attention_span(mut span: Span<'static>, color: Color) -> Span<'static> {
+    span.style = span.style.fg(color);
     span
 }
 
-fn waiting_header_spans(
+fn attention_header_spans(
     header: &str,
     started_at: Option<Instant>,
     duration: Duration,
     now: Instant,
+    color: Color,
 ) -> Vec<Span<'static>> {
     let chars = header.chars().collect::<Vec<_>>();
     let highlighted = started_at.map_or(0, |started_at| {
@@ -341,7 +340,7 @@ fn waiting_header_spans(
         .into_iter()
         .enumerate()
         .map(|(index, character)| {
-            let mut span = Span::from(character.to_string()).fg(Color::Yellow);
+            let mut span = Span::from(character.to_string()).fg(color);
             if index < highlighted {
                 span = span.bold();
             } else {
@@ -562,6 +561,53 @@ mod tests {
     }
 
     #[test]
+    fn renders_api_error_with_waiting_animation_in_light_red() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut widget = StatusIndicatorWidget::new(
+            tx,
+            crate::tui::FrameRequester::test_dummy(),
+            /*animations_enabled*/ false,
+        );
+        let header = "Reconnecting... 1/5";
+        widget.update_header(header.to_string());
+        widget.reset_api_error_animation(Duration::from_secs(10));
+        widget.waiting_animation_started_at = Some(Instant::now() - Duration::from_secs(5));
+        let mut timer = StatusTimer::default();
+        timer.pause_at(timer.last_resume_at);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 1)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                widget
+                    .with_timer(&timer)
+                    .render(frame.area(), frame.buffer_mut())
+            })
+            .expect("draw");
+
+        let styles = (0..header.chars().count())
+            .map(|x| {
+                let cell = &terminal.backend().buffer()[(x as u16, 0)];
+                (cell.symbol().to_string(), cell.fg, cell.modifier)
+            })
+            .collect::<Vec<_>>();
+        assert!(styles.iter().all(|(_, color, _)| *color == Color::LightRed));
+        assert!(styles[0].2.contains(ratatui::style::Modifier::BOLD));
+        assert!(
+            styles
+                .last()
+                .expect("header style")
+                .2
+                .contains(ratatui::style::Modifier::DIM)
+        );
+        insta::assert_debug_snapshot!("api_error_waiting_animation_light_red", styles);
+
+        widget.update_header("Working".to_string());
+        assert!(!widget.api_error);
+        assert_eq!(widget.waiting_animation_started_at, None);
+    }
+
+    #[test]
     fn waiting_animation_expiry_restores_regular_status_rendering() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
@@ -570,7 +616,7 @@ mod tests {
             crate::tui::FrameRequester::test_dummy(),
             /*animations_enabled*/ false,
         );
-        widget.update_header("Waiting for background terminal".to_string());
+        widget.update_header("Waiting for terminal".to_string());
         widget.waiting_animation_duration = Duration::from_secs(1);
         widget.waiting_animation_started_at = Some(Instant::now() - Duration::from_secs(2));
         let mut timer = StatusTimer::default();
@@ -586,7 +632,7 @@ mod tests {
             .expect("draw");
 
         insta::assert_snapshot!(terminal.backend(), @r###"
-"Waiting for background terminal (0s)                                            "
+"Waiting for terminal (0s)                                                       "
 "###);
         let cell = &terminal.backend().buffer()[(0, 0)];
         assert_eq!(cell.symbol(), "W");
@@ -610,33 +656,22 @@ mod tests {
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         );
 
-        for (background, snapshot) in [
-            (None, "hook_status_reflows_without_background_activity"),
-            (
-                Some("1 background terminal running"),
-                "hook_status_reflows_with_background_activity",
-            ),
-        ] {
-            w.update_inline_message(background.map(str::to_string));
-            let mut expected = "Working (0s)".to_string();
-            if let Some(background) = background {
-                expected.push_str(&format!(" · {background}"));
-            }
-            expected.push_str(" · checking 日本語 ｶﾞﾊﾟ policy");
-            let fit_width = display_width(&expected) as u16;
-            let mut frames = Vec::new();
-            for width in [fit_width, fit_width - 1, 24, fit_width] {
-                let height = w.with_timer(&timer).desired_height(width);
-                assert_eq!(height, if width >= fit_width { 2 } else { 3 });
-                let mut terminal =
-                    Terminal::new(TestBackend::new(width, height)).expect("terminal");
-                terminal
-                    .draw(|f| w.with_timer(&timer).render(f.area(), f.buffer_mut()))
-                    .expect("draw");
-                frames.push(format!("{width} columns:\n{}", terminal.backend()));
-            }
-            insta::assert_snapshot!(snapshot, frames.join("\n"));
+        let expected = "Working (0s) · checking 日本語 ｶﾞﾊﾟ policy";
+        let fit_width = display_width(expected) as u16;
+        let mut frames = Vec::new();
+        for width in [fit_width, fit_width - 1, 24, fit_width] {
+            let height = w.with_timer(&timer).desired_height(width);
+            assert_eq!(height, if width >= fit_width { 2 } else { 3 });
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+            terminal
+                .draw(|f| w.with_timer(&timer).render(f.area(), f.buffer_mut()))
+                .expect("draw");
+            frames.push(format!("{width} columns:\n{}", terminal.backend()));
         }
+        insta::assert_snapshot!(
+            "hook_status_reflows_without_background_activity",
+            frames.join("\n")
+        );
     }
 
     #[test]

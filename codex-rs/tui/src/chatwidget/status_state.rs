@@ -94,7 +94,7 @@ impl StatusIndicatorState {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum TerminalTitleStatusKind {
     Working,
-    WaitingForBackgroundTerminal,
+    WaitingForTerminal,
     #[default]
     Thinking,
 }

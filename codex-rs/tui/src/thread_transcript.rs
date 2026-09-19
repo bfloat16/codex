@@ -9,7 +9,6 @@ use crate::app_server_session::HistoryHydrationScope;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::new_active_exec_command;
 use crate::exec_command::split_command_string;
-use crate::exec_command::strip_bash_lc_and_escape;
 use crate::git_action_directives::parse_assistant_markdown;
 use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::HistoryCell;
@@ -19,7 +18,6 @@ use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::UserHistoryCell;
 use crate::history_cell::new_patch_apply_failure;
 use crate::history_cell::new_patch_events;
-use crate::history_cell::new_unified_exec_interaction;
 use crate::history_cell::split_reasoning_summary_parts;
 use crate::inline_visualization::InlineVisualizationContext;
 use crate::legacy_core::config::Config;
@@ -206,11 +204,6 @@ pub(crate) fn thread_items_to_transcript_cells(
                 if source
                     == codex_app_server_protocol::CommandExecutionSource::UnifiedExecInteraction
                 {
-                    let command_display = strip_bash_lc_and_escape(&split_command_string(&command));
-                    cells.push(Arc::new(new_unified_exec_interaction(
-                        (!command_display.is_empty()).then_some(command_display),
-                        String::new(),
-                    )));
                     continue;
                 }
                 let mut cell = new_active_exec_command(
@@ -221,7 +214,6 @@ pub(crate) fn thread_items_to_transcript_cells(
                         .map(codex_app_server_protocol::CommandAction::into_core)
                         .collect(),
                     source,
-                    /*interaction_input*/ None,
                     /*animations_enabled*/ false,
                 );
                 if status != codex_app_server_protocol::CommandExecutionStatus::InProgress {

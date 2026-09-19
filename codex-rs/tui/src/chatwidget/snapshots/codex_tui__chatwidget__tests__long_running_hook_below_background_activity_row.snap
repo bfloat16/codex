@@ -4,19 +4,23 @@ expression: "format!(\"80 columns:\\n{}\\n120 columns:\\n{}\", hook_status_frame
 ---
 80 columns:
 "                                                                                "
-"● Working (0s) · 1 background terminal running                                  "
+"• Running sleep 2                                                               "
+"                                                                                "
+"● Working (0s)                                                                  "
 "  └ checking command policy for deployment commands, production credentials, an…"
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                                "
-"  gpt-5.6-sol default · /tmp/project                                            "
+"  Read Only        · gpt-5.6-sol default · /tmp/project                         "
 120 columns:
 "                                                                                                                        "
-"● Working (0s) · 1 background terminal running                                                                          "
+"• Running sleep 2                                                                                                       "
+"                                                                                                                        "
+"● Working (0s)                                                                                                          "
 "  └ checking command policy for deployment commands, production credentials, and paths containing 日本語 before continu…" Hidden by multi-width symbols: [(99, " "), (101, " "), (103, " ")]
 "                                                                                                                        "
 "                                                                                                                        "
 "› Ask Codex to do anything                                                                                              "
 "                                                                                                                        "
-"  gpt-5.6-sol default · /tmp/project                                                                                    "
+"  Read Only        · gpt-5.6-sol default · /tmp/project                                                                 "

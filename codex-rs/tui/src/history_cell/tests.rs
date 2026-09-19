@@ -564,56 +564,6 @@ fn session_configured_event(model: &str) -> ThreadSessionState {
 }
 
 #[test]
-fn unified_exec_interaction_cell_renders_input() {
-    let input = (1..=16).map(|line| format!("line {line}\n")).collect();
-    let cell = new_unified_exec_interaction(Some("cat".to_string()), input);
-    assert_eq!(
-        cell.tool_activity(),
-        Some(ToolActivity {
-            call_count: 1,
-            background_terminal_interactions: 1,
-            ..ToolActivity::default()
-        })
-    );
-    let lines = render_lines(&cell.display_lines(/*width*/ 80));
-    assert_eq!(lines, render_transcript(&cell));
-    insta::assert_snapshot!(lines.join("\n"), @"
-    ↳ Interacted with background terminal · cat
-      └ line 1
-        line 2
-        line 3
-        line 4
-        line 5
-        line 6
-        line 7
-        line 8
-        line 9
-        line 10
-        line 11
-        line 12
-        line 13
-        line 14
-        line 15
-        line 16
-    ");
-}
-
-#[test]
-fn unified_exec_interaction_cell_renders_wait() {
-    let cell = new_unified_exec_interaction(/*command_display*/ None, String::new());
-    let lines = render_transcript(&cell);
-    assert_eq!(
-        cell.tool_activity(),
-        Some(ToolActivity {
-            call_count: 1,
-            background_terminal_waits: 1,
-            ..ToolActivity::default()
-        })
-    );
-    insta::assert_snapshot!(lines.join("\n"), @"● Waited for background terminal");
-}
-
-#[test]
 fn final_message_separator_hides_short_worked_label_and_includes_runtime_metrics() {
     let summary = RuntimeMetricsSummary {
         tool_calls: RuntimeMetricTotals {
@@ -1144,22 +1094,6 @@ fn prefixed_wrapped_history_cell_does_not_split_url_like_token() {
 }
 
 #[test]
-fn unified_exec_interaction_cell_does_not_split_url_like_stdin_token() {
-    let url_like = "example.test/api/v1/projects/alpha-team/releases/2026-02-17/builds/1234567890";
-    let cell = UnifiedExecInteractionCell::new(Some("true".to_string()), url_like.to_string());
-    let rendered = render_lines(&cell.display_lines(/*width*/ 24));
-
-    assert_eq!(
-        rendered
-            .iter()
-            .filter(|line| line.contains(url_like))
-            .count(),
-        1,
-        "expected full URL-like token in one rendered line, got: {rendered:?}"
-    );
-}
-
-#[test]
 fn prefixed_wrapped_history_cell_height_matches_wrapped_rendering() {
     let url_like = "example.test/api/v1/projects/alpha-team/releases/2026-02-17/builds/1234567890/artifacts/reports/performance/summary/detail/with/a/very/long/path";
     let cell: Box<dyn HistoryCell> = Box::new(PrefixedWrappedHistoryCell::new(
@@ -1193,42 +1127,6 @@ fn prefixed_wrapped_history_cell_height_matches_wrapped_rendering() {
     assert!(
         first_row.contains("✔"),
         "expected first rendered row to keep the prefix visible, got: {first_row:?}"
-    );
-}
-
-#[test]
-fn unified_exec_interaction_cell_height_matches_wrapped_rendering() {
-    let url_like = "example.test/api/v1/projects/alpha-team/releases/2026-02-17/builds/1234567890/artifacts/reports/performance/summary/detail/with/a/very/long/path";
-    let cell: Box<dyn HistoryCell> = Box::new(UnifiedExecInteractionCell::new(
-        Some("true".to_string()),
-        url_like.to_string(),
-    ));
-
-    let width: u16 = 24;
-    let logical_height = cell.display_lines(width).len() as u16;
-    let wrapped_height = cell.desired_height(width);
-    assert!(
-        wrapped_height > logical_height,
-        "expected wrapped height to exceed logical line count ({logical_height}), got {wrapped_height}"
-    );
-
-    let area = Rect::new(0, 0, width, wrapped_height);
-    let mut buf = ratatui::buffer::Buffer::empty(area);
-    cell.render(area, &mut buf);
-
-    let first_row = (0..area.width)
-        .map(|x| {
-            let symbol = buf[(x, 0)].symbol();
-            if symbol.is_empty() {
-                ' '
-            } else {
-                symbol.chars().next().unwrap_or(' ')
-            }
-        })
-        .collect::<String>();
-    assert!(
-        first_row.contains("Interacted with"),
-        "expected first rendered row to keep the header visible, got: {first_row:?}"
     );
 }
 
@@ -1912,7 +1810,6 @@ fn coalesces_sequential_reads_within_one_call() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -1939,7 +1836,6 @@ fn coalesces_reads_across_multiple_calls() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -1955,7 +1851,6 @@ fn coalesces_reads_across_multiple_calls() {
             path: "shimmer.rs".into(),
         }],
         ExecCommandSource::Agent,
-        /*interaction_input*/ None,
     ));
     cell.complete_call("c2", CommandOutput::default(), Duration::from_millis(1));
     // Call 3: Read B
@@ -1968,7 +1863,6 @@ fn coalesces_reads_across_multiple_calls() {
             path: "status_indicator_widget.rs".into(),
         }],
         ExecCommandSource::Agent,
-        /*interaction_input*/ None,
     ));
     cell.complete_call("c3", CommandOutput::default(), Duration::from_millis(1));
 
@@ -2004,7 +1898,6 @@ fn coalesced_reads_dedupe_names() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -2028,7 +1921,6 @@ fn multiline_command_wraps_with_extra_indent_on_subsequent_lines() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -2054,7 +1946,6 @@ fn single_line_command_compact_when_fits() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -2078,7 +1969,6 @@ fn single_line_command_wraps_with_four_space_continuation() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -2101,7 +1991,6 @@ fn single_line_command_over_highlight_limit_uses_plain_text_fallback() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -2125,7 +2014,6 @@ fn multiline_command_without_wrap_uses_branch_then_eight_spaces() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -2149,7 +2037,6 @@ fn multiline_command_both_lines_wrap_with_correct_prefixes() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -2173,7 +2060,6 @@ fn stderr_tail_more_than_five_lines_snapshot() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );
@@ -2219,7 +2105,6 @@ fn ran_cell_multiline_with_stderr_snapshot() {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         },
         /*animations_enabled*/ true,
     );

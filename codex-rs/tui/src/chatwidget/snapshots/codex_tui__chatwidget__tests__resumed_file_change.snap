@@ -5,6 +5,3 @@ expression: rendered
 ● Edited src/lib.rs (+1 -1)
     1 -old
     1 +new
-
-
-● Waited for background terminal · cargo test -p codex-tui

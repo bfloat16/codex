@@ -126,34 +126,18 @@ async fn resumed_initial_messages_render_history() {
 }
 
 #[tokio::test]
-async fn resumed_file_change_and_terminal_wait_render_native_history() {
+async fn resumed_file_change_renders_native_history() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     let turn = AppServerTurn {
-        items: vec![
-            AppServerThreadItem::FileChange {
-                id: "exec-file-change".to_string(),
-                changes: vec![FileUpdateChange {
-                    path: "src/lib.rs".to_string(),
-                    kind: PatchChangeKind::Update { move_path: None },
-                    diff: "@@ -1 +1 @@\n-old\n+new\n".to_string(),
-                }],
-                status: AppServerPatchApplyStatus::Completed,
-            },
-            AppServerThreadItem::CommandExecution {
-                id: "wait-1".to_string(),
-                plugin_id: None,
-                script_path: None,
-                command: "cargo test -p codex-tui".to_string(),
-                cwd: chat.config.cwd.clone().into(),
-                process_id: Some("process-1".to_string()),
-                source: ExecCommandSource::UnifiedExecInteraction,
-                status: AppServerCommandExecutionStatus::Completed,
-                command_actions: Vec::new(),
-                aggregated_output: Some(String::new()),
-                exit_code: Some(0),
-                duration_ms: Some(25),
-            },
-        ],
+        items: vec![AppServerThreadItem::FileChange {
+            id: "exec-file-change".to_string(),
+            changes: vec![FileUpdateChange {
+                path: "src/lib.rs".to_string(),
+                kind: PatchChangeKind::Update { move_path: None },
+                diff: "@@ -1 +1 @@\n-old\n+new\n".to_string(),
+            }],
+            status: AppServerPatchApplyStatus::Completed,
+        }],
         ..app_server_turn(
             "turn-1",
             AppServerTurnStatus::Completed,
@@ -170,7 +154,7 @@ async fn resumed_file_change_and_terminal_wait_render_native_history() {
         .map(|cell| lines_to_single_string(cell))
         .collect::<Vec<_>>()
         .join("\n");
-    assert_chatwidget_snapshot!("resumed_file_change_and_terminal_wait", rendered);
+    assert_chatwidget_snapshot!("resumed_file_change", rendered);
 }
 
 #[tokio::test]

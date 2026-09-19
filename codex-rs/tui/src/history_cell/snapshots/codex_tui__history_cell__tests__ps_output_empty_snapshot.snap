@@ -1,9 +1,9 @@
 ---
-source: tui/src/history_cell.rs
+source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
 /ps
 
-Background terminals
+Running terminals
 
-  • No background terminals running.
+  • No terminals running.

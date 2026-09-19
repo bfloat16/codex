@@ -3509,8 +3509,8 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         ),
         ("../p", "keymap", "open_transcript"),
         ("../unknown", "local", "This directory is not trusted"),
-        ("../trusted", "main", "background terminals"),
-        ("../trusted", "child", "background terminals"),
+        ("../trusted", "main", "terminals"),
+        ("../trusted", "child", "terminals"),
     ] {
         app.config.approvals_reviewer = ApprovalsReviewer::User;
         if kind == "reviewer" {

@@ -69,7 +69,6 @@ pub(crate) struct ExecCall {
     pub(crate) source: ExecCommandSource,
     pub(crate) start_time: Option<Instant>,
     pub(crate) duration: Option<Duration>,
-    pub(crate) interaction_input: Option<String>,
 }
 
 #[derive(Debug)]
@@ -92,7 +91,6 @@ impl ExecCell {
         command: Vec<String>,
         parsed: Vec<ParsedCommand>,
         source: ExecCommandSource,
-        interaction_input: Option<String>,
     ) -> bool {
         let call = ExecCall {
             call_id,
@@ -102,7 +100,6 @@ impl ExecCell {
             source,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input,
         };
         if self.is_exploring_cell() && Self::is_exploring_call(&call) {
             self.calls.push(call);
@@ -219,9 +216,5 @@ impl ExecCell {
 impl ExecCall {
     pub(crate) fn is_user_shell_command(&self) -> bool {
         matches!(self.source, ExecCommandSource::UserShell)
-    }
-
-    pub(crate) fn is_unified_exec_interaction(&self) -> bool {
-        matches!(self.source, ExecCommandSource::UnifiedExecInteraction)
     }
 }

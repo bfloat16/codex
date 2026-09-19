@@ -25,7 +25,6 @@ use crate::app_event::HistoryLookupResponse;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::pending_input_preview::PendingInputPreview;
 use crate::bottom_pane::pending_thread_approvals::PendingThreadApprovals;
-use crate::bottom_pane::unified_exec_footer::UnifiedExecFooter;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::key_hint::KeyBindingListExt;
@@ -181,7 +180,6 @@ mod selection_row_layout;
 mod selection_tabs;
 mod startup;
 mod textarea;
-mod unified_exec_footer;
 pub(crate) use feedback_note_view::FeedbackNoteView;
 pub(crate) use hooks_browser_view::HooksBrowserView;
 pub(crate) use selection_tabs::SelectionTab;
@@ -274,11 +272,6 @@ pub(crate) struct BottomPane {
     model_transfer: Option<ModelTransferStatus>,
     /// Streaming may drop the row without losing its elapsed time or modal pause.
     status_timer: crate::status_indicator_widget::StatusTimer,
-    /// Unified exec session summary source.
-    ///
-    /// When a status row exists, this summary is mirrored inline in that row;
-    /// when no status row exists, it renders as its own footer row.
-    unified_exec_footer: UnifiedExecFooter,
     /// Preview of pending steers and queued drafts shown above the composer.
     pending_input_preview: PendingInputPreview,
     /// Inactive threads with pending approval requests.
@@ -349,7 +342,6 @@ impl BottomPane {
             inline_banner: None,
             model_transfer: None,
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
-            unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
             pending_thread_approvals: PendingThreadApprovals::new(),
             esc_backtrack_hint: false,
@@ -1210,7 +1202,7 @@ impl BottomPane {
                 if let Some(status) = self.status.as_mut() {
                     status.update_model_transfer(self.model_transfer);
                 }
-                self.sync_status_inline_message();
+                self.sync_status_hook_message();
                 self.request_redraw();
             }
         } else {
@@ -1239,7 +1231,7 @@ impl BottomPane {
                     self.animations_enabled,
                 )
             });
-            self.sync_status_inline_message();
+            self.sync_status_hook_message();
             self.request_redraw();
         }
     }
@@ -1247,6 +1239,13 @@ impl BottomPane {
     pub(crate) fn reset_waiting_animation(&mut self, duration: Duration) {
         if let Some(status) = self.status.as_mut() {
             status.reset_waiting_animation(duration);
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn reset_api_error_animation(&mut self, duration: Duration) {
+        if let Some(status) = self.status.as_mut() {
+            status.reset_api_error_animation(duration);
             self.request_redraw();
         }
     }
@@ -1519,17 +1518,6 @@ impl BottomPane {
         self.pending_thread_approvals.threads()
     }
 
-    /// Update the unified-exec process set and refresh whichever summary surface is active.
-    ///
-    /// The summary may be displayed inline in the status row or as a dedicated
-    /// footer row depending on whether a status indicator is currently visible.
-    pub(crate) fn set_unified_exec_processes(&mut self, processes: Vec<String>) {
-        if self.unified_exec_footer.set_processes(processes) {
-            self.sync_status_inline_message();
-            self.request_redraw();
-        }
-    }
-
     /// Update hook activity after the lifecycle reveal delay, even outside a turn.
     pub(crate) fn set_hook_status_message(&mut self, message: Option<String>) {
         if self.hook_status_message == message {
@@ -1540,18 +1528,14 @@ impl BottomPane {
         if self.hook_status_message.is_some() && self.status.is_none() && self.is_task_running() {
             self.ensure_status_indicator();
         } else {
-            self.sync_status_inline_message();
+            self.sync_status_hook_message();
             self.request_redraw();
         }
     }
 
-    /// Copy background activity and hook text into the active status row, if any.
-    ///
-    /// This keeps status-line inline text synchronized without forcing the
-    /// standalone unified-exec footer row to be visible.
-    fn sync_status_inline_message(&mut self) {
+    /// Copy hook text into the active status row, if any.
+    fn sync_status_hook_message(&mut self) {
         if let Some(status) = self.status.as_mut() {
-            status.update_inline_message(self.unified_exec_footer.summary_text());
             status.update_hook_status_message(self.hook_status_message.clone());
         }
     }
@@ -2009,14 +1993,6 @@ impl BottomPane {
                     })),
                 );
             }
-            // Avoid double-surfacing the same summary and avoid adding an extra
-            // row while the status line is already visible.
-            if self.status_widget().is_none() && !self.unified_exec_footer.is_empty() {
-                flex.push(
-                    /*flex*/ 0,
-                    RenderableItem::Borrowed(&self.unified_exec_footer),
-                );
-            }
             let has_pending_thread_approvals = !self.pending_thread_approvals.is_empty();
             let has_questions = self
                 .questions
@@ -2026,11 +2002,10 @@ impl BottomPane {
                 || !self.pending_input_preview.queued_messages.is_empty()
                 || !self.pending_input_preview.pending_steers.is_empty()
                 || !self.pending_input_preview.rejected_steers.is_empty();
-            let has_status_or_footer = self.status_widget().is_some()
-                || self.hook_status_message.is_some()
-                || !self.unified_exec_footer.is_empty();
+            let has_status_surface =
+                self.status_widget().is_some() || self.hook_status_message.is_some();
             let has_inline_previews = has_pending_thread_approvals || has_pending_input;
-            if has_inline_previews && has_status_or_footer {
+            if has_inline_previews && has_status_surface {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
             flex.push(
@@ -2054,7 +2029,7 @@ impl BottomPane {
             );
             let question_editor = self.questions.as_ref().filter(|q| q.expanded);
             if !has_inline_previews
-                && has_status_or_footer
+                && has_status_surface
                 && question_editor.is_none_or(|q| q.unanswered_count() > 1)
             {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
@@ -2991,35 +2966,6 @@ mod tests {
         let height = pane.desired_height(width);
         let area = Rect::new(0, 0, width, height);
         assert_snapshot!("status_only_snapshot", render_snapshot(&pane, area));
-    }
-
-    #[test]
-    fn unified_exec_summary_does_not_increase_height_when_status_visible() {
-        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
-        let tx = AppEventSender::new(tx_raw);
-        let mut pane = BottomPane::new(BottomPaneParams {
-            app_event_tx: tx,
-            frame_requester: FrameRequester::test_dummy(),
-            has_input_focus: true,
-            enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
-            disable_paste_burst: false,
-            animations_enabled: true,
-            skills: Some(Vec::new()),
-        });
-
-        pane.set_task_running(/*running*/ true);
-        let width = 120;
-        let before = pane.desired_height(width);
-
-        pane.set_unified_exec_processes(vec!["sleep 5".to_string()]);
-        let after = pane.desired_height(width);
-
-        assert_eq!(after, before);
-
-        let area = Rect::new(0, 0, width, after);
-        let rendered = render_snapshot(&pane, area);
-        assert!(rendered.contains("1 background terminal running"));
     }
 
     #[test]

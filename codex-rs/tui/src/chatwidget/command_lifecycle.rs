@@ -10,10 +10,6 @@ impl ChatWidget {
         let Some(wait) = self.unified_exec_wait_streak.take() else {
             return;
         };
-        self.transcript.needs_final_message_separator = true;
-        let cell = history_cell::new_unified_exec_interaction(wait.command_display, String::new());
-        self.app_event_tx
-            .send(AppEvent::InsertHistoryCell(Box::new(cell)));
         self.status_state.terminal_title_status_kind = wait.previous_terminal_title_status_kind;
         self.set_status(
             wait.previous_status.header,
@@ -29,13 +25,11 @@ impl ChatWidget {
             command,
             process_id,
             source,
-            command_actions,
             ..
         } = &item
         else {
             return;
         };
-        let (_command, parsed_cmd) = command_execution_command_and_parsed(command, command_actions);
         self.flush_answer_stream_with_separator();
         if *source == ExecCommandSource::Agent && self.bottom_pane.is_task_running() {
             self.bottom_pane.ensure_status_indicator();
@@ -48,11 +42,7 @@ impl ChatWidget {
             if !self.bottom_pane.is_task_running() {
                 return;
             }
-            // Unified exec may be parsed as Unknown; keep the working indicator visible regardless.
             self.bottom_pane.ensure_status_indicator();
-            if !is_standard_tool_call(&parsed_cmd) {
-                return;
-            }
         }
         self.defer_or_handle(
             item,
@@ -97,15 +87,12 @@ impl ChatWidget {
 
         self.flush_answer_stream_with_separator();
         if stdin.is_empty() {
-            match &mut self.unified_exec_wait_streak {
-                Some(wait) if wait.process_id == process_id => {
-                    wait.update_command_display(command_display.clone());
-                }
+            match &self.unified_exec_wait_streak {
+                Some(wait) if wait.process_id == process_id => {}
                 Some(_) => {
                     self.flush_unified_exec_wait_streak();
                     self.unified_exec_wait_streak = Some(UnifiedExecWaitStreak::new(
                         process_id,
-                        command_display.clone(),
                         self.status_state.current_status.clone(),
                         self.status_state.terminal_title_status_kind,
                     ));
@@ -113,22 +100,21 @@ impl ChatWidget {
                 None => {
                     self.unified_exec_wait_streak = Some(UnifiedExecWaitStreak::new(
                         process_id,
-                        command_display.clone(),
                         self.status_state.current_status.clone(),
                         self.status_state.terminal_title_status_kind,
                     ));
                 }
             }
-            // Empty stdin means we are polling for background output.
+            // Empty stdin means we are polling for terminal output.
             // Surface this in the status indicator (single "waiting" surface) instead of
             // the transcript. Keep the header short so the elapsed time remains visible.
             self.bottom_pane.ensure_status_indicator();
             self.bottom_pane
                 .reset_waiting_animation(Duration::from_secs(180));
             self.status_state.terminal_title_status_kind =
-                TerminalTitleStatusKind::WaitingForBackgroundTerminal;
+                TerminalTitleStatusKind::WaitingForTerminal;
             self.set_status(
-                "Waiting for background terminal".to_string(),
+                "Waiting for terminal".to_string(),
                 command_display,
                 StatusDetailsCapitalization::Preserve,
                 /*details_max_lines*/ 1,
@@ -142,10 +128,6 @@ impl ChatWidget {
             {
                 self.flush_unified_exec_wait_streak();
             }
-            self.add_to_history(history_cell::new_unified_exec_interaction(
-                command_display,
-                stdin,
-            ));
         }
     }
 
@@ -160,6 +142,10 @@ impl ChatWidget {
             return;
         };
         self.finish_waiting(&format!("command:{id}"));
+        if *source == ExecCommandSource::UnifiedExecInteraction {
+            self.suppressed_exec_calls.remove(id);
+            return;
+        }
         if is_unified_exec_source(*source) {
             let render_after_interrupt = self.interrupted_unified_exec_calls.remove(id);
             if let Some(process_id) = process_id.as_deref()
@@ -207,7 +193,6 @@ impl ChatWidget {
                 recent_chunks: Vec::new(),
             });
         }
-        self.sync_unified_exec_footer();
     }
 
     pub(super) fn track_unified_exec_process_end(
@@ -216,24 +201,11 @@ impl ChatWidget {
         process_id: Option<&str>,
     ) {
         let key = process_id.unwrap_or(call_id);
-        let before = self.unified_exec_processes.len();
         self.unified_exec_processes
             .retain(|process| process.key != key);
-        if self.unified_exec_processes.len() != before {
-            self.sync_unified_exec_footer();
-        }
     }
 
-    pub(super) fn sync_unified_exec_footer(&mut self) {
-        let processes = self
-            .unified_exec_processes
-            .iter()
-            .map(|process| process.command_display.clone())
-            .collect();
-        self.bottom_pane.set_unified_exec_processes(processes);
-    }
-
-    /// Record recent stdout/stderr lines for the unified exec footer.
+    /// Record recent stdout/stderr lines for `/ps` output.
     pub(super) fn track_unified_exec_output_chunk(&mut self, call_id: &str, chunk: &[u8]) {
         let Some(process) = self
             .unified_exec_processes
@@ -274,6 +246,10 @@ impl ChatWidget {
             command_execution_command_and_parsed(&command, &command_actions);
         // Ensure the status indicator is visible while the command runs.
         self.bottom_pane.ensure_status_indicator();
+        if source == ExecCommandSource::UnifiedExecInteraction {
+            self.suppressed_exec_calls.insert(id);
+            return;
+        }
         let parsed_cmd = self.annotate_skill_reads_in_parsed_cmd(parsed_cmd);
         self.running_commands.insert(
             id.clone(),
@@ -283,34 +259,12 @@ impl ChatWidget {
                 source,
             },
         );
-        let is_wait_interaction = matches!(source, ExecCommandSource::UnifiedExecInteraction);
-        let command_display = command.join(" ");
-        let should_suppress_unified_wait = is_wait_interaction
-            && self
-                .last_unified_wait
-                .as_ref()
-                .is_some_and(|wait| wait.is_duplicate(&command_display));
-        if is_wait_interaction {
-            self.last_unified_wait = Some(UnifiedExecWaitState::new(command_display));
-        } else {
-            self.last_unified_wait = None;
-        }
-        if should_suppress_unified_wait {
-            self.suppressed_exec_calls.insert(id);
-            return;
-        }
         if let Some(cell) = self
             .transcript
             .active_cell
             .as_mut()
             .and_then(|c| c.as_any_mut().downcast_mut::<ExecCell>())
-            && cell.add_call(
-                id.clone(),
-                command.clone(),
-                parsed_cmd.clone(),
-                source,
-                /*interaction_input*/ None,
-            )
+            && cell.add_call(id.clone(), command.clone(), parsed_cmd.clone(), source)
         {
             self.bump_active_cell_revision();
         } else {
@@ -321,7 +275,6 @@ impl ChatWidget {
                 command,
                 parsed_cmd,
                 source,
-                /*interaction_input*/ None,
                 self.local_settings.tui.animations,
             )));
             self.bump_active_cell_revision();
@@ -386,8 +339,6 @@ impl ChatWidget {
             None => (event_command, event_parsed, source),
         };
         let parsed = self.annotate_skill_reads_in_parsed_cmd(parsed);
-        let is_unified_exec_interaction =
-            matches!(source, ExecCommandSource::UnifiedExecInteraction);
         let is_user_shell = source == ExecCommandSource::UserShell;
         let end_target = match self.transcript.active_cell.as_ref() {
             Some(cell) => match cell.as_any().downcast_ref::<ExecCell>() {
@@ -405,13 +356,7 @@ impl ChatWidget {
             None => ExecEndTarget::NewCell,
         };
 
-        // Unified exec interaction rows intentionally hide command output text in the exec cell and
-        // instead render the interaction-specific content elsewhere in the UI.
-        let output = if is_unified_exec_interaction {
-            CommandOutput::new(exit_code, String::new())
-        } else {
-            CommandOutput::new(exit_code, aggregated_output)
-        };
+        let output = CommandOutput::new(exit_code, aggregated_output);
 
         match end_target {
             ExecEndTarget::ActiveTracked => {
@@ -437,7 +382,6 @@ impl ChatWidget {
                     command,
                     parsed,
                     source,
-                    /*interaction_input*/ None,
                     self.local_settings.tui.animations,
                 );
                 let completed = orphan.complete_call(&id, output, duration);
@@ -454,7 +398,6 @@ impl ChatWidget {
                     command,
                     parsed,
                     source,
-                    /*interaction_input*/ None,
                     self.local_settings.tui.animations,
                 );
                 let completed = cell.complete_call(&id, output, duration);

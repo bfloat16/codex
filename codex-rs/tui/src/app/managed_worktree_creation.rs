@@ -124,7 +124,7 @@ impl App {
                     .request_typed::<ListResponse>(request)
                     .await;
                 if !matches!(result, Ok(response) if response.data.is_empty()) {
-                    return self.working_directory_error("Active background terminals block /cd.");
+                    return self.working_directory_error("Active terminals block /cd.");
                 }
             }
             let setup = async {

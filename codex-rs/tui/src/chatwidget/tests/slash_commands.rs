@@ -2868,7 +2868,7 @@ async fn slash_stop_submits_background_terminal_cleanup() {
     assert_eq!(cells.len(), 1, "expected cleanup confirmation message");
     let rendered = lines_to_single_string(&cells[0]);
     assert!(
-        rendered.contains("Stopping all background terminals."),
+        rendered.contains("Stopping all running terminals."),
         "expected cleanup confirmation, got {rendered:?}"
     );
 }

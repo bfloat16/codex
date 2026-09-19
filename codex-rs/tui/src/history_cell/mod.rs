@@ -151,8 +151,6 @@ pub(crate) struct ToolActivity {
     pub(crate) listed_directories: usize,
     pub(crate) shell_commands: usize,
     pub(crate) mcp_calls: usize,
-    pub(crate) background_terminal_interactions: usize,
-    pub(crate) background_terminal_waits: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -171,12 +169,6 @@ impl ToolActivity {
             .saturating_add(other.listed_directories);
         self.shell_commands = self.shell_commands.saturating_add(other.shell_commands);
         self.mcp_calls = self.mcp_calls.saturating_add(other.mcp_calls);
-        self.background_terminal_interactions = self
-            .background_terminal_interactions
-            .saturating_add(other.background_terminal_interactions);
-        self.background_terminal_waits = self
-            .background_terminal_waits
-            .saturating_add(other.background_terminal_waits);
     }
 }
 
@@ -254,10 +246,6 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
 
     fn is_file_change(&self) -> bool {
         false
-    }
-
-    fn file_change_path(&self) -> Option<&Path> {
-        None
     }
 
     fn file_change_line_counts(&self) -> Option<(usize, usize)> {

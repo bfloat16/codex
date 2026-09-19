@@ -36,7 +36,7 @@ use crate::wrapping::word_wrap_line;
 const MIN_GROUPED_TOOL_CALLS: usize = 1;
 const SUMMARY_TEXT_ALPHA: f32 = 0.68;
 const HOVERED_SUMMARY_TEXT_ALPHA: f32 = 0.86;
-const ACTIVE_PREVIEW_MAX_ROWS: usize = 2;
+const ACTIVE_PREVIEW_MAX_ROWS: usize = 10;
 
 #[derive(Clone, Copy, Default)]
 struct ToolGroupTail<'a> {
@@ -363,20 +363,6 @@ impl ToolActivityGroupRenderable {
                 "called",
                 "MCP tool",
                 "MCP tools",
-            ),
-            (
-                self.activity.background_terminal_interactions,
-                "Interacted with",
-                "interacted with",
-                "background terminal",
-                "background terminals",
-            ),
-            (
-                self.activity.background_terminal_waits,
-                "Waited for",
-                "waited for",
-                "background terminal",
-                "background terminals",
             ),
             (
                 self.activity.shell_commands,

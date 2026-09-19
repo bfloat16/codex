@@ -1,139 +1,7 @@
-//! Background terminal interaction and process-summary history cells.
+//! Running terminal process-summary history cells.
 
 use super::*;
-use crate::exec_cell::summarize_interaction_input;
 use crate::width::display_width;
-
-#[derive(Debug)]
-pub(crate) struct UnifiedExecInteractionCell {
-    command_display: Option<String>,
-    stdin: String,
-}
-
-impl UnifiedExecInteractionCell {
-    pub(crate) fn new(command_display: Option<String>, stdin: String) -> Self {
-        Self {
-            command_display,
-            stdin,
-        }
-    }
-}
-
-impl HistoryCell for UnifiedExecInteractionCell {
-    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        if width == 0 {
-            return Vec::new();
-        }
-        let wrap_width = width as usize;
-        let waited_only = self.stdin.is_empty();
-
-        let mut header_spans = if waited_only {
-            vec!["● ".dim().bold(), "Waited for background terminal".bold()]
-        } else {
-            vec!["↳ ".dim(), "Interacted with background terminal".bold()]
-        };
-        if let Some(command) = &self.command_display
-            && !command.is_empty()
-        {
-            header_spans.push(" · ".dim());
-            header_spans.push(command.clone().dim());
-        }
-        let header = Line::from(header_spans);
-
-        let mut out: Vec<Line<'static>> = Vec::new();
-        let header_wrapped = adaptive_wrap_line(&header, RtOptions::new(wrap_width));
-        push_owned_lines(&header_wrapped, &mut out);
-
-        if waited_only {
-            return out;
-        }
-
-        let input_lines: Vec<Line<'static>> = self
-            .stdin
-            .lines()
-            .map(|line| Line::from(line.to_string()))
-            .collect();
-
-        let input_wrapped = adaptive_wrap_lines(
-            input_lines,
-            RtOptions::new(wrap_width)
-                .initial_indent(Line::from("  └ ".dim()))
-                .subsequent_indent(Line::from("    ".dim())),
-        );
-        out.extend(input_wrapped);
-        out
-    }
-
-    fn raw_lines(&self) -> Vec<Line<'static>> {
-        let mut out = Vec::new();
-        if self.stdin.is_empty() {
-            if let Some(command) = self
-                .command_display
-                .as_ref()
-                .filter(|command| !command.is_empty())
-            {
-                out.push(Line::from(format!(
-                    "Waited for background terminal: {command}"
-                )));
-            } else {
-                out.push(Line::from("Waited for background terminal"));
-            }
-            return out;
-        }
-
-        if let Some(command) = self
-            .command_display
-            .as_ref()
-            .filter(|command| !command.is_empty())
-        {
-            out.push(Line::from(format!(
-                "Interacted with background terminal: {command}"
-            )));
-        } else {
-            out.push(Line::from("Interacted with background terminal"));
-        }
-        out.extend(raw_lines_from_source(&self.stdin));
-        out
-    }
-
-    fn tool_activity(&self) -> Option<ToolActivity> {
-        Some(ToolActivity {
-            call_count: 1,
-            background_terminal_interactions: usize::from(!self.stdin.is_empty()),
-            background_terminal_waits: usize::from(self.stdin.is_empty()),
-            ..ToolActivity::default()
-        })
-    }
-
-    fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
-        let mut spans = if self.stdin.is_empty() {
-            vec!["Waited".cyan(), " for background terminal".into()]
-        } else {
-            vec!["Interacted".cyan(), " with background terminal".into()]
-        };
-        if let Some(command) = self
-            .command_display
-            .as_ref()
-            .filter(|command| !command.is_empty())
-        {
-            spans.extend([" · ".dim(), command.clone().dim()]);
-        }
-        if !self.stdin.is_empty() {
-            spans.extend([
-                " · sent ".dim(),
-                format!("`{}`", summarize_interaction_input(&self.stdin)).dim(),
-            ]);
-        }
-        vec![spans.into()]
-    }
-}
-
-pub(crate) fn new_unified_exec_interaction(
-    command_display: Option<String>,
-    stdin: String,
-) -> UnifiedExecInteractionCell {
-    UnifiedExecInteractionCell::new(command_display, stdin)
-}
 
 #[derive(Debug)]
 struct UnifiedExecProcessesCell {
@@ -161,11 +29,11 @@ impl HistoryCell for UnifiedExecProcessesCell {
         let wrap_width = width as usize;
         let max_processes = 16usize;
         let mut out: Vec<Line<'static>> = Vec::new();
-        out.push(vec!["Background terminals".bold()].into());
+        out.push(vec!["Running terminals".bold()].into());
         out.push("".into());
 
         if self.processes.is_empty() {
-            out.push("  • No background terminals running.".italic().into());
+            out.push("  • No terminals running.".italic().into());
             return out;
         }
 

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Duration;
 use std::time::Instant;
 
 use super::model::CommandOutput;
@@ -13,6 +14,7 @@ use crate::motion::activity_indicator;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::line_utils::prefix_lines;
 use crate::render::line_utils::push_owned_lines;
+use crate::status_indicator_widget::fmt_elapsed_compact;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::ui_consts::TRANSCRIPT_HINT;
 use crate::wrapping::RtOptions;
@@ -21,7 +23,6 @@ use crate::wrapping::adaptive_wrap_lines;
 use codex_ansi_escape::ansi_escape_line;
 use codex_app_server_protocol::CommandExecutionSource as ExecCommandSource;
 use codex_protocol::parse_command::ParsedCommand;
-use codex_shell_command::bash::extract_bash_command;
 use codex_utils_elapsed::format_duration;
 use itertools::Itertools;
 use ratatui::prelude::*;
@@ -34,7 +35,6 @@ use unicode_width::UnicodeWidthStr;
 
 pub(crate) const TOOL_CALL_MAX_LINES: usize = 5;
 const USER_SHELL_TOOL_CALL_MAX_LINES: usize = 50;
-const MAX_INTERACTION_PREVIEW_CHARS: usize = 80;
 
 pub(crate) struct OutputLinesParams {
     pub(crate) line_limit: usize,
@@ -48,7 +48,6 @@ pub(crate) fn new_active_exec_command(
     command: Vec<String>,
     parsed: Vec<ParsedCommand>,
     source: ExecCommandSource,
-    interaction_input: Option<String>,
     animations_enabled: bool,
 ) -> ExecCell {
     ExecCell::new(
@@ -60,40 +59,9 @@ pub(crate) fn new_active_exec_command(
             source,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input,
         },
         animations_enabled,
     )
-}
-
-fn format_unified_exec_interaction(command: &[String], input: Option<&str>) -> String {
-    let command_display = if let Some((_, script)) = extract_bash_command(command) {
-        script.to_string()
-    } else {
-        command.join(" ")
-    };
-    match input {
-        Some(data) if !data.is_empty() => {
-            let preview = summarize_interaction_input(data);
-            format!("Interacted with `{command_display}`, sent `{preview}`")
-        }
-        _ => format!("Waited for `{command_display}`"),
-    }
-}
-
-pub(crate) fn summarize_interaction_input(input: &str) -> String {
-    let single_line = input.replace('\n', "\\n");
-    let sanitized = single_line.replace('`', "\\`");
-    if sanitized.chars().count() <= MAX_INTERACTION_PREVIEW_CHARS {
-        return sanitized;
-    }
-
-    let mut preview = String::new();
-    for ch in sanitized.chars().take(MAX_INTERACTION_PREVIEW_CHARS) {
-        preview.push(ch);
-    }
-    preview.push_str("...");
-    preview
 }
 
 #[derive(Clone)]
@@ -211,16 +179,14 @@ impl HistoryCell for ExecCell {
             lines.extend(cmd_display);
 
             if let Some(output) = call.output.as_ref() {
-                if !call.is_unified_exec_interaction() {
-                    let wrap_width = width.max(1) as usize;
-                    let wrap_opts = RtOptions::new(wrap_width);
-                    for unwrapped in output
-                        .transcript_lines()
-                        .map(|line| ansi_escape_line(line.as_ref()))
-                    {
-                        let wrapped = adaptive_wrap_line(&unwrapped, wrap_opts.clone());
-                        push_owned_lines(&wrapped, &mut lines);
-                    }
+                let wrap_width = width.max(1) as usize;
+                let wrap_opts = RtOptions::new(wrap_width);
+                for unwrapped in output
+                    .transcript_lines()
+                    .map(|line| ansi_escape_line(line.as_ref()))
+                {
+                    let wrapped = adaptive_wrap_line(&unwrapped, wrap_opts.clone());
+                    push_owned_lines(&wrapped, &mut lines);
                 }
                 if let Some(duration) = call.duration {
                     let duration = format_duration(duration);
@@ -295,7 +261,19 @@ impl HistoryCell for ExecCell {
             let [call] = self.calls.as_slice() else {
                 return Vec::new();
             };
-            let mut line: Line<'static> = vec!["Run".cyan(), " ".into()].into();
+            let elapsed = call
+                .duration
+                .or_else(|| call.start_time.map(|start| start.elapsed()));
+            let mut spans = vec!["Ran".cyan()];
+            if let Some(elapsed) = elapsed.filter(|elapsed| *elapsed > Duration::from_secs(10)) {
+                spans.extend([
+                    " (".into(),
+                    fmt_elapsed_compact(elapsed.as_secs()).cyan(),
+                    ")".into(),
+                ]);
+            }
+            spans.push(" ".into());
+            let mut line: Line<'static> = spans.into();
             let command = strip_bash_lc_and_escape(&call.command);
             let highlighted = highlight_bash_to_lines(&command);
             if let Some(first) = highlighted.first() {
@@ -307,6 +285,11 @@ impl HistoryCell for ExecCell {
 
     fn tool_group_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.display_hyperlink_lines(width)
+    }
+
+    fn transcript_animation_tick(&self) -> Option<u64> {
+        self.active_start_time()
+            .map(|start| start.elapsed().as_secs())
     }
 }
 
@@ -433,10 +416,7 @@ impl ExecCell {
             Some(false) => "●".red().bold(),
             None => activity_marker(call.start_time, self.animations_enabled()),
         };
-        let is_interaction = call.is_unified_exec_interaction();
-        let title = if is_interaction {
-            ""
-        } else if self.is_active() {
+        let title = if self.is_active() {
             "Running"
         } else if call.is_user_shell_command() {
             "You ran"
@@ -444,18 +424,11 @@ impl ExecCell {
             "Ran"
         };
 
-        let mut header_line = if is_interaction {
-            Line::from(vec![bullet.clone(), " ".into()])
-        } else {
-            Line::from(vec![bullet.clone(), " ".into(), title.bold(), " ".into()])
-        };
+        let mut header_line =
+            Line::from(vec![bullet.clone(), " ".into(), title.bold(), " ".into()]);
         let header_prefix_width = header_line.width();
 
-        let cmd_display = if call.is_unified_exec_interaction() {
-            format_unified_exec_interaction(&call.command, call.interaction_input.as_deref())
-        } else {
-            strip_bash_lc_and_escape(&call.command)
-        };
+        let cmd_display = strip_bash_lc_and_escape(&call.command);
         let highlighted_lines = highlight_bash_to_lines(&cmd_display);
 
         let continuation_wrap_width = layout.command_continuation.wrap_width(width);
@@ -521,13 +494,11 @@ impl ExecCell {
             };
 
             if raw_output.lines.is_empty() {
-                if !call.is_unified_exec_interaction() {
-                    lines.extend(prefix_lines(
-                        vec![Line::from("(no output)".dim())],
-                        Span::from(layout.output_block.initial_prefix).dim(),
-                        Span::from(layout.output_block.subsequent_prefix),
-                    ));
-                }
+                lines.extend(prefix_lines(
+                    vec![Line::from("(no output)".dim())],
+                    Span::from(layout.output_block.initial_prefix).dim(),
+                    Span::from(layout.output_block.subsequent_prefix),
+                ));
             } else {
                 // Wrap first so that truncation is applied to on-screen lines
                 // rather than logical lines. This ensures that a small number
@@ -784,6 +755,63 @@ mod tests {
     }
 
     #[test]
+    fn tool_group_preview_formats_long_shell_durations() {
+        let preview = |duration| {
+            let mut cell = new_active_exec_command(
+                "call-id".to_string(),
+                vec![
+                    "bash".into(),
+                    "-lc".into(),
+                    "cargo test -p codex-tui".into(),
+                ],
+                Vec::new(),
+                ExecCommandSource::Agent,
+                /*animations_enabled*/ false,
+            );
+            cell.calls[0].start_time = None;
+            cell.calls[0].duration = Some(duration);
+            render_line_text(&cell.tool_group_preview_lines()[0])
+        };
+
+        insta::assert_snapshot!(
+            [
+                preview(Duration::from_secs(10)),
+                preview(Duration::from_secs(11)),
+                preview(Duration::from_secs(61)),
+                preview(Duration::from_secs(3_661)),
+            ]
+            .join("\n"),
+            @r"
+        Ran cargo test -p codex-tui
+        Ran (11s) cargo test -p codex-tui
+        Ran (1m 01s) cargo test -p codex-tui
+        Ran (1h 01m 01s) cargo test -p codex-tui
+            "
+        );
+
+        let mut active = new_active_exec_command(
+            "active-call".to_string(),
+            vec![
+                "bash".into(),
+                "-lc".into(),
+                "cargo test -p codex-tui".into(),
+            ],
+            Vec::new(),
+            ExecCommandSource::Agent,
+            /*animations_enabled*/ false,
+        );
+        active.calls[0].start_time = Some(Instant::now() - Duration::from_secs(11));
+        let active_preview = render_line_text(&active.tool_group_preview_lines()[0]);
+        assert!(active_preview.starts_with("Ran ("));
+        assert!(active_preview.ends_with(" cargo test -p codex-tui"));
+        assert!(
+            active
+                .transcript_animation_tick()
+                .is_some_and(|tick| tick >= 11)
+        );
+    }
+
+    #[test]
     fn user_shell_output_is_limited_by_screen_lines() {
         let long_url_like = format!(
             "https://example.test/api/v1/projects/alpha-team/releases/2026-02-17/builds/1234567890/{}",
@@ -842,7 +870,6 @@ mod tests {
             source: ExecCommandSource::UserShell,
             start_time: None,
             duration: None,
-            interaction_input: None,
         };
 
         let cell = ExecCell::new(call, /*animations_enabled*/ false);
@@ -971,7 +998,6 @@ mod tests {
             vec!["bash".into(), "-lc".into(), "echo output".into()],
             Vec::new(),
             ExecCommandSource::Agent,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
         for line in 1..=160 {
@@ -1015,7 +1041,6 @@ mod tests {
             vec!["bash".into(), "-lc".into(), "echo output".into()],
             Vec::new(),
             ExecCommandSource::Agent,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
         let hidden = "\x1b[2m".repeat(300_000);
@@ -1048,7 +1073,6 @@ mod tests {
             command,
             parsed,
             ExecCommandSource::Agent,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
         let rendered = cell
@@ -1081,7 +1105,6 @@ mod tests {
                 },
             ],
             ExecCommandSource::Agent,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
         let shell = new_active_exec_command(
@@ -1089,7 +1112,6 @@ mod tests {
             vec!["cargo".into(), "check".into()],
             Vec::new(),
             ExecCommandSource::Agent,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
         let user_shell = new_active_exec_command(
@@ -1097,7 +1119,6 @@ mod tests {
             vec!["git".into(), "status".into()],
             Vec::new(),
             ExecCommandSource::UserShell,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
         let unified_exec = new_active_exec_command(
@@ -1105,7 +1126,6 @@ mod tests {
             vec!["cargo".into(), "test".into()],
             Vec::new(),
             ExecCommandSource::UnifiedExecStartup,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
 
@@ -1155,7 +1175,6 @@ mod tests {
                 ),
             }],
             ExecCommandSource::Agent,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
         assert!(read.complete_call(
@@ -1173,7 +1192,6 @@ mod tests {
             ],
             Vec::new(),
             ExecCommandSource::Agent,
-            /*interaction_input*/ None,
             /*animations_enabled*/ false,
         );
         assert!(bash.complete_call(
@@ -1268,7 +1286,6 @@ mod tests {
             source: ExecCommandSource::UserShell,
             start_time: None,
             duration: None,
-            interaction_input: None,
         };
 
         let cell = ExecCell::new(call, /*animations_enabled*/ false);
@@ -1300,7 +1317,6 @@ mod tests {
             source: ExecCommandSource::Agent,
             start_time: Some(Instant::now()),
             duration: None,
-            interaction_input: None,
         };
 
         let cell = ExecCell::new(call, /*animations_enabled*/ false);
@@ -1334,7 +1350,6 @@ mod tests {
             source: ExecCommandSource::Agent,
             start_time: None,
             duration: None,
-            interaction_input: None,
         };
 
         let cell = ExecCell::new(call, /*animations_enabled*/ false);
@@ -1371,7 +1386,6 @@ mod tests {
             source: ExecCommandSource::UserShell,
             start_time: None,
             duration: None,
-            interaction_input: None,
         };
 
         let cell = ExecCell::new(call, /*animations_enabled*/ false);
@@ -1404,7 +1418,6 @@ mod tests {
             source: ExecCommandSource::Agent,
             start_time: None,
             duration: None,
-            interaction_input: None,
         };
 
         let cell = ExecCell::new(call, /*animations_enabled*/ false);
