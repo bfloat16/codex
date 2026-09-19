@@ -2,8 +2,8 @@ use super::*;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
-fn windows_shell_guidance_description() -> String {
-    format!("\n\n{}", windows_shell_guidance())
+fn windows_shell_guidance_description(guidance: WindowsShellGuidance) -> String {
+    format!("\n\n{}", guidance.description())
 }
 
 fn has_parameter(tool: &ToolSpec, parameter_name: &str) -> bool {
@@ -23,7 +23,7 @@ fn exec_command_tool_matches_expected_spec() {
     let description = if cfg!(windows) {
         format!(
             "Runs a command in a PTY, returning output or a session ID for ongoing interaction.{}",
-            windows_shell_guidance_description()
+            windows_shell_guidance_description(WindowsShellGuidance::Generic)
         )
     } else {
         "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
@@ -107,11 +107,41 @@ fn exec_command_tool_can_hide_shell_parameter() {
         },
         /*include_environment_id*/ false,
         /*include_shell_parameter*/ false,
-        /*include_windows_shell_guidance*/ cfg!(windows),
+        cfg!(windows).then_some(WindowsShellGuidance::Generic),
     );
 
     assert!(!has_parameter(&tool, "shell"));
     assert!(has_parameter(&tool, "cmd"));
+}
+
+#[test]
+fn windows_shell_guidance_distinguishes_git_bash_and_powershell() {
+    let options = CommandToolOptions {
+        allow_login_shell: true,
+        exec_permission_approvals_enabled: false,
+    };
+    let ToolSpec::Function(git_bash) = create_exec_command_tool_with_environment_id(
+        options,
+        /*include_environment_id*/ false,
+        /*include_shell_parameter*/ true,
+        Some(WindowsShellGuidance::GitBash),
+    ) else {
+        panic!("expected function tool");
+    };
+    let ToolSpec::Function(powershell) = create_exec_command_tool_with_environment_id(
+        options,
+        /*include_environment_id*/ false,
+        /*include_shell_parameter*/ true,
+        Some(WindowsShellGuidance::PowerShell),
+    ) else {
+        panic!("expected function tool");
+    };
+
+    assert!(git_bash.description.contains("Use Bash syntax"));
+    assert!(git_bash.description.contains("`C:\\repo`"));
+    assert!(!git_bash.description.contains("prefer native PowerShell"));
+    assert!(powershell.description.contains("Use PowerShell syntax"));
+    assert!(powershell.description.contains("`Remove-Item`"));
 }
 
 #[test]

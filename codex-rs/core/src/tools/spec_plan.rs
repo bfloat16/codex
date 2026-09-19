@@ -1007,9 +1007,7 @@ fn add_core_tool_sources(context: &CoreToolPlanContext<'_>, registry: &mut ToolR
                         turn_context,
                         context.environments,
                     ),
-                    include_windows_shell_guidance: should_include_windows_shell_guidance(
-                        context.environments,
-                    ),
+                    windows_shell_guidance: windows_shell_guidance(context.environments),
                 }));
                 registry.add(WriteStdinHandler);
             }
@@ -1056,22 +1054,43 @@ fn any_environment_allows_login_shell(environments: &TurnEnvironmentSnapshot) ->
         .any(|environment| environment.config().allow_login_shell)
 }
 
-fn should_include_windows_shell_guidance(environments: &TurnEnvironmentSnapshot) -> bool {
-    let mut environments = environments.turn_environments();
-    let Some(environment) = environments.next() else {
-        return false;
-    };
-    let executor_platform_os = if environments.next().is_none() {
-        environment.executor_platform_os.as_deref()
-    } else {
-        None
-    };
+fn windows_shell_guidance(
+    environments: &TurnEnvironmentSnapshot,
+) -> Option<crate::tools::handlers::shell_spec::WindowsShellGuidance> {
+    use crate::tools::handlers::shell_spec::WindowsShellGuidance;
 
-    // One tool schema can target any ready environment. Multi-environment turns and legacy
-    // executors without platform OS information preserve the host-derived guidance.
-    match executor_platform_os {
-        Some(platform_os) => platform_os == "windows",
-        None => cfg!(windows),
+    let mut environments = environments.turn_environments();
+    let environment = environments.next()?;
+    if let Some(next_environment) = environments.next() {
+        let (has_windows, has_unknown) = std::iter::once(environment)
+            .chain(std::iter::once(next_environment))
+            .chain(environments)
+            .fold((false, false), |(has_windows, has_unknown), environment| {
+                let platform_os = environment.executor_platform_os.as_deref();
+                (
+                    has_windows || platform_os == Some("windows"),
+                    has_unknown || platform_os.is_none(),
+                )
+            });
+        return (has_windows || has_unknown && cfg!(windows))
+            .then_some(WindowsShellGuidance::Generic);
+    }
+
+    match environment.executor_platform_os.as_deref() {
+        Some("windows") => Some(
+            match environment.shell.as_ref().map(|shell| shell.shell_type) {
+                Some(crate::shell::ShellType::Bash) => WindowsShellGuidance::GitBash,
+                Some(crate::shell::ShellType::PowerShell) => WindowsShellGuidance::PowerShell,
+                Some(
+                    crate::shell::ShellType::Zsh
+                    | crate::shell::ShellType::Sh
+                    | crate::shell::ShellType::Cmd,
+                )
+                | None => WindowsShellGuidance::Generic,
+            },
+        ),
+        Some(_) => None,
+        None => cfg!(windows).then_some(WindowsShellGuidance::Generic),
     }
 }
 
@@ -1099,7 +1118,7 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
             turn_context,
             context.environments,
         ),
-        include_windows_shell_guidance: should_include_windows_shell_guidance(context.environments),
+        windows_shell_guidance: windows_shell_guidance(context.environments),
     };
     if features.enabled(Feature::UnifiedExec) {
         registry.add(ExecCommandHandler::new(options));

@@ -46,6 +46,7 @@ use codex_utils_path_uri::PathConvention;
 use codex_utils_string::truncate_middle_chars;
 
 use super::super::shell_spec::CommandToolOptions;
+use super::super::shell_spec::WindowsShellGuidance;
 use super::super::shell_spec::create_exec_command_tool_with_environment_id;
 use super::ExecCommandArgs;
 use super::ExecCommandEnvironmentArgs;
@@ -63,7 +64,7 @@ pub(crate) struct ExecCommandHandlerOptions {
     pub(crate) exec_permission_approvals_enabled: bool,
     pub(crate) include_environment_id: bool,
     pub(crate) include_shell_parameter: bool,
-    pub(crate) include_windows_shell_guidance: bool,
+    pub(crate) windows_shell_guidance: Option<WindowsShellGuidance>,
 }
 
 #[derive(Clone, Copy)]
@@ -87,7 +88,7 @@ impl Default for ExecCommandHandler {
                 exec_permission_approvals_enabled: false,
                 include_environment_id: false,
                 include_shell_parameter: true,
-                include_windows_shell_guidance: cfg!(windows),
+                windows_shell_guidance: cfg!(windows).then_some(WindowsShellGuidance::Generic),
             },
         }
     }
@@ -122,7 +123,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             },
             self.options.include_environment_id,
             self.options.include_shell_parameter,
-            self.options.include_windows_shell_guidance,
+            self.options.windows_shell_guidance,
         );
         let mut spec = match self.lifetime {
             ExecCommandLifetime::Interactive => spec,

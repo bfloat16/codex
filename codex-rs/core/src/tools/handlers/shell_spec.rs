@@ -11,13 +11,24 @@ pub struct CommandToolOptions {
     pub exec_permission_approvals_enabled: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowsShellGuidance {
+    GitBash,
+    PowerShell,
+    Generic,
+}
+
 #[cfg(test)]
 pub fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec {
     create_exec_command_tool_with_environment_id(
         options,
         /*include_environment_id*/ false,
         /*include_shell_parameter*/ true,
-        /*include_windows_shell_guidance*/ cfg!(windows),
+        if cfg!(windows) {
+            Some(WindowsShellGuidance::Generic)
+        } else {
+            None
+        },
     )
 }
 
@@ -25,7 +36,7 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     options: CommandToolOptions,
     include_environment_id: bool,
     include_shell_parameter: bool,
-    include_windows_shell_guidance: bool,
+    windows_shell_guidance: Option<WindowsShellGuidance>,
 ) -> ToolSpec {
     let yield_time_ms_description = if cfg!(windows) {
         "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms."
@@ -94,10 +105,10 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
 
     ToolSpec::Function(ResponsesApiTool {
         name: "exec_command".to_string(),
-        description: if include_windows_shell_guidance {
+        description: if let Some(windows_shell_guidance) = windows_shell_guidance {
             format!(
                 "Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n{}",
-                windows_shell_guidance()
+                windows_shell_guidance.description()
             )
         } else {
             "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
@@ -336,11 +347,30 @@ fn file_system_permissions_schema() -> JsonSchema {
     schema
 }
 
-fn windows_shell_guidance() -> &'static str {
-    r#"Windows safety rules:
-- Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.
-- Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.
-- When using `Start-Process` to launch a background helper or service, pass `-WindowStyle Hidden` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control."#
+impl WindowsShellGuidance {
+    fn description(self) -> &'static str {
+        match self {
+            Self::GitBash => {
+                r#"Windows Git Bash guidance:
+- The default shell is Git Bash. Use Bash syntax for `cmd`; do not switch to PowerShell solely because the executor is Windows.
+- The `workdir` field is interpreted by the Windows executor before Bash starts. Omit it to use the turn cwd, or pass a relative path or a native Windows path such as `C:\repo`; do not pass Git Bash paths such as `/c/repo` or `/`.
+- Keep destructive filesystem operations in Git Bash. Do not enumerate paths in Bash and pass them to PowerShell, `cmd /c`, or batch builtins for deletion or moving. Quote paths and verify every resolved recursive delete or move target stays within the intended workspace or explicitly named directory."#
+            }
+            Self::PowerShell => {
+                r#"Windows PowerShell guidance:
+- The default shell is PowerShell. Use PowerShell syntax and native cmdlets for `cmd`.
+- The `workdir` field is interpreted by the Windows executor. Omit it to use the turn cwd, or pass a relative or native Windows path.
+- Keep destructive filesystem operations in PowerShell. Use `Remove-Item` / `Move-Item` with `-LiteralPath`, avoid string-built shell commands, and verify every resolved recursive delete or move target stays within the intended workspace or explicitly named directory.
+- When using `Start-Process` to launch a background helper or service, pass `-WindowStyle Hidden` unless the user explicitly asked for a visible interactive window."#
+            }
+            Self::Generic => {
+                r#"Windows shell guidance:
+- Use the shell reported in `<environment_context>` for `cmd` syntax. Do not infer PowerShell from the Windows executor.
+- The `workdir` field is interpreted by the Windows executor before the shell starts. Omit it to use the turn cwd, or pass a relative or native Windows path.
+- Keep destructive filesystem operations in one shell, and verify every resolved recursive delete or move target stays within the intended workspace or explicitly named directory."#
+            }
+        }
+    }
 }
 
 #[cfg(test)]

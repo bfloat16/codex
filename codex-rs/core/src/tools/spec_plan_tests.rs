@@ -499,11 +499,11 @@ fn has_parameter(spec: &ToolSpec, parameter_name: &str) -> bool {
         .is_some()
 }
 
-fn has_windows_shell_guidance(spec: &ToolSpec) -> bool {
+fn tool_description(spec: &ToolSpec) -> &str {
     let ToolSpec::Function(tool) = spec else {
-        return false;
+        return "";
     };
-    tool.description.contains("Windows safety rules:")
+    &tool.description
 }
 
 fn apply_patch_accepts_environment_id(spec: &ToolSpec) -> bool {
@@ -913,11 +913,41 @@ async fn shell_family_registers_only_unified_exec_tools() {
 #[tokio::test]
 async fn exec_command_guidance_follows_executor_platform_and_fallbacks() {
     let opposite_host_os = if cfg!(windows) { "linux" } else { "windows" };
-    for (platform_os, multiple_environments, expect_windows_guidance) in [
-        (Some("windows"), false, true),
-        (Some("linux"), false, false),
-        (None, false, cfg!(windows)),
-        (Some(opposite_host_os), true, cfg!(windows)),
+    for (platform_os, shell_type, multiple_environments, expected_heading) in [
+        (
+            Some("windows"),
+            Some(crate::shell::ShellType::Bash),
+            false,
+            Some("Windows Git Bash guidance:"),
+        ),
+        (
+            Some("windows"),
+            Some(crate::shell::ShellType::PowerShell),
+            false,
+            Some("Windows PowerShell guidance:"),
+        ),
+        (
+            Some("linux"),
+            Some(crate::shell::ShellType::Bash),
+            false,
+            None,
+        ),
+        (
+            None,
+            Some(crate::shell::ShellType::Bash),
+            false,
+            cfg!(windows).then_some("Windows shell guidance:"),
+        ),
+        (
+            Some(opposite_host_os),
+            Some(crate::shell::ShellType::Bash),
+            true,
+            if opposite_host_os == "windows" {
+                Some("Windows shell guidance:")
+            } else {
+                None
+            },
+        ),
     ] {
         let plan = probe(|turn| {
             set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
@@ -935,17 +965,26 @@ async fn exec_command_guidance_follows_executor_platform_and_fallbacks() {
                 panic!("primary environment should be ready");
             };
             environment.executor_platform_os = platform_os.map(str::to_string);
+            if let Some(shell_type) = shell_type {
+                environment.shell = crate::shell::get_shell(shell_type);
+            }
             if multiple_environments {
                 duplicate_primary_environment(turn);
             }
         })
         .await;
 
-        assert_eq!(
-            has_windows_shell_guidance(plan.visible_spec("exec_command")),
-            expect_windows_guidance,
-            "unexpected guidance for executor platform {platform_os:?} with multiple_environments={multiple_environments}"
-        );
+        let description = tool_description(plan.visible_spec("exec_command"));
+        match expected_heading {
+            Some(expected_heading) => assert!(
+                description.contains(expected_heading),
+                "expected {expected_heading:?} for executor platform {platform_os:?}, shell {shell_type:?}, multiple_environments={multiple_environments}: {description}"
+            ),
+            None => assert!(
+                !description.contains("Windows "),
+                "unexpected Windows guidance for executor platform {platform_os:?}, shell {shell_type:?}: {description}"
+            ),
+        }
     }
 }
 
