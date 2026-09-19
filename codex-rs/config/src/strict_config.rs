@@ -84,31 +84,6 @@ fn config_error_from_ignored_toml_value_fields_for_source<T: DeserializeOwned>(
     }
 }
 
-pub(crate) fn ignored_toml_value_field<T: DeserializeOwned>(value: TomlValue) -> Option<String> {
-    let mut ignored_paths = Vec::new();
-    let result: Result<T, _> = serde_ignored::deserialize(value, |ignored_path| {
-        let path_segments = ignored_path_segments(&ignored_path);
-        if !path_segments.is_empty() {
-            ignored_paths.push(path_segments);
-        }
-    });
-    if result.is_err() {
-        return None;
-    }
-
-    ignored_paths
-        .into_iter()
-        .next()
-        .map(|path_segments| path_segments.join("."))
-}
-
-pub(crate) fn unknown_feature_toml_value_field(value: &TomlValue) -> Option<String> {
-    unknown_feature_toml_value_path(value)
-        .into_iter()
-        .next()
-        .map(|path_segments| path_segments.join("."))
-}
-
 fn unknown_field_error_from_paths(
     source: ConfigDiagnosticSource<'_>,
     contents: &str,

@@ -32,8 +32,6 @@ use crate::state::ConfigLoadOptions;
 use crate::state::LoaderOverrides;
 use crate::state::validate_enabled_config_layers;
 use crate::strict_config::config_error_from_ignored_toml_value_fields;
-use crate::strict_config::ignored_toml_value_field;
-use crate::strict_config::unknown_feature_toml_value_field;
 use crate::thread_config::ThreadConfigContext;
 use crate::thread_config::ThreadConfigLoader;
 use codex_file_system::ExecutorFileSystem;
@@ -282,9 +280,6 @@ pub async fn load_config_layers_state(
             .as_ref()
             .map(AbsolutePathBuf::as_path)
             .unwrap_or(codex_home);
-        if strict_config {
-            validate_cli_overrides_strictly(&cli_overrides_layer, base_dir)?;
-        }
         Some(resolve_relative_paths_in_config_toml(
             cli_overrides_layer,
             base_dir,
@@ -665,29 +660,6 @@ fn validate_config_toml_strictly(
     } else {
         Ok(())
     }
-}
-
-fn validate_cli_overrides_strictly(
-    cli_overrides_layer: &TomlValue,
-    base_dir: &Path,
-) -> io::Result<()> {
-    let _guard = AbsolutePathBufGuard::new(base_dir);
-    if let Some(ignored_path) = ignored_toml_value_field::<ConfigToml>(cli_overrides_layer.clone())
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unknown configuration field `{ignored_path}` in -c/--config override"),
-        ));
-    }
-
-    if let Some(ignored_path) = unknown_feature_toml_value_field(cli_overrides_layer) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unknown configuration field `{ignored_path}` in -c/--config override"),
-        ));
-    }
-
-    Ok(())
 }
 
 /// If available, load requirements from the platform's system `requirements.toml`

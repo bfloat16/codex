@@ -683,74 +683,30 @@ set = { PATH = "/bin" }
 }
 
 #[tokio::test]
-async fn strict_config_rejects_unknown_cli_override_key() {
+async fn strict_config_ignores_unknown_cli_override_keys() {
     let tmp = tempdir().expect("tempdir");
 
-    let err = ConfigBuilder::default()
-        .codex_home(tmp.path().to_path_buf())
-        .fallback_cwd(Some(tmp.path().to_path_buf()))
-        .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
-        .cli_overrides(vec![(
-            "foo".to_string(),
-            TomlValue::String("bar".to_string()),
-        )])
-        .strict_config(/*strict_config*/ true)
-        .build()
-        .await
-        .expect_err("expected error");
-
-    assert_eq!(
-        err.to_string(),
-        "unknown configuration field `foo` in -c/--config override"
-    );
-}
-
-#[tokio::test]
-async fn strict_config_rejects_unknown_cli_override_key_with_relative_path_override() {
-    let tmp = tempdir().expect("tempdir");
-    let instructions_path = tmp.path().join("instructions.md");
-    std::fs::write(&instructions_path, "instructions").expect("write instructions");
-
-    let err = ConfigBuilder::default()
+    let config = ConfigBuilder::default()
         .codex_home(tmp.path().to_path_buf())
         .fallback_cwd(Some(tmp.path().to_path_buf()))
         .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
         .cli_overrides(vec![
-            (
-                "model_instructions_file".to_string(),
-                TomlValue::String("instructions.md".to_string()),
-            ),
             ("foo".to_string(), TomlValue::String("bar".to_string())),
+            (
+                "features.unknown_feature".to_string(),
+                TomlValue::Boolean(true),
+            ),
+            (
+                "model".to_string(),
+                TomlValue::String("known-model".to_string()),
+            ),
         ])
         .strict_config(/*strict_config*/ true)
         .build()
         .await
-        .expect_err("expected error");
+        .expect("unknown CLI overrides should be ignored");
 
-    assert_eq!(
-        err.to_string(),
-        "unknown configuration field `foo` in -c/--config override"
-    );
-}
-
-#[tokio::test]
-async fn strict_config_rejects_unknown_feature_cli_override_key() {
-    let tmp = tempdir().expect("tempdir");
-
-    let err = ConfigBuilder::default()
-        .codex_home(tmp.path().to_path_buf())
-        .fallback_cwd(Some(tmp.path().to_path_buf()))
-        .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
-        .cli_overrides(vec![("features.foo".to_string(), TomlValue::Boolean(true))])
-        .strict_config(/*strict_config*/ true)
-        .build()
-        .await
-        .expect_err("expected error");
-
-    assert_eq!(
-        err.to_string(),
-        "unknown configuration field `features.foo` in -c/--config override"
-    );
+    assert_eq!(config.model.as_deref(), Some("known-model"));
 }
 
 #[tokio::test]
