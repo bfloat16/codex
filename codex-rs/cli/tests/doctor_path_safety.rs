@@ -51,7 +51,6 @@ impl Fixture {
             home.join("config.toml"),
             r#"
 cli_auth_credentials_store = "file"
-check_for_update_on_startup = false
 model_provider = "local"
 [analytics]
 enabled = false

@@ -180,14 +180,6 @@ fn render_debug_config_lines(
         ));
     }
 
-    if let Some(check_for_update_on_startup) = requirements.check_for_update_on_startup.as_ref() {
-        requirement_lines.push(requirement_line(
-            "check_for_update_on_startup",
-            check_for_update_on_startup.value.to_string(),
-            Some(&check_for_update_on_startup.source),
-        ));
-    }
-
     if let Some(allow_login_shell) = requirements.allow_login_shell.as_ref() {
         requirement_lines.push(requirement_line(
             "allow_login_shell",
@@ -851,10 +843,6 @@ interrupt_message = false
                 model_catalog_json.clone(),
                 RequirementSource::LegacyManagedConfigTomlFromMdm,
             )),
-            check_for_update_on_startup: Some(Sourced::new(
-                /*value*/ false,
-                RequirementSource::LegacyManagedConfigTomlFromMdm,
-            )),
             allow_login_shell: Some(Sourced::new(
                 /*value*/ false,
                 RequirementSource::LegacyManagedConfigTomlFromMdm,
@@ -963,7 +951,6 @@ interrupt_message = false
             sqlite_home: Some(sqlite_home),
             log_dir: Some(log_dir),
             model_catalog_json: Some(model_catalog_json),
-            check_for_update_on_startup: Some(false),
             allow_login_shell: Some(false),
             feedback: Some(FeedbackConfigToml {
                 enabled: Some(false),

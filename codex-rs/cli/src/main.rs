@@ -34,7 +34,6 @@ use codex_state::StateRuntime;
 use codex_tui::AppExitInfo;
 use codex_tui::Cli as TuiCli;
 use codex_tui::ExitReason;
-use codex_tui::UpdateAction;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::ProfileV2Name;
@@ -179,9 +178,6 @@ enum Subcommand {
 
     /// Generate shell completion scripts.
     Completion(CompletionCommand),
-
-    /// Update Codex to the latest version.
-    Update,
 
     /// Diagnose local Codex installation, config, auth, and runtime health.
     Doctor(DoctorCommand),
@@ -798,10 +794,6 @@ enum AppServerDaemonSubcommand {
 
     /// Print local CLI and running app-server versions as JSON.
     Version,
-
-    /// [internal] Run the detached pid-backed standalone updater loop.
-    #[clap(hide = true)]
-    PidUpdateLoop,
 }
 
 #[derive(Debug, Args)]
@@ -863,7 +855,7 @@ fn parse_socket_path(raw: &str) -> Result<AbsolutePathBuf, String> {
         .map_err(|err| format!("failed to resolve socket path `{raw}`: {err}"))
 }
 
-/// Handle the app exit and print the results. Optionally run the update action.
+/// Handle the app exit and print the results.
 fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
     let is_fatal = match &exit_info.exit_reason {
         ExitReason::Fatal(message) => {
@@ -876,7 +868,6 @@ fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
         | ExitReason::ThreadRemoved => false,
     };
 
-    let update_action = exit_info.update_action;
     let color_enabled = supports_color::on(Stream::Stdout).is_some();
     for line in exit_info.format_exit_messages(color_enabled) {
         println!("{line}");
@@ -885,96 +876,7 @@ fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
         std::io::stdout().flush()?;
         std::process::exit(1);
     }
-    if let Some(action) = update_action {
-        run_update_action(action)?;
-    }
     Ok(())
-}
-
-/// Run the update action and print the result.
-fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
-    println!();
-    let cmd_str = action.command_str();
-    println!("Updating Codex via `{cmd_str}`...");
-    let status = {
-        #[cfg(windows)]
-        {
-            let (cmd, args) = action.command_args();
-            let cmd = if action == UpdateAction::StandaloneWindows {
-                // These args contain PowerShell metacharacters, so do not let
-                // PATHEXT select a batch shim for this action.
-                "powershell.exe"
-            } else {
-                cmd
-            };
-            let path_env =
-                std::env::var_os("PATH").ok_or_else(|| anyhow::anyhow!("PATH is not set"))?;
-            let command_path = resolve_windows_update_command_from_path(cmd, &path_env)?;
-            // Do not let a project-local command or package-manager config
-            // influence the updater after the user accepts the update prompt.
-            let update_cwd = tempfile::tempdir()?;
-            // Resolve through PATH without consulting the project cwd. When
-            // this returns a .cmd/.bat shim, std::process::Command routes the
-            // absolute path through the system command processor.
-            std::process::Command::new(command_path)
-                .args(args)
-                .current_dir(update_cwd.path())
-                .status()?
-        }
-        #[cfg(not(windows))]
-        {
-            let (cmd, args) = action.command_args();
-            let command_path = crate::wsl_paths::normalize_for_wsl(cmd);
-            let normalized_args: Vec<String> = args
-                .iter()
-                .map(crate::wsl_paths::normalize_for_wsl)
-                .collect();
-            std::process::Command::new(&command_path)
-                .args(&normalized_args)
-                .status()?
-        }
-    };
-    if !status.success() {
-        anyhow::bail!("`{cmd_str}` failed with status {status}");
-    }
-    println!("\n🎉 Update ran successfully! Please restart Codex.");
-    Ok(())
-}
-
-#[cfg(windows)]
-fn resolve_windows_update_command_from_path(
-    command: &str,
-    path_env: &std::ffi::OsStr,
-) -> anyhow::Result<PathBuf> {
-    let path_env =
-        std::env::join_paths(std::env::split_paths(path_env).filter(|path| path.is_absolute()))?;
-    if path_env.is_empty() {
-        anyhow::bail!(
-            "Could not find an absolute update command `{command}` on PATH. Please update manually: https://developers.openai.com/codex/cli/"
-        );
-    }
-    which::which_in_global(command, Some(&path_env))?
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("could not find update command `{command}` on PATH"))
-}
-
-fn run_update_command() -> anyhow::Result<()> {
-    #[cfg(debug_assertions)]
-    {
-        anyhow::bail!(
-            "`codex update` is not available in debug builds. Install a release build of Codex to use this command."
-        );
-    }
-
-    #[cfg(not(debug_assertions))]
-    {
-        let Some(action) = codex_tui::get_update_action() else {
-            anyhow::bail!(
-                "Could not detect the Codex installation method. Please update manually: https://developers.openai.com/codex/cli/"
-            );
-        };
-        run_update_action(action)
-    }
 }
 
 fn run_execpolicycheck(cmd: ExecPolicyCheckCommand) -> anyhow::Result<()> {
@@ -1394,18 +1296,6 @@ async fn cli_main(
                     AppServerDaemonSubcommand::Version => {
                         print_app_server_daemon_output(AppServerLifecycleCommand::Version).await?;
                     }
-                    AppServerDaemonSubcommand::PidUpdateLoop => {
-                        let cli_overrides = root_config_overrides
-                            .parse_overrides()
-                            .map_err(anyhow::Error::msg)?;
-                        let config = ConfigBuilder::default()
-                            .cli_overrides(cli_overrides)
-                            .build()
-                            .await
-                            .map_err(anyhow::Error::from);
-                        let http_client_factory = updater_http_client_factory(config);
-                        codex_app_server_daemon::run_pid_update_loop(http_client_factory).await?;
-                    }
                 },
                 Some(AppServerSubcommand::Proxy(proxy_cli)) => {
                     let socket_path = match proxy_cli.socket_path {
@@ -1641,14 +1531,6 @@ async fn cli_main(
                 "completion",
             )?;
             print_completion(completion_cli);
-        }
-        Some(Subcommand::Update) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "update",
-            )?;
-            run_update_command()?;
         }
         Some(Subcommand::Doctor(doctor_cli)) => {
             reject_remote_mode_for_subcommand(
@@ -2565,7 +2447,6 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Login(_)) => Some("login"),
         Some(Subcommand::Logout(_)) => Some("logout"),
         Some(Subcommand::Completion(_)) => Some("completion"),
-        Some(Subcommand::Update) => Some("update"),
         Some(Subcommand::Cloud(_)) => Some("cloud"),
         Some(Subcommand::Sandbox(_)) => Some("sandbox"),
         Some(Subcommand::Debug(_)) => Some("debug"),
@@ -2624,7 +2505,6 @@ fn app_server_subcommand_name(subcommand: Option<&AppServerSubcommand>) -> &'sta
             }
             AppServerDaemonSubcommand::Stop => "app-server daemon stop",
             AppServerDaemonSubcommand::Version => "app-server daemon version",
-            AppServerDaemonSubcommand::PidUpdateLoop => "app-server daemon pid-update-loop",
         },
         Some(AppServerSubcommand::Proxy(_)) => "app-server proxy",
         Some(AppServerSubcommand::GenerateTs(_)) => "app-server generate-ts",
@@ -2639,20 +2519,6 @@ async fn print_app_server_daemon_output(command: AppServerLifecycleCommand) -> a
     let output = codex_app_server_daemon::run(command).await?;
     println!("{}", serde_json::to_string(&output)?);
     Ok(())
-}
-
-fn updater_http_client_factory(
-    config: anyhow::Result<codex_core::config::Config>,
-) -> codex_http_client::HttpClientFactory {
-    match config {
-        Ok(config) => config.http_client_factory(),
-        Err(error) => {
-            eprintln!("warning: failed to load updater network configuration: {error}");
-            codex_http_client::HttpClientFactory::new(
-                codex_http_client::OutboundProxyPolicy::ReqwestDefault,
-            )
-        }
-    }
 }
 
 async fn print_app_server_remote_control_output(
@@ -3007,80 +2873,6 @@ mod tests {
         let size = std::mem::size_of_val(&future);
 
         assert!(size < 64 * 1024, "interactive TUI future is {size} bytes");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_update_command_resolution_ignores_relative_path_entries() {
-        let cwd = std::env::current_dir().expect("current directory");
-        let decoy_dir = tempfile::tempdir_in(&cwd).expect("relative decoy directory");
-        let trusted_dir = tempfile::tempdir().expect("trusted PATH directory");
-        let relative_decoy_dir = decoy_dir
-            .path()
-            .strip_prefix(&cwd)
-            .expect("decoy directory should be relative to cwd");
-
-        for command in ["npm.cmd", "pnpm.cmd", "bun.exe"] {
-            std::fs::write(decoy_dir.path().join(command), "decoy")
-                .expect("write cwd-relative decoy");
-            std::fs::write(trusted_dir.path().join(command), "trusted")
-                .expect("write trusted PATH command");
-            let path_env = std::env::join_paths([relative_decoy_dir, trusted_dir.path()])
-                .expect("join synthetic PATH");
-
-            let resolved = resolve_windows_update_command_from_path(command, &path_env)
-                .expect("resolve update command");
-
-            assert_eq!(resolved, trusted_dir.path().join(command));
-        }
-
-        let cwd_decoy = tempfile::Builder::new()
-            .suffix(".cmd")
-            .tempfile_in(&cwd)
-            .expect("cwd-local decoy");
-        let command = cwd_decoy
-            .path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("decoy filename");
-        let relative_only_path_env = std::env::join_paths(["."]).expect("join relative-only PATH");
-        let err = resolve_windows_update_command_from_path(command, &relative_only_path_env)
-            .expect_err("relative-only PATH should not resolve a cwd command");
-
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "Could not find an absolute update command `{command}` on PATH. Please update manually: https://developers.openai.com/codex/cli/"
-            )
-        );
-    }
-
-    #[tokio::test]
-    async fn updater_http_client_factory_honors_respect_system_proxy() {
-        let codex_home = tempfile::tempdir().expect("temporary Codex home");
-        let config = ConfigBuilder::default()
-            .codex_home(codex_home.path().to_path_buf())
-            .cli_overrides(vec![(
-                "features.respect_system_proxy".to_string(),
-                toml::Value::Boolean(true),
-            )])
-            .build()
-            .await
-            .expect("config should load");
-
-        assert_eq!(
-            updater_http_client_factory(Ok(config)).outbound_proxy_policy(),
-            codex_http_client::OutboundProxyPolicy::RespectSystemProxy
-        );
-    }
-
-    #[test]
-    fn updater_http_client_factory_falls_back_when_config_load_fails() {
-        assert_eq!(
-            updater_http_client_factory(Err(anyhow::anyhow!("invalid config")))
-                .outbound_proxy_policy(),
-            codex_http_client::OutboundProxyPolicy::ReqwestDefault
-        );
     }
 
     #[test]
@@ -3756,12 +3548,6 @@ mod tests {
     }
 
     #[test]
-    fn update_parses_as_update_subcommand() {
-        let cli = MultitoolCli::try_parse_from(["codex", "update"]).expect("parse");
-        assert!(matches!(cli.subcommand, Some(Subcommand::Update)));
-    }
-
-    #[test]
     fn archive_merges_scoped_tui_flags() {
         let (target, interactive, remote) = finalize_archive_from_args(
             [
@@ -3938,7 +3724,6 @@ mod tests {
                 thread_name: thread_name.map(str::to_string),
             }),
             disconnect_info: None,
-            update_action: None,
             exit_reason: ExitReason::UserRequested,
         }
     }
@@ -3950,7 +3735,6 @@ mod tests {
             thread_id: None,
             resume_hint: None,
             disconnect_info: None,
-            update_action: None,
             exit_reason: ExitReason::UserRequested,
         };
         let lines = exit_info.format_exit_messages(/*color_enabled*/ false);
@@ -4023,7 +3807,6 @@ mod tests {
             thread_id: Some(ThreadId::from_string("123e4567-e89b-12d3-a456-426614174000").unwrap()),
             resume_hint: None,
             disconnect_info: None,
-            update_action: None,
             exit_reason: ExitReason::Fatal("boom".to_string()),
         };
         let lines = exit_info.format_exit_messages(/*color_enabled*/ false);

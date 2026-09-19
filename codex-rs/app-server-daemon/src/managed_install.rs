@@ -1,4 +1,4 @@
-//! Resolves both package and legacy standalone layouts and compares installed executables.
+//! Resolves package and legacy standalone layouts.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -6,9 +6,6 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
-use sha2::Digest;
-use sha2::Sha256;
-use tokio::fs;
 use tokio::process::Command;
 
 /// Returns the packaged executable when present, otherwise an existing legacy executable.
@@ -28,15 +25,6 @@ pub(crate) fn managed_codex_bin(codex_home: &Path) -> PathBuf {
     } else {
         legacy
     }
-}
-
-pub(crate) async fn resolved_managed_codex_bin(codex_bin: &Path) -> Result<PathBuf> {
-    fs::canonicalize(codex_bin).await.with_context(|| {
-        format!(
-            "failed to resolve managed Codex binary {}",
-            codex_bin.display()
-        )
-    })
 }
 
 pub(crate) async fn managed_codex_version(codex_bin: &Path) -> Result<String> {
@@ -64,24 +52,6 @@ pub(crate) async fn managed_codex_version(codex_bin: &Path) -> Result<String> {
         )
     })?;
     parse_codex_version(&stdout)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ExecutableIdentity {
-    digest: [u8; 32],
-}
-
-pub(crate) async fn executable_identity(executable: &Path) -> Result<ExecutableIdentity> {
-    let bytes = fs::read(executable)
-        .await
-        .with_context(|| format!("failed to read executable {}", executable.display()))?;
-    Ok(executable_identity_from_bytes(&bytes))
-}
-
-pub(crate) fn executable_identity_from_bytes(bytes: &[u8]) -> ExecutableIdentity {
-    ExecutableIdentity {
-        digest: Sha256::digest(bytes).into(),
-    }
 }
 
 fn managed_codex_file_name() -> &'static str {

@@ -19,7 +19,7 @@ use super::push_path_detail;
 /// Builds the process provenance row for the current Codex executable.
 ///
 /// This check is informational and should not fail on its own; inconsistent
-/// install state is reported by the installation and update checks instead.
+/// install state is reported by the installation checks instead.
 pub(super) fn runtime_check() -> DoctorCheck {
     let current_exe = env::current_exe().ok();
     let install_context = doctor_install_context(current_exe.as_deref());

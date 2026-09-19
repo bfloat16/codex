@@ -443,7 +443,6 @@ pub struct ConfigRequirements {
     pub log_dir: Option<PathUri>,
     #[schemars(with = "Option<String>")]
     pub model_catalog_json: Option<PathUri>,
-    pub check_for_update_on_startup: Option<bool>,
     pub allow_login_shell: Option<bool>,
     pub feedback: Option<FeedbackRequirements>,
     pub windows_sandbox_private_desktop: Option<bool>,

@@ -1077,11 +1077,6 @@ pub struct Config {
     /// Collection of various notices we show the user
     pub notices: Notice,
 
-    /// When `true`, checks for Codex updates on startup and surfaces update prompts.
-    /// Set to `false` only if your Codex updates are centrally managed.
-    /// Defaults to `true`.
-    pub check_for_update_on_startup: bool,
-
     /// When true, disables burst-paste detection for typed input entirely.
     /// All characters are inserted as they are received, and no buffering
     /// or placeholder replacement will occur for fast keypress bursts.
@@ -3206,7 +3201,6 @@ impl Config {
             sqlite_home: _,
             log_dir: _,
             model_catalog_json: _,
-            check_for_update_on_startup: _,
             allow_login_shell: _,
             feedback: _,
             approval_policy: mut constrained_approval_policy,
@@ -3979,7 +3973,6 @@ impl Config {
 
         let review_model = override_review_model.or(cfg.review_model);
 
-        let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
 
         let log_dir = cfg
@@ -4346,7 +4339,6 @@ impl Config {
                 .unwrap_or(false),
             active_project,
             notices,
-            check_for_update_on_startup,
             disable_paste_burst: cfg
                 .tui
                 .as_ref()

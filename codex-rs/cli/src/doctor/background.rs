@@ -3,8 +3,7 @@
 //! The background-server check is deliberately passive. It reads the daemon
 //! state directory, PID files, settings file, and control socket path, then
 //! attempts only a bounded initialize probe when a socket already exists. That
-//! keeps doctor safe to run while the user is debugging startup or update-loop
-//! issues.
+//! keeps doctor safe to run while the user is debugging startup issues.
 
 use std::path::Path;
 
@@ -17,7 +16,6 @@ const MAX_PROBE_ERROR_CHARS: usize = 120;
 const STATE_DIR_NAME: &str = "app-server-daemon";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const PID_FILE_NAME: &str = "app-server.pid";
-const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
 
 /// Builds the app-server status row from existing daemon state.
 ///
@@ -34,11 +32,6 @@ pub(super) async fn background_server_check(config: &Config) -> DoctorCheck {
         &state_dir.join(SETTINGS_FILE_NAME),
     );
     push_file_detail(&mut details, "pid file", &state_dir.join(PID_FILE_NAME));
-    push_file_detail(
-        &mut details,
-        "update-loop pid file",
-        &state_dir.join(UPDATE_PID_FILE_NAME),
-    );
 
     let socket_path = match codex_app_server::app_server_control_socket_path(&config.codex_home) {
         Ok(socket_path) => socket_path,

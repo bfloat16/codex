@@ -28,8 +28,6 @@ const HANDSHAKE_CHECK_ID: &str = "desktop.app_server.handshake";
 
 pub(super) struct DesktopDiagnostics {
     pub(super) checks: Vec<DoctorCheck>,
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    pub(super) application: Option<platform::InstalledApp>,
 }
 
 struct DesktopLog {
@@ -69,8 +67,6 @@ pub(super) async fn collect() -> Option<DesktopDiagnostics> {
                     #[cfg(target_os = "windows")]
                     windows_security::collect().await,
                 ],
-                #[cfg(any(target_os = "macos", target_os = "windows"))]
-                application: None,
             });
         }
     };
@@ -104,8 +100,6 @@ pub(super) async fn collect() -> Option<DesktopDiagnostics> {
             #[cfg(target_os = "windows")]
             windows_security::collect().await,
         ],
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        application: Some(application),
     })
 }
 

@@ -5803,12 +5803,6 @@
             "null"
           ]
         },
-        "checkForUpdateOnStartup": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "cliAuthCredentialsStore": {
           "anyOf": [
             {

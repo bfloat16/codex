@@ -71,7 +71,6 @@ enum PidFileState {
 #[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 enum PidCommandKind {
     AppServer { remote_control_enabled: bool },
-    UpdateLoop,
 }
 
 impl PidBackend {
@@ -84,16 +83,6 @@ impl PidBackend {
             command_kind: PidCommandKind::AppServer {
                 remote_control_enabled,
             },
-        }
-    }
-
-    pub(crate) fn new_update_loop(codex_bin: PathBuf, pid_file: PathBuf) -> Self {
-        let lock_file = pid_file.with_extension("pid.lock");
-        Self {
-            codex_bin,
-            pid_file,
-            lock_file,
-            command_kind: PidCommandKind::UpdateLoop,
         }
     }
 
@@ -117,7 +106,7 @@ impl PidBackend {
 
     #[cfg(any(unix, windows))]
     pub(crate) async fn start(&self) -> Result<Option<u32>> {
-        self.start_inner(/*replacement*/ None).await
+        self.start_inner().await
     }
 
     #[cfg(not(any(unix, windows)))]
@@ -165,11 +154,6 @@ impl PidBackend {
                             tracing::warn!(%pid, %err, "managed app-server shutdown request failed; waiting for force deadline");
                         }
                     }
-                    PidCommandKind::UpdateLoop => {
-                        fs::write(self.pid_file.with_extension("shutdown"), pid.to_string())
-                            .await
-                            .context("failed to request updater shutdown")?;
-                    }
                 }
                 process
             };
@@ -179,7 +163,7 @@ impl PidBackend {
                 if let Ok(raw_pid) = libc::pid_t::try_from(pid)
                     && raw_pid > 0
                 {
-                    // A previous updater may have started this child; reap it if it has exited.
+                    // Reap a detached child if it has exited.
                     unsafe { libc::waitpid(raw_pid, std::ptr::null_mut(), libc::WNOHANG) };
                 }
                 if !self.record_is_active(&record).await? {
@@ -341,7 +325,6 @@ impl PidBackend {
             PidCommandKind::AppServer {
                 remote_control_enabled: false,
             } => vec!["app-server", "--listen", "unix://"],
-            PidCommandKind::UpdateLoop => vec!["app-server", "daemon", "pid-update-loop"],
         }
     }
 
@@ -353,15 +336,13 @@ impl PidBackend {
             } => Some((REMOTE_CONTROL_DISABLED_ENV_VAR, "1")),
             PidCommandKind::AppServer {
                 remote_control_enabled: true,
-            }
-            | PidCommandKind::UpdateLoop => None,
+            } => None,
         }
     }
 
     fn terminate_process(&self, pid: u32) -> Result<()> {
         match self.command_kind {
             PidCommandKind::AppServer { .. } => terminate_process(pid),
-            PidCommandKind::UpdateLoop => terminate_process(pid),
         }
     }
 
@@ -369,7 +350,6 @@ impl PidBackend {
     fn force_terminate_process(&self, pid: u32) -> Result<()> {
         match self.command_kind {
             PidCommandKind::AppServer { .. } => force_terminate_process(pid),
-            PidCommandKind::UpdateLoop => force_terminate_process_group(pid),
         }
     }
 
@@ -467,21 +447,6 @@ fn force_terminate_process(pid: u32) -> Result<()> {
     Err(err).with_context(|| format!("failed to force terminate pid-managed app server {pid}"))
 }
 
-#[cfg(unix)]
-fn force_terminate_process_group(pid: u32) -> Result<()> {
-    let raw_pid = libc::pid_t::try_from(pid)
-        .with_context(|| format!("pid-managed updater pid {pid} is out of range"))?;
-    let result = unsafe { libc::kill(-raw_pid, libc::SIGKILL) };
-    if result == 0 {
-        return Ok(());
-    }
-    let err = std::io::Error::last_os_error();
-    if err.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
-    }
-    Err(err).with_context(|| format!("failed to force terminate pid-managed updater group {pid}"))
-}
-
 #[cfg(not(any(unix, windows)))]
 fn terminate_process(_pid: u32) -> Result<()> {
     bail!("pid-managed app-server shutdown is unsupported on this platform")
@@ -490,11 +455,6 @@ fn terminate_process(_pid: u32) -> Result<()> {
 #[cfg(not(any(unix, windows)))]
 fn force_terminate_process(_pid: u32) -> Result<()> {
     bail!("pid-managed app-server shutdown is unsupported on this platform")
-}
-
-#[cfg(not(any(unix, windows)))]
-fn force_terminate_process_group(_pid: u32) -> Result<()> {
-    bail!("pid-managed updater shutdown is unsupported on this platform")
 }
 
 #[cfg(unix)]
@@ -506,7 +466,7 @@ async fn process_matches_record(record: &PidRecord) -> Result<bool> {
     match read_process_details(record.pid).await {
         Ok((state, start_time)) => {
             // An unreaped zombie still passes kill(pid, 0) and retains its start
-            // time, but it can no longer run the app-server or updater.
+            // time, but it can no longer run the app-server.
             if state.starts_with('Z') {
                 if start_time == record.process_start_time
                     && let Ok(raw_pid) = libc::pid_t::try_from(record.pid)
@@ -708,10 +668,6 @@ fn force_terminate_process(pid: u32) -> Result<()> {
 
 #[cfg(windows)]
 use force_terminate_process as terminate_process;
-
-#[cfg(windows)]
-#[path = "pid_windows.rs"]
-mod windows;
 
 #[cfg(any(unix, windows))]
 #[path = "pid_start.rs"]

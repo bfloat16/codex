@@ -25,14 +25,11 @@ use windows_sys::Win32::Security::TokenElevation;
 use windows_sys::Win32::Storage::FileSystem::LOCKFILE_EXCLUSIVE_LOCK;
 use windows_sys::Win32::Storage::FileSystem::LOCKFILE_FAIL_IMMEDIATELY;
 use windows_sys::Win32::Storage::FileSystem::LockFileEx;
+#[cfg(test)]
 use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+#[cfg(test)]
 use windows_sys::Win32::System::JobObjects::CreateJobObjectW;
 use windows_sys::Win32::System::JobObjects::IsProcessInJob;
-use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-use windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
-use windows_sys::Win32::System::JobObjects::JobObjectExtendedLimitInformation;
-use windows_sys::Win32::System::JobObjects::SetInformationJobObject;
 use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
 use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
@@ -239,33 +236,6 @@ pub(crate) fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
         return Ok(false);
     }
     Err(err).context("failed to lock daemon state")
-}
-
-// Keep installer descendants bounded by the updater's lifetime, while allowing
-// app-server launches and successor updaters to break away from this job.
-pub(crate) fn updater_job() -> Result<OwnedHandle> {
-    let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-    if job == 0 {
-        return Err(io::Error::last_os_error()).context("failed to create updater job");
-    }
-    let owned = unsafe { OwnedHandle::from_raw_handle(job as _) };
-    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-    limits.BasicLimitInformation.LimitFlags =
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-    if unsafe {
-        SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-            std::mem::size_of_val(&limits) as u32,
-        )
-    } == 0
-        || unsafe { AssignProcessToJobObject(job, GetCurrentProcess()) } == 0
-    {
-        return Err(io::Error::last_os_error())
-            .context("failed to contain updater installer processes");
-    }
-    Ok(owned)
 }
 
 #[cfg(test)]

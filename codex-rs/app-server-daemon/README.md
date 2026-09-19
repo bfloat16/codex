@@ -115,8 +115,8 @@ for future starts. If a managed app-server is already running, they restart it
 so the new setting takes effect immediately.
 
 Top-level `codex remote-control` bootstraps with `--remote-control` when the
-updater loop is not running. Otherwise it enables remote control and starts the
-daemon normally.
+daemon has not been configured yet. Otherwise it enables remote control and
+starts the daemon normally.
 
 `stop` sends a graceful termination request first, then sends a second
 termination signal after the grace window if the process is still alive.
@@ -131,5 +131,4 @@ The daemon stores its local state under `CODEX_HOME/app-server-daemon/`:
 
 - `settings.json` for persisted launch settings
 - `app-server.pid` for the app-server process record
-- `app-server-updater.pid` for the pid-backed standalone updater loop
 - `daemon.lock` for daemon-wide lifecycle serialization

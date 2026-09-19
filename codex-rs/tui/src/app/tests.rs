@@ -40,6 +40,7 @@ mod plugin_catalog;
 mod rate_limits;
 #[path = "tests/recap_generation_tests.rs"]
 mod recap_generation;
+mod safety_buffering;
 #[path = "tests/session_lifecycle_requests.rs"]
 mod session_lifecycle_requests;
 mod session_summary;
@@ -5803,7 +5804,6 @@ async fn make_test_app() -> App {
         environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
         app_server_target: crate::AppServerTarget::Embedded,
         reconnect: Default::default(),
-        pending_update_action: None,
         pending_shutdown_exit_thread_id: None,
         windows_sandbox: WindowsSandboxState::default(),
         thread_event_channels: HashMap::new(),
@@ -5898,7 +5898,6 @@ pub(super) async fn make_test_app_with_channels() -> (
             environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
             app_server_target: crate::AppServerTarget::Embedded,
             reconnect: Default::default(),
-            pending_update_action: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
             thread_event_channels: HashMap::new(),
@@ -7196,7 +7195,7 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_rollback() {
 
 #[tokio::test]
 async fn double_esc_opens_backtrack_picker_below_composer() -> Result<()> {
-    let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
     app.chat_widget.handle_thread_session(ThreadSessionState {
         thread_id,
@@ -7247,6 +7246,21 @@ async fn double_esc_opens_backtrack_picker_below_composer() -> Result<()> {
         app.chat_widget.render(frame.area(), frame.buffer_mut());
     })?;
     insta::assert_snapshot!("backtrack_prompt_picker_below_composer", terminal.backend());
+
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let event = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::RollbackSessionForPromptEdit { .. }))
+        .expect("historical prompt should request rollback preview");
+    assert_matches!(
+        event,
+        AppEvent::RollbackSessionForPromptEdit {
+            nth_user_message: 1,
+            ..
+        }
+    );
     app.show_backtrack_restore_picker(
         BacktrackSelection {
             thread_id,
@@ -7269,6 +7283,25 @@ async fn double_esc_opens_backtrack_picker_below_composer() -> Result<()> {
     })?;
     insta::assert_snapshot!(
         "backtrack_restore_picker_below_composer",
+        terminal.backend()
+    );
+
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(
+        std::iter::from_fn(|| app_event_rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::BacktrackRestoreBack))
+    );
+    assert_eq!(
+        app.chat_widget
+            .selected_index_for_active_view("backtrack-message"),
+        Some(1)
+    );
+    terminal.draw(|frame| {
+        app.chat_widget.render(frame.area(), frame.buffer_mut());
+    })?;
+    insta::assert_snapshot!(
+        "backtrack_prompt_picker_restored_after_escape",
         terminal.backend()
     );
     Ok(())

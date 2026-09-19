@@ -167,7 +167,6 @@ pub struct ConfigRequirements {
     pub sqlite_home: Option<Sourced<AbsolutePathBuf>>,
     pub log_dir: Option<Sourced<AbsolutePathBuf>>,
     pub model_catalog_json: Option<Sourced<AbsolutePathBuf>>,
-    pub check_for_update_on_startup: Option<Sourced<bool>>,
     pub allow_login_shell: Option<Sourced<bool>>,
     pub feedback: Option<Sourced<FeedbackConfigToml>>,
     pub approval_policy: ConstrainedWithSource<AskForApproval>,
@@ -209,7 +208,6 @@ impl Default for ConfigRequirements {
             sqlite_home: None,
             log_dir: None,
             model_catalog_json: None,
-            check_for_update_on_startup: None,
             allow_login_shell: None,
             feedback: None,
             approval_policy: ConstrainedWithSource::new(
@@ -989,7 +987,6 @@ pub struct ConfigRequirementsToml {
     pub sqlite_home: Option<AbsolutePathBuf>,
     pub log_dir: Option<AbsolutePathBuf>,
     pub model_catalog_json: Option<AbsolutePathBuf>,
-    pub check_for_update_on_startup: Option<bool>,
     pub allow_login_shell: Option<bool>,
     pub feedback: Option<FeedbackConfigToml>,
     pub allowed_approval_policies: Option<Vec<AskForApproval>>,
@@ -1095,7 +1092,6 @@ pub struct ConfigRequirementsWithSources {
     pub sqlite_home: Option<Sourced<AbsolutePathBuf>>,
     pub log_dir: Option<Sourced<AbsolutePathBuf>>,
     pub model_catalog_json: Option<Sourced<AbsolutePathBuf>>,
-    pub check_for_update_on_startup: Option<Sourced<bool>>,
     pub allow_login_shell: Option<Sourced<bool>>,
     pub feedback: Option<Sourced<FeedbackConfigToml>>,
     pub allowed_approval_policies: Option<Sourced<Vec<AskForApproval>>>,
@@ -1155,7 +1151,6 @@ impl ConfigRequirementsWithSources {
             sqlite_home: _,
             log_dir: _,
             model_catalog_json: _,
-            check_for_update_on_startup: _,
             allow_login_shell: _,
             feedback: _,
             allowed_approval_policies: _,
@@ -1210,7 +1205,6 @@ impl ConfigRequirementsWithSources {
                 sqlite_home,
                 log_dir,
                 model_catalog_json,
-                check_for_update_on_startup,
                 allow_login_shell,
                 feedback,
                 allowed_approval_policies,
@@ -1293,7 +1287,6 @@ impl ConfigRequirementsWithSources {
             sqlite_home,
             log_dir,
             model_catalog_json,
-            check_for_update_on_startup,
             allow_login_shell,
             feedback,
             allowed_approval_policies,
@@ -1334,7 +1327,6 @@ impl ConfigRequirementsWithSources {
             sqlite_home: sqlite_home.map(|sourced| sourced.value),
             log_dir: log_dir.map(|sourced| sourced.value),
             model_catalog_json: model_catalog_json.map(|sourced| sourced.value),
-            check_for_update_on_startup: check_for_update_on_startup.map(|sourced| sourced.value),
             allow_login_shell: allow_login_shell.map(|sourced| sourced.value),
             feedback: feedback.map(|sourced| sourced.value),
             allowed_approval_policies: allowed_approval_policies.map(|sourced| sourced.value),
@@ -1444,7 +1436,6 @@ impl ConfigRequirementsToml {
             && self.sqlite_home.is_none()
             && self.log_dir.is_none()
             && self.model_catalog_json.is_none()
-            && self.check_for_update_on_startup.is_none()
             && self.allow_login_shell.is_none()
             && self
                 .feedback
@@ -1541,7 +1532,6 @@ impl ConfigRequirementsToml {
         apply_exact!(sqlite_home);
         apply_exact!(log_dir);
         apply_exact!(model_catalog_json);
-        apply_exact!(check_for_update_on_startup);
         apply_exact!(allow_login_shell);
 
         if self
@@ -1569,18 +1559,13 @@ impl ConfigRequirementsToml {
 
     /// Returns the exact managed field affected by editing `segments`.
     pub fn exact_requirement_for_config_path(&self, segments: &[String]) -> Option<&'static str> {
-        let managed_fields: [(bool, &[&str], &'static str); 9] = [
+        let managed_fields: [(bool, &[&str], &'static str); 8] = [
             (self.sqlite_home.is_some(), &["sqlite_home"], "sqlite_home"),
             (self.log_dir.is_some(), &["log_dir"], "log_dir"),
             (
                 self.model_catalog_json.is_some(),
                 &["model_catalog_json"],
                 "model_catalog_json",
-            ),
-            (
-                self.check_for_update_on_startup.is_some(),
-                &["check_for_update_on_startup"],
-                "check_for_update_on_startup",
             ),
             (
                 self.allow_login_shell.is_some(),
@@ -1665,7 +1650,6 @@ impl TryFrom<ConfigRequirementsWithSources> for ConfigRequirements {
             sqlite_home,
             log_dir,
             model_catalog_json,
-            check_for_update_on_startup,
             allow_login_shell,
             feedback,
             allowed_approval_policies,
@@ -2029,7 +2013,6 @@ impl TryFrom<ConfigRequirementsWithSources> for ConfigRequirements {
             sqlite_home,
             log_dir,
             model_catalog_json,
-            check_for_update_on_startup,
             allow_login_shell,
             feedback,
             approval_policy,
@@ -2125,7 +2108,6 @@ mod tests {
             sqlite_home: Some(managed_path.clone()),
             log_dir: Some(managed_path.clone()),
             model_catalog_json: Some(managed_path),
-            check_for_update_on_startup: Some(false),
             allow_login_shell: Some(false),
             feedback: Some(FeedbackConfigToml {
                 enabled: Some(false),
@@ -2145,10 +2127,6 @@ mod tests {
             (&["sqlite_home"], Some("sqlite_home")),
             (&["log_dir"], Some("log_dir")),
             (&["model_catalog_json"], Some("model_catalog_json")),
-            (
-                &["check_for_update_on_startup"],
-                Some("check_for_update_on_startup"),
-            ),
             (&["allow_login_shell"], Some("allow_login_shell")),
             (&["feedback", "enabled"], Some("feedback.enabled")),
             (
@@ -2203,7 +2181,6 @@ mod tests {
             sqlite_home,
             log_dir,
             model_catalog_json,
-            check_for_update_on_startup,
             allow_login_shell,
             feedback,
             allowed_approval_policies,
@@ -2249,8 +2226,6 @@ mod tests {
             sqlite_home: sqlite_home.map(|value| Sourced::new(value, RequirementSource::Unknown)),
             log_dir: log_dir.map(|value| Sourced::new(value, RequirementSource::Unknown)),
             model_catalog_json: model_catalog_json
-                .map(|value| Sourced::new(value, RequirementSource::Unknown)),
-            check_for_update_on_startup: check_for_update_on_startup
                 .map(|value| Sourced::new(value, RequirementSource::Unknown)),
             allow_login_shell: allow_login_shell
                 .map(|value| Sourced::new(value, RequirementSource::Unknown)),
@@ -2769,7 +2744,6 @@ mod tests {
             sqlite_home: Some(sqlite_home.clone()),
             log_dir: Some(log_dir.clone()),
             model_catalog_json: Some(model_catalog_json.clone()),
-            check_for_update_on_startup: Some(false),
             allow_login_shell: Some(false),
             feedback: Some(feedback.clone()),
             allowed_approval_policies: Some(allowed_approval_policies.clone()),
@@ -2828,10 +2802,6 @@ mod tests {
                 sqlite_home: Some(Sourced::new(sqlite_home, source.clone())),
                 log_dir: Some(Sourced::new(log_dir, source.clone())),
                 model_catalog_json: Some(Sourced::new(model_catalog_json, source.clone())),
-                check_for_update_on_startup: Some(Sourced::new(
-                    /*value*/ false,
-                    source.clone(),
-                )),
                 allow_login_shell: Some(Sourced::new(/*value*/ false, source.clone())),
                 feedback: Some(Sourced::new(feedback, source.clone())),
                 allowed_approval_policies: Some(Sourced::new(
