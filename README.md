@@ -1,81 +1,55 @@
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
-
----
-
-## Quickstart
-
-### Installing and running Codex CLI
-
-Run the following on Mac or Linux to install Codex CLI:
+# Compile
 
 ```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
+git clone https://github.com/bfloat16/codex.git
+cd codex/codex-rs
+
+rustup component add rustfmt clippy
+cargo install --locked just
+cargo install --locked cargo-nextest
+
+# Windows
+.\scripts\build-windows.ps1
+
+# macOS or Linux
+bash ./scripts/build-unix.sh
 ```
 
-Run the following on Windows to install Codex CLI:
+# New Features
 
-```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
-```
+## A more capable terminal workspace
 
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
+- An owned full-screen terminal keeps the conversation viewport available for history navigation, mouse-wheel scrolling, text selection, and copy-friendly raw mode.
+- The persistent `/diff` panel docks beside the conversation, lists changed and untracked files, supports navigation and refresh, and preserves the selected file while the working tree changes.
+- File changes and tool output are grouped and folded independently, with live activity and clearer waiting states for long-running background terminals.
+- Permission mode, plan mode, model, and provider controls can be changed during an active session without losing the current conversation context. `/provider` switches among configured providers for the current session.
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
-```
+## Rewind and recovery
 
-```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
-```
+- A staged, Claude-style rewind picker lives below the composer and summarizes both conversation and file changes.
+- Prompt edits can be rolled back in place, while turn-scoped file checkpoints preview, restore, or discard changes with conflict and unavailable states reported explicitly.
+- Rewind handles completed, interrupted, partial, steered, paginated, and output-free turns; the selected transcript snapshot remains stable even when an Esc interruption arrives while rollback is pending.
+- Safety-buffered requests show progress and can offer one retry with a faster model by forking from the source thread.
 
-Codex CLI can also be installed via the following package managers:
+## Model lifecycle and context
 
-```shell
-# Install using npm
-npm install -g @openai/codex
-```
+- Model metadata and context-window defaults have been refreshed, including models with context windows up to one million tokens; the status line can show usage and remaining capacity.
+- Compaction is now explicit and observable, with local, remote v1, and remote v2 modes, lifecycle progress, token accounting, and model-aware fallback behavior.
+- Active turns can refresh runtime settings and switch providers, request retries use bounded budgets, and request progress reports bytes sent and received.
+- Environment metadata (platform, path convention, and shell flavor) is supplied to the model, and shell guidance adapts to Windows Git Bash and PowerShell.
+- Code Mode admits nested tool calls safely in parallel and applies per-cell wait backoff for long-running work.
+- Subagents start with fresh v2 contexts by default; parallel tools, unified-exec waits, background-terminal polling, and session shutdown checkpoints have more consistent lifecycle handling.
+- Restricted commands are approved before execution, MCP execution authority can switch without reconnecting, and hook discovery is confined to `CODEX_HOME`.
+- Project instructions accept `AGENTS.md` first and use `CLAUDE.md` as a built-in fallback. Unknown `-c` configuration keys are ignored so shared configuration can be reused safely.
 
-```shell
-# Install using Homebrew
-brew install --cask codex
-```
+## App Server and storage
 
-Then simply run `codex` to get started.
+- Threads can be reverted in place while preserving durable history and reload state.
+- App Server v2 exposes provider and request lifecycle notifications, configurable compaction, thread provider updates, and file-change read/restore/discard APIs.
+- A dedicated file-checkpoint store records create, update, and delete operations and reports which files are restorable, conflicting, or unavailable.
+- Canonical file-change history is reconstructed correctly after reload, and generated JSON/TypeScript schemas stay aligned with the protocol.
 
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
-
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
-
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
-
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+# Special Thanks
+ - [TheSmallHanCat](https://github.com/TheSmallHanCat)
+ - [Cometix Codex](https://linux.do/t/topic/1481797)
+ - [LINUX DO](https://linux.do/)
