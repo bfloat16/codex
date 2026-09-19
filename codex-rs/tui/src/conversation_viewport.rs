@@ -32,6 +32,8 @@ use crate::tui::MouseScrollDirection;
 mod file_changes;
 mod tool_groups;
 
+pub(crate) use tool_groups::summary_text_style;
+
 pub(crate) struct ConversationViewport {
     content: PagerContent,
     cells: Vec<Arc<dyn HistoryCell>>,

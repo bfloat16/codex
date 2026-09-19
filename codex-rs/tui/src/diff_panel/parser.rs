@@ -55,7 +55,15 @@ pub(super) fn parse_git_diff(text: &str) -> Vec<DiffPanelFile> {
 }
 
 pub(super) fn paths_match(left: &Path, right: &Path) -> bool {
-    normalize_path(left) == normalize_path(right)
+    let left = normalize_path(left);
+    let right = normalize_path(right);
+    left == right
+        || left
+            .strip_suffix(&right)
+            .is_some_and(|prefix| prefix.ends_with('/'))
+        || right
+            .strip_suffix(&left)
+            .is_some_and(|prefix| prefix.ends_with('/'))
 }
 
 fn normalize_path(path: &Path) -> String {

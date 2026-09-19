@@ -12,7 +12,6 @@ use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -22,12 +21,14 @@ use std::path::PathBuf;
 pub(crate) const MIN_DIFF_PANEL_TERMINAL_WIDTH: u16 = 110;
 const MAX_VISIBLE_FILES: usize = 8;
 const BODY_SCROLL_ROWS: usize = 3;
+const PANEL_BACKGROUND_ALPHA: f32 = 0.06;
 
 mod parser;
 mod render;
 
 use parser::parse_git_diff;
 use parser::paths_match;
+pub(crate) use render::DIFF_PANEL_GAP;
 pub(crate) use render::diff_panel_width;
 use render::summary_line;
 
@@ -37,6 +38,8 @@ pub(crate) struct DiffPanel {
     selected_file: Option<usize>,
     file_list_start: usize,
     body_scroll: usize,
+    hovered_file: Option<usize>,
+    close_hovered: bool,
     revision: u64,
     layout_cache: Option<DiffPanelLayoutCache>,
     close_area: Rect,
@@ -92,6 +95,8 @@ impl DiffPanel {
             selected_file: None,
             file_list_start: 0,
             body_scroll: 0,
+            hovered_file: None,
+            close_hovered: false,
             revision: 0,
             layout_cache: None,
             close_area: Rect::default(),
@@ -102,25 +107,64 @@ impl DiffPanel {
     }
 
     pub(crate) fn set_result(&mut self, result: Result<(bool, String), String>) {
+        if result.is_err() && matches!(&self.content, DiffPanelContent::Ready(_)) {
+            return;
+        }
+        let previous_selected_file = self.selected_file;
+        let selected_path = previous_selected_file
+            .and_then(|index| self.files()?.get(index))
+            .map(|file| file.path.clone());
+        let hovered_path = self
+            .hovered_file
+            .and_then(|index| self.files()?.get(index))
+            .map(|file| file.path.clone());
+        let body_width = self.body_area.width.max(1);
+        let selected_relative_scroll = previous_selected_file
+            .and_then(|index| {
+                self.body_layout(body_width)
+                    .and_then(|layout| layout.file_offsets.get(index))
+                    .copied()
+            })
+            .map(|offset| self.body_scroll.saturating_sub(offset))
+            .unwrap_or(0);
         self.content = match result {
             Ok((false, _)) => DiffPanelContent::NotRepository,
             Ok((true, text)) => DiffPanelContent::Ready(parse_git_diff(&text)),
             Err(error) => DiffPanelContent::Failed(error),
         };
-        self.selected_file = self
-            .files()
-            .is_some_and(|files| !files.is_empty())
-            .then_some(0);
-        self.file_list_start = 0;
-        self.body_scroll = 0;
         self.revision = self.revision.wrapping_add(1);
         self.layout_cache = None;
-    }
-
-    pub(crate) fn set_loading(&mut self) {
-        self.content = DiffPanelContent::Loading;
-        self.revision = self.revision.wrapping_add(1);
-        self.layout_cache = None;
+        let Some(files) = self.files() else {
+            self.selected_file = None;
+            self.file_list_start = 0;
+            self.body_scroll = 0;
+            self.hovered_file = None;
+            return;
+        };
+        if files.is_empty() {
+            self.selected_file = None;
+            self.file_list_start = 0;
+            self.body_scroll = 0;
+            self.hovered_file = None;
+            return;
+        }
+        let selected_file = selected_path
+            .as_ref()
+            .and_then(|path| files.iter().position(|file| file.path == *path))
+            .or_else(|| previous_selected_file.map(|index| index.min(files.len() - 1)))
+            .unwrap_or(0);
+        let hovered_file = hovered_path
+            .as_ref()
+            .and_then(|path| files.iter().position(|file| file.path == *path));
+        self.selected_file = Some(selected_file);
+        self.hovered_file = hovered_file;
+        self.ensure_selected_file_visible(selected_file);
+        self.body_scroll = self
+            .body_layout(body_width)
+            .and_then(|layout| layout.file_offsets.get(selected_file))
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(selected_relative_scroll);
     }
 
     pub(crate) fn jump_to_path(&mut self, path: &Path) -> bool {
@@ -147,9 +191,20 @@ impl DiffPanel {
         }
 
         Clear.render(area, buffer);
-        let block = Block::default()
-            .borders(Borders::LEFT)
-            .border_style(Style::new().dim());
+        let panel_style =
+            crate::terminal_palette::default_bg().map_or_else(Style::new, |background| {
+                let overlay = if crate::color::is_light(background) {
+                    (0, 0, 0)
+                } else {
+                    (255, 255, 255)
+                };
+                Style::new().bg(crate::terminal_palette::best_color(crate::color::blend(
+                    overlay,
+                    background,
+                    PANEL_BACKGROUND_ALPHA,
+                )))
+            });
+        let block = Block::default().style(panel_style);
         let inner = block.inner(area);
         block.render(area, buffer);
         if inner.is_empty() {
@@ -177,18 +232,25 @@ impl DiffPanel {
         if self.close_area.contains(position) {
             return DiffPanelClick::Close;
         }
-        if self.file_list_content_area.contains(position) {
-            let row = usize::from(position.y.saturating_sub(self.file_list_content_area.y));
-            let index = self.file_list_start.saturating_add(row);
-            if self.files().is_some_and(|files| index < files.len()) {
-                self.jump_to_file(index);
-                return DiffPanelClick::Handled;
-            }
+        if let Some(index) = self.file_index_at(position) {
+            self.jump_to_file(index);
+            return DiffPanelClick::Handled;
         }
         if self.body_area.contains(position) {
             return DiffPanelClick::Handled;
         }
         DiffPanelClick::Ignored
+    }
+
+    pub(crate) fn handle_mouse_move(&mut self, position: Position) -> bool {
+        let close_hovered = self.close_area.contains(position);
+        let hovered_file = self.file_index_at(position);
+        if self.close_hovered == close_hovered && self.hovered_file == hovered_file {
+            return false;
+        }
+        self.close_hovered = close_hovered;
+        self.hovered_file = hovered_file;
+        true
     }
 
     pub(crate) fn handle_mouse_scroll(
@@ -216,6 +278,7 @@ impl DiffPanel {
                     .saturating_add(BODY_SCROLL_ROWS)
                     .min(max_scroll),
             };
+            self.sync_selected_file_to_body_scroll();
             return true;
         }
         false
@@ -225,20 +288,28 @@ impl DiffPanel {
         let summary = summary_line(self.files());
         let summary_area = Rect::new(
             area.x.saturating_add(1),
-            area.y,
+            area.y.saturating_add(1),
             area.width.saturating_sub(3),
             1,
         );
         Paragraph::new(summary).render(summary_area, buffer);
-        self.close_area = Rect::new(area.right().saturating_sub(2), area.y, 2.min(area.width), 1);
-        Paragraph::new("×".dim()).render(self.close_area, buffer);
+        self.close_area = Rect::new(
+            area.right().saturating_sub(3),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(2).min(1),
+            area.height.saturating_sub(1).min(1),
+        );
+        let close = Line::from("✕").style(crate::conversation_viewport::summary_text_style(
+            self.close_hovered,
+        ));
+        Paragraph::new(close).render(self.close_area, buffer);
     }
 
     fn render_ready(&mut self, area: Rect, buffer: &mut Buffer) {
         let files_len = self.files().map_or(0, <[DiffPanelFile]>::len);
         let base_area = Rect::new(
             area.x.saturating_add(1),
-            area.y.saturating_add(1),
+            area.y.saturating_add(2),
             area.width.saturating_sub(2),
             1,
         );
@@ -249,7 +320,7 @@ impl DiffPanel {
             return;
         }
 
-        let available_list_rows = usize::from(area.height.saturating_sub(7)).max(1);
+        let available_list_rows = usize::from(area.height.saturating_sub(8)).max(1);
         let visible_files = files_len
             .min(MAX_VISIBLE_FILES)
             .min(available_list_rows.saturating_sub(2).max(1));
@@ -263,7 +334,7 @@ impl DiffPanel {
         let list_height = u16::try_from(list_rows).unwrap_or(u16::MAX);
         self.file_list_area = Rect::new(
             area.x.saturating_add(1),
-            area.y.saturating_add(3),
+            area.y.saturating_add(4),
             area.width.saturating_sub(2),
             list_height,
         );
@@ -293,6 +364,23 @@ impl DiffPanel {
             .unwrap_or_default();
         let max_scroll = lines.len().saturating_sub(usize::from(body_height));
         self.body_scroll = self.body_scroll.min(max_scroll);
+        for (row, line) in lines
+            .iter()
+            .skip(self.body_scroll)
+            .take(usize::from(body_height))
+            .enumerate()
+        {
+            let Some(background) = line.style.bg else {
+                continue;
+            };
+            let Ok(row) = u16::try_from(row) else {
+                break;
+            };
+            let y = self.body_area.y.saturating_add(row);
+            for x in area.x..area.right() {
+                buffer[(x, y)].set_bg(background);
+            }
+        }
         Paragraph::new(lines)
             .scroll((u16::try_from(self.body_scroll).unwrap_or(u16::MAX), 0))
             .render(self.body_area, buffer);
@@ -321,11 +409,9 @@ impl DiffPanel {
         {
             let index = self.file_list_start.saturating_add(row);
             let stats = format!("+{} -{}", file.added, file.removed);
-            let prefix = if self.selected_file == Some(index) {
-                "› "
-            } else {
-                "  "
-            };
+            let selected = self.selected_file == Some(index);
+            let hovered = self.hovered_file == Some(index);
+            let prefix = if selected { "▶ " } else { "  " };
             let reserved = display_width(prefix).saturating_add(display_width(&stats));
             let path_width = usize::from(self.file_list_area.width).saturating_sub(reserved);
             let path = truncate_line_with_ellipsis_if_overflow(
@@ -338,15 +424,21 @@ impl DiffPanel {
                 .map(|span| span.content.into_owned())
                 .collect::<String>();
             let padding = " ".repeat(path_width.saturating_sub(display_width(&path_text)));
+            let prefix = if selected {
+                prefix.bold().cyan()
+            } else {
+                prefix.into()
+            };
             let line: Line<'static> = vec![
-                prefix.into(),
-                path_text.dim(),
+                prefix,
+                path_text.into(),
                 padding.into(),
                 format!("+{}", file.added).green(),
                 " ".into(),
                 format!("-{}", file.removed).red(),
             ]
             .into();
+            let line = line.style(crate::conversation_viewport::summary_text_style(hovered));
             let row_area = Rect::new(
                 self.file_list_content_area.x,
                 self.file_list_content_area
@@ -455,6 +547,43 @@ impl DiffPanel {
             return;
         }
         self.selected_file = Some(index);
+        self.ensure_selected_file_visible(index);
+        let body_width = self.body_area.width.max(1);
+        self.body_scroll = self
+            .body_layout(body_width)
+            .and_then(|layout| layout.file_offsets.get(index))
+            .copied()
+            .unwrap_or(0);
+    }
+
+    fn file_index_at(&self, position: Position) -> Option<usize> {
+        if !self.file_list_content_area.contains(position) {
+            return None;
+        }
+        let row = usize::from(position.y.saturating_sub(self.file_list_content_area.y));
+        let index = self.file_list_start.saturating_add(row);
+        self.files()
+            .is_some_and(|files| index < files.len())
+            .then_some(index)
+    }
+
+    fn sync_selected_file_to_body_scroll(&mut self) {
+        let body_scroll = self.body_scroll;
+        let selected_file = self
+            .body_layout(self.body_area.width.max(1))
+            .and_then(|layout| {
+                layout
+                    .file_offsets
+                    .partition_point(|offset| *offset <= body_scroll)
+                    .checked_sub(1)
+            });
+        if let Some(selected_file) = selected_file {
+            self.selected_file = Some(selected_file);
+            self.ensure_selected_file_visible(selected_file);
+        }
+    }
+
+    fn ensure_selected_file_visible(&mut self, index: usize) {
         let visible_files =
             usize::from(self.file_list_content_area.height).clamp(1, MAX_VISIBLE_FILES);
         if index < self.file_list_start {
@@ -462,12 +591,6 @@ impl DiffPanel {
         } else if index >= self.file_list_start.saturating_add(visible_files) {
             self.file_list_start = index.saturating_sub(visible_files.saturating_sub(1));
         }
-        let body_width = self.body_area.width.max(1);
-        self.body_scroll = self
-            .body_layout(body_width)
-            .and_then(|layout| layout.file_offsets.get(index))
-            .copied()
-            .unwrap_or(0);
     }
 
     fn max_body_scroll(&mut self) -> usize {

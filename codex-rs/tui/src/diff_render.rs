@@ -402,7 +402,7 @@ fn row_for_change<'a>(path: &'a Path, change: &'a FileChange) -> Row<'a> {
     }
 }
 
-fn line_counts(change: &FileChange) -> (usize, usize) {
+pub(crate) fn line_counts(change: &FileChange) -> (usize, usize) {
     match change {
         FileChange::Add { content } => (content.lines().count(), 0),
         FileChange::Delete { content } => (0, content.lines().count()),

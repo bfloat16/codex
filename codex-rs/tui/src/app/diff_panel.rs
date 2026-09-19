@@ -30,9 +30,11 @@ impl App {
             ));
             return;
         };
-        let conversation_width = self
-            .chat_widget
-            .history_wrap_width(terminal_width.saturating_sub(panel_width));
+        let conversation_width = self.chat_widget.history_wrap_width(
+            terminal_width
+                .saturating_sub(panel_width)
+                .saturating_sub(crate::diff_panel::DIFF_PANEL_GAP),
+        );
         let Some(generation) = screen.open_diff_panel(terminal_width, conversation_width) else {
             return;
         };
@@ -97,14 +99,17 @@ impl App {
         let runner = self.workspace_command_runner.clone();
         let cwd = self.chat_widget.current_working_directory().to_path_buf();
         tokio::spawn(async move {
-            let color = if panel_generation.is_some() {
-                crate::get_git_diff::GitDiffColor::Never
-            } else {
-                crate::get_git_diff::GitDiffColor::Always
-            };
             let result = match runner {
+                Some(runner) if panel_generation.is_some() => {
+                    crate::get_git_diff::get_git_diff_for_panel(runner.as_ref(), &cwd).await
+                }
                 Some(runner) => {
-                    crate::get_git_diff::get_git_diff(runner.as_ref(), &cwd, color).await
+                    crate::get_git_diff::get_git_diff(
+                        runner.as_ref(),
+                        &cwd,
+                        crate::get_git_diff::GitDiffColor::Always,
+                    )
+                    .await
                 }
                 None => Err("workspace command runner unavailable".to_string()),
             };

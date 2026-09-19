@@ -120,7 +120,15 @@ impl OwnedScreen {
             .as_ref()
             .and_then(|_| diff_panel_width(area.width))
             .unwrap_or(0);
-        let conversation_slot_width = area.width.saturating_sub(panel_width);
+        let panel_gap = if panel_width > 0 {
+            crate::diff_panel::DIFF_PANEL_GAP
+        } else {
+            0
+        };
+        let conversation_slot_width = area
+            .width
+            .saturating_sub(panel_width)
+            .saturating_sub(panel_gap);
         let conversation_area = Rect::new(
             area.x,
             area.y,
@@ -154,7 +162,11 @@ impl OwnedScreen {
             |width| chat_widget.active_cell_display(width),
         );
         self.viewport.render(conversation_area, buffer);
-        Self::extend_conversation_backgrounds(conversation_area, diff_panel_area.x, buffer);
+        Self::extend_conversation_backgrounds(
+            conversation_area,
+            diff_panel_area.x.saturating_sub(panel_gap),
+            buffer,
+        );
         if !self.viewport.is_following_bottom() {
             Self::render_jump_to_bottom_hint(conversation_area, buffer);
         }
@@ -220,7 +232,22 @@ impl OwnedScreen {
         let position = Position::new(event.column, event.row);
         match event.kind {
             MouseInteractionKind::Move => {
-                if self.last_diff_panel_area.contains(position) {
+                if let Some(panel) = self.diff_panel.as_mut() {
+                    if self.last_diff_panel_area.contains(position) {
+                        return if panel.handle_mouse_move(position) {
+                            OwnedScreenMouseAction::Redraw
+                        } else {
+                            OwnedScreenMouseAction::Ignored
+                        };
+                    }
+                    let panel_changed = panel.handle_mouse_move(position);
+                    if self
+                        .viewport
+                        .handle_mouse_move(self.last_conversation_area, position)
+                        || panel_changed
+                    {
+                        return OwnedScreenMouseAction::Redraw;
+                    }
                     return OwnedScreenMouseAction::Ignored;
                 }
                 if self
@@ -241,6 +268,17 @@ impl OwnedScreen {
                         DiffPanelClick::Handled => OwnedScreenMouseAction::Redraw,
                         DiffPanelClick::Close => OwnedScreenMouseAction::CloseDiffPanel,
                     };
+                }
+                if self.diff_panel.is_some()
+                    && let Some(path) = self
+                        .viewport
+                        .file_change_path_at(self.last_conversation_area, position)
+                    && self
+                        .diff_panel
+                        .as_mut()
+                        .is_some_and(|panel| panel.jump_to_path(path.as_path()))
+                {
+                    return OwnedScreenMouseAction::Redraw;
                 }
                 if self.selection.left_down(self.last_selection_area, position) {
                     OwnedScreenMouseAction::Redraw
@@ -406,9 +444,6 @@ impl OwnedScreen {
 
     pub(super) fn begin_diff_panel_refresh(&mut self) -> u64 {
         self.diff_panel_generation = self.diff_panel_generation.wrapping_add(1);
-        if let Some(panel) = self.diff_panel.as_mut() {
-            panel.set_loading();
-        }
         self.diff_panel_generation
     }
 

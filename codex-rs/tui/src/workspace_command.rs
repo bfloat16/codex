@@ -152,12 +152,36 @@ pub(crate) trait WorkspaceCommandExecutor: Send + Sync {
 #[derive(Clone)]
 pub(crate) struct AppServerWorkspaceCommandRunner {
     request_handle: AppServerRequestHandle,
+    uses_windows_output_limits: bool,
 }
 
 impl AppServerWorkspaceCommandRunner {
     /// Creates a runner from an app-server request handle owned by the current TUI session.
-    pub(crate) fn new(request_handle: AppServerRequestHandle) -> Self {
-        Self { request_handle }
+    pub(crate) fn new(
+        request_handle: AppServerRequestHandle,
+        app_server_platform_os: Option<&str>,
+    ) -> Self {
+        Self {
+            request_handle,
+            uses_windows_output_limits: app_server_platform_os == Some("windows"),
+        }
+    }
+
+    fn output_cap_params(
+        uses_windows_output_limits: bool,
+        command: &WorkspaceCommand,
+    ) -> (Option<usize>, bool) {
+        if uses_windows_output_limits {
+            // Restricted-token command execution on Windows currently supports only the
+            // app-server default cap. Omitting the custom policy keeps workspace probes and
+            // `/diff` compatible without changing execution on Unix app servers.
+            (None, false)
+        } else {
+            (
+                (!command.disable_output_cap).then_some(command.output_bytes_cap),
+                command.disable_output_cap,
+            )
+        }
     }
 }
 
@@ -175,6 +199,8 @@ impl WorkspaceCommandExecutor for AppServerWorkspaceCommandRunner {
     > {
         Box::pin(async move {
             let timeout_ms = i64::try_from(command.timeout.as_millis()).unwrap_or(i64::MAX);
+            let (output_bytes_cap, disable_output_cap) =
+                Self::output_cap_params(self.uses_windows_output_limits, &command);
             let env = if command.env.is_empty() {
                 None
             } else {
@@ -190,9 +216,8 @@ impl WorkspaceCommandExecutor for AppServerWorkspaceCommandRunner {
                         tty: false,
                         stream_stdin: false,
                         stream_stdout_stderr: false,
-                        output_bytes_cap: (!command.disable_output_cap)
-                            .then_some(command.output_bytes_cap),
-                        disable_output_cap: command.disable_output_cap,
+                        output_bytes_cap,
+                        disable_output_cap,
                         disable_timeout: false,
                         timeout_ms: Some(timeout_ms),
                         cwd: command.cwd,
@@ -213,3 +238,7 @@ impl WorkspaceCommandExecutor for AppServerWorkspaceCommandRunner {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "workspace_command_tests.rs"]
+mod tests;

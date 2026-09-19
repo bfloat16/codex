@@ -16,12 +16,14 @@ use codex_git_utils::FsmonitorProbeRunner;
 use codex_git_utils::detect_fsmonitor_override;
 
 const DIFF_COMMAND_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
+const MAX_PANEL_UNTRACKED_FILES: usize = 50;
 const DISABLE_HOOKS_CONFIG: &str = if cfg!(windows) {
     "core.hooksPath=NUL"
 } else {
     "core.hooksPath=/dev/null"
 };
 const EXECUTABLE_FILTER_CONFIG_PATTERN: &str = r"^filter\..*\.(clean|process)$";
+const UNTRACKED_DIFF_ALIAS_CONFIG: &str = r#"alias.codex-diff=!f() { git diff "$@"; status=$?; if [ "$status" -eq 1 ]; then return 0; fi; return "$status"; }; f"#;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum GitDiffColor {
@@ -39,9 +41,14 @@ struct WorkspaceFsmonitorProbeRunner<'a> {
 
 impl FsmonitorProbeRunner for WorkspaceFsmonitorProbeRunner<'_> {
     async fn run_probe(&mut self, args: &[&str]) -> Option<Vec<u8>> {
-        let argv = ["git", "-c", codex_git_utils::SAFE_BARE_REPOSITORY_CONFIG]
-            .into_iter()
-            .chain(args.iter().copied());
+        let argv = [
+            "git",
+            "--no-optional-locks",
+            "-c",
+            codex_git_utils::SAFE_BARE_REPOSITORY_CONFIG,
+        ]
+        .into_iter()
+        .chain(args.iter().copied());
         let command = WorkspaceCommand::new(argv).cwd(self.cwd.to_path_buf());
         match self.runner.run(command).await {
             Ok(output) if output.success() => Some(output.stdout.into_bytes()),
@@ -59,14 +66,34 @@ pub(crate) async fn get_git_diff(
     cwd: &Path,
     color: GitDiffColor,
 ) -> Result<(bool, String), String> {
+    get_git_diff_with_options(runner, cwd, color, /*fast*/ false).await
+}
+
+pub(crate) async fn get_git_diff_for_panel(
+    runner: &dyn WorkspaceCommandExecutor,
+    cwd: &Path,
+) -> Result<(bool, String), String> {
+    get_git_diff_with_options(runner, cwd, GitDiffColor::Never, /*fast*/ true).await
+}
+
+async fn get_git_diff_with_options(
+    runner: &dyn WorkspaceCommandExecutor,
+    cwd: &Path,
+    color: GitDiffColor,
+    fast: bool,
+) -> Result<(bool, String), String> {
     // First check if we are inside a Git repository.
     if !inside_git_repo(runner, cwd).await? {
         return Ok((false, String::new()));
     }
 
     // Probe once per `/diff` and reuse the result for all subsequent Git commands.
-    let mut probe_runner = WorkspaceFsmonitorProbeRunner { runner, cwd };
-    let fsmonitor = detect_fsmonitor_override(&mut probe_runner).await;
+    let fsmonitor = if fast {
+        FsmonitorOverride::Disabled
+    } else {
+        let mut probe_runner = WorkspaceFsmonitorProbeRunner { runner, cwd };
+        detect_fsmonitor_override(&mut probe_runner).await
+    };
 
     // Keep `/diff` informational: repository configuration must not select executable diff helpers.
     let diff_config_overrides = diff_filter_config_overrides(runner, cwd, fsmonitor).await?;
@@ -94,43 +121,100 @@ pub(crate) async fn get_git_diff(
             runner,
             cwd,
             fsmonitor,
-            &["ls-files", "--others", "--exclude-standard"]
+            &["ls-files", "--others", "--exclude-standard", "--full-name"]
         ),
     );
     let tracked_diff = tracked_diff_res?;
     let untracked_output = untracked_output_res?;
-
-    let mut untracked_diff = String::new();
-    let null_device: &Path = if cfg!(windows) {
-        Path::new("NUL")
-    } else {
-        Path::new("/dev/null")
-    };
-
-    let null_path = null_device.to_str().unwrap_or("/dev/null");
-    for file in untracked_output
-        .split('\n')
+    let mut untracked_files = untracked_output
+        .lines()
         .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        let args = [
-            "diff",
-            "--no-textconv",
-            "--no-ext-diff",
-            "--submodule=short",
-            "--ignore-submodules=dirty",
-            color_arg,
-            "--no-index",
-            "--",
-            null_path,
-            file,
-        ];
-        let diff =
-            run_git_capture_diff(runner, cwd, fsmonitor, &diff_config_overrides, &args).await?;
-        untracked_diff.push_str(&diff);
+        .filter(|file| !file.is_empty())
+        .take(if fast {
+            MAX_PANEL_UNTRACKED_FILES
+        } else {
+            usize::MAX
+        });
+    let diff_config_overrides = &diff_config_overrides;
+    let mut untracked_diff = String::new();
+    while let Some(first) = untracked_files.next() {
+        let second = untracked_files.next();
+        let third = untracked_files.next();
+        let fourth = untracked_files.next();
+        let diffs = tokio::try_join!(
+            run_untracked_diff(
+                runner,
+                cwd,
+                fsmonitor,
+                diff_config_overrides,
+                color_arg,
+                Some(first),
+            ),
+            run_untracked_diff(
+                runner,
+                cwd,
+                fsmonitor,
+                diff_config_overrides,
+                color_arg,
+                second,
+            ),
+            run_untracked_diff(
+                runner,
+                cwd,
+                fsmonitor,
+                diff_config_overrides,
+                color_arg,
+                third,
+            ),
+            run_untracked_diff(
+                runner,
+                cwd,
+                fsmonitor,
+                diff_config_overrides,
+                color_arg,
+                fourth,
+            ),
+        )?;
+        for diff in [diffs.0, diffs.1, diffs.2, diffs.3].into_iter().flatten() {
+            untracked_diff.push_str(&diff);
+        }
     }
 
     Ok((true, format!("{tracked_diff}{untracked_diff}")))
+}
+
+fn null_device() -> &'static str {
+    if cfg!(windows) { "NUL" } else { "/dev/null" }
+}
+
+async fn run_untracked_diff(
+    runner: &dyn WorkspaceCommandExecutor,
+    cwd: &Path,
+    fsmonitor: FsmonitorOverride,
+    config_overrides: &[(String, String)],
+    color_arg: &str,
+    file: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(file) = file else {
+        return Ok(None);
+    };
+    let args = [
+        "-c",
+        UNTRACKED_DIFF_ALIAS_CONFIG,
+        "codex-diff",
+        "--no-textconv",
+        "--no-ext-diff",
+        "--submodule=short",
+        "--ignore-submodules=dirty",
+        color_arg,
+        "--no-index",
+        "--",
+        null_device(),
+        file,
+    ];
+    run_git_capture_diff(runner, cwd, fsmonitor, config_overrides, &args)
+        .await
+        .map(Some)
 }
 
 /// Helper that executes `git` with the given `args` and returns `stdout` as a
@@ -245,6 +329,7 @@ async fn run_git_command(
 ) -> Result<WorkspaceCommandOutput, String> {
     let argv = [
         "git",
+        "--no-optional-locks",
         "-c",
         codex_git_utils::SAFE_BARE_REPOSITORY_CONFIG,
         "-c",
@@ -367,7 +452,7 @@ mod tests {
             response(
                 git_command(
                     FsmonitorOverride::Disabled,
-                    &["ls-files", "--others", "--exclude-standard"],
+                    &["ls-files", "--others", "--exclude-standard", "--full-name"],
                 ),
                 /*exit_code*/ 0,
                 "new.txt\n",
@@ -376,7 +461,9 @@ mod tests {
                 git_command(
                     FsmonitorOverride::Disabled,
                     &[
-                        "diff",
+                        "-c",
+                        UNTRACKED_DIFF_ALIAS_CONFIG,
+                        "codex-diff",
                         "--no-textconv",
                         "--no-ext-diff",
                         "--submodule=short",
@@ -388,7 +475,7 @@ mod tests {
                         "new.txt",
                     ],
                 ),
-                /*exit_code*/ 1,
+                /*exit_code*/ 0,
                 "untracked\n",
             ),
         ]);
@@ -456,7 +543,7 @@ mod tests {
             response(
                 git_command(
                     FsmonitorOverride::BuiltIn,
-                    &["ls-files", "--others", "--exclude-standard"],
+                    &["ls-files", "--others", "--exclude-standard", "--full-name"],
                 ),
                 /*exit_code*/ 0,
                 "new.txt\n",
@@ -465,7 +552,9 @@ mod tests {
                 git_command(
                     FsmonitorOverride::BuiltIn,
                     &[
-                        "diff",
+                        "-c",
+                        UNTRACKED_DIFF_ALIAS_CONFIG,
+                        "codex-diff",
                         "--no-textconv",
                         "--no-ext-diff",
                         "--submodule=short",
@@ -477,7 +566,7 @@ mod tests {
                         "new.txt",
                     ],
                 ),
-                /*exit_code*/ 1,
+                /*exit_code*/ 0,
                 "untracked\n",
             ),
         ]);
@@ -486,6 +575,20 @@ mod tests {
 
         assert_eq!(result, Ok((true, "tracked\nuntracked\n".to_string())));
         assert_command_metadata(&runner.commands(), &cwd);
+    }
+
+    #[tokio::test]
+    async fn untracked_diffs_run_concurrently_and_preserve_listing_order() {
+        let runner = ConcurrentUntrackedRunner::default();
+        let cwd = PathBuf::from("/workspace");
+
+        let result = get_git_diff_for_panel(&runner, &cwd).await;
+
+        assert_eq!(result, Ok((true, "a\nb\n".to_string())));
+        assert_eq!(
+            runner.max_active.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
     }
 
     #[tokio::test]
@@ -537,7 +640,7 @@ mod tests {
             response(
                 git_command(
                     FsmonitorOverride::Disabled,
-                    &["ls-files", "--others", "--exclude-standard"],
+                    &["ls-files", "--others", "--exclude-standard", "--full-name"],
                 ),
                 /*exit_code*/ 0,
                 "",
@@ -548,6 +651,64 @@ mod tests {
 
         assert_eq!(result, Ok((true, "tracked\n".to_string())));
         assert_command_metadata(&runner.commands(), &cwd);
+    }
+
+    #[tokio::test]
+    async fn panel_diff_skips_fsmonitor_probes() {
+        let cwd = PathBuf::from("/workspace");
+        let runner = FakeRunner::new(vec![
+            response(
+                git_command(
+                    FsmonitorOverride::Disabled,
+                    &["rev-parse", "--is-inside-work-tree"],
+                ),
+                /*exit_code*/ 0,
+                "true\n",
+            ),
+            response(
+                git_command(
+                    FsmonitorOverride::Disabled,
+                    &[
+                        "config",
+                        "--null",
+                        "--name-only",
+                        "--get-regexp",
+                        EXECUTABLE_FILTER_CONFIG_PATTERN,
+                    ],
+                ),
+                /*exit_code*/ 1,
+                "",
+            ),
+            response(
+                git_command(
+                    FsmonitorOverride::Disabled,
+                    &[
+                        "diff",
+                        "--no-textconv",
+                        "--no-ext-diff",
+                        "--submodule=short",
+                        "--ignore-submodules=dirty",
+                        "--no-color",
+                    ],
+                ),
+                /*exit_code*/ 1,
+                "tracked\n",
+            ),
+            response(
+                git_command(
+                    FsmonitorOverride::Disabled,
+                    &["ls-files", "--others", "--exclude-standard", "--full-name"],
+                ),
+                /*exit_code*/ 0,
+                "",
+            ),
+        ]);
+
+        assert_eq!(
+            get_git_diff_for_panel(&runner, &cwd).await,
+            Ok((true, "tracked\n".to_string()))
+        );
+        assert_eq!(runner.commands().len(), 4);
     }
 
     #[tokio::test]
@@ -599,7 +760,7 @@ mod tests {
             response(
                 git_command(
                     FsmonitorOverride::Disabled,
-                    &["ls-files", "--others", "--exclude-standard"],
+                    &["ls-files", "--others", "--exclude-standard", "--full-name"],
                 ),
                 /*exit_code*/ 0,
                 "",
@@ -760,6 +921,7 @@ mod tests {
     fn git_command(fsmonitor: FsmonitorOverride, args: &[&str]) -> Vec<String> {
         [
             "git",
+            "--no-optional-locks",
             "-c",
             codex_git_utils::SAFE_BARE_REPOSITORY_CONFIG,
             "-c",
@@ -774,11 +936,16 @@ mod tests {
     }
 
     fn git_probe_command(args: &[&str]) -> Vec<String> {
-        ["git", "-c", codex_git_utils::SAFE_BARE_REPOSITORY_CONFIG]
-            .into_iter()
-            .chain(args.iter().copied())
-            .map(str::to_string)
-            .collect()
+        [
+            "git",
+            "--no-optional-locks",
+            "-c",
+            codex_git_utils::SAFE_BARE_REPOSITORY_CONFIG,
+        ]
+        .into_iter()
+        .chain(args.iter().copied())
+        .map(str::to_string)
+        .collect()
     }
 
     fn filter_override_env(driver: &str) -> HashMap<String, Option<String>> {
@@ -848,7 +1015,7 @@ mod tests {
         for command in commands {
             assert_eq!(command.cwd.as_deref(), Some(cwd));
             if matches!(
-                command.argv.get(3).map(String::as_str),
+                command.argv.get(4).map(String::as_str),
                 Some("config" | "version")
             ) {
                 assert_eq!(command.env, HashMap::new());
@@ -870,6 +1037,68 @@ mod tests {
     struct FakeRunner {
         responses: Mutex<VecDeque<FakeResponse>>,
         commands: Mutex<Vec<WorkspaceCommand>>,
+    }
+
+    #[derive(Default)]
+    struct ConcurrentUntrackedRunner {
+        active: std::sync::atomic::AtomicUsize,
+        max_active: std::sync::atomic::AtomicUsize,
+    }
+
+    impl WorkspaceCommandExecutor for ConcurrentUntrackedRunner {
+        fn run(
+            &self,
+            command: WorkspaceCommand,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<WorkspaceCommandOutput, WorkspaceCommandError>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async move {
+                let output = if command.argv.iter().any(|arg| arg == "rev-parse") {
+                    response_output(/*exit_code*/ 0, "true\n")
+                } else if command.argv.iter().any(|arg| arg == "config") {
+                    response_output(/*exit_code*/ 1, "")
+                } else if command.argv.iter().any(|arg| arg == "ls-files") {
+                    response_output(/*exit_code*/ 0, "a.txt\nb.txt\n")
+                } else if command.argv.last().is_some_and(|arg| arg == "a.txt") {
+                    let active = self
+                        .active
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                        .saturating_add(1);
+                    self.max_active
+                        .fetch_max(active, std::sync::atomic::Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    self.active
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    response_output(/*exit_code*/ 0, "a\n")
+                } else if command.argv.last().is_some_and(|arg| arg == "b.txt") {
+                    let active = self
+                        .active
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                        .saturating_add(1);
+                    self.max_active
+                        .fetch_max(active, std::sync::atomic::Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    self.active
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    response_output(/*exit_code*/ 0, "b\n")
+                } else {
+                    response_output(/*exit_code*/ 0, "")
+                };
+                Ok(output)
+            })
+        }
+    }
+
+    fn response_output(exit_code: i32, stdout: &str) -> WorkspaceCommandOutput {
+        WorkspaceCommandOutput {
+            exit_code,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+        }
     }
 
     impl FakeRunner {

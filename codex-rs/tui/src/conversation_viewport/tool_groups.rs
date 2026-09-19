@@ -559,7 +559,7 @@ impl Renderable for ToolActivityGroupRenderable {
     }
 }
 
-pub(super) fn summary_text_style(hovered: bool) -> Style {
+pub(crate) fn summary_text_style(hovered: bool) -> Style {
     let alpha = if hovered {
         HOVERED_SUMMARY_TEXT_ALPHA
     } else {

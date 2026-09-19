@@ -276,19 +276,19 @@ async fn diff_panel_collapses_locks_and_navigates_file_changes() {
 
     let panel_width = crate::diff_panel::diff_panel_width(/*terminal_width*/ 120)
         .expect("wide terminal supports panel");
-    let conversation_width = chat_widget.history_wrap_width(120_u16.saturating_sub(panel_width));
+    let conversation_width = chat_widget.history_wrap_width(
+        120_u16
+            .saturating_sub(panel_width)
+            .saturating_sub(crate::diff_panel::DIFF_PANEL_GAP),
+    );
+    let panel_diff =
+        "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n\
+         diff --git a/src/b.rs b/src/b.rs\n--- a/src/b.rs\n+++ b/src/b.rs\n@@ -1 +1 @@\n-before\n+after\n"
+            .to_string();
     let generation = screen
         .open_diff_panel(/*terminal_width*/ 120, conversation_width)
         .expect("open diff panel");
-    assert!(screen.apply_diff_panel_result(
-        generation,
-        Ok((
-            true,
-            "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n\
-             diff --git a/src/b.rs b/src/b.rs\n--- a/src/b.rs\n+++ b/src/b.rs\n@@ -1 +1 @@\n-before\n+after\n"
-                .to_string(),
-        )),
-    ));
+    assert!(screen.apply_diff_panel_result(generation, Ok((true, panel_diff.clone())),));
     render(&mut screen, &mut terminal);
     let opened = normalized_backend_snapshot(terminal.backend());
 
@@ -306,10 +306,17 @@ async fn diff_panel_collapses_locks_and_navigates_file_changes() {
             column: 4,
             row: 2,
         }),
-        OwnedScreenMouseAction::Redraw,
+        OwnedScreenMouseAction::Redraw | OwnedScreenMouseAction::Ignored,
     ));
     render(&mut screen, &mut terminal);
     let jumped = normalized_backend_snapshot(terminal.backend());
+
+    let refresh_generation = screen.begin_diff_panel_refresh();
+    render(&mut screen, &mut terminal);
+    assert_eq!(normalized_backend_snapshot(terminal.backend()), jumped);
+    assert!(screen.apply_diff_panel_result(refresh_generation, Ok((true, panel_diff)),));
+    render(&mut screen, &mut terminal);
+    assert_eq!(normalized_backend_snapshot(terminal.backend()), jumped);
 
     screen.close_diff_panel();
     assert!(screen.viewport.handle_left_click(
