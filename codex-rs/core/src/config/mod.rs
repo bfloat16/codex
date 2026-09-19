@@ -117,6 +117,7 @@ use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::openai_models::required_provider_id;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::NetworkSandboxPolicy;
@@ -1621,6 +1622,24 @@ impl Config {
             personality: self.personality,
             model_catalog: self.model_catalog.clone(),
         }
+    }
+
+    pub(crate) fn apply_required_model_provider(&mut self, model: &str) -> Result<(), String> {
+        let Some(required_provider_id) = required_provider_id(model) else {
+            return Ok(());
+        };
+        let provider = self
+            .model_providers
+            .get(required_provider_id)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "Model provider `{required_provider_id}` required by model `{model}` was not found"
+                )
+            })?;
+        self.model_provider_id = required_provider_id.to_string();
+        self.model_provider = provider;
+        Ok(())
     }
 
     /// Returns auth routing resolved from the effective feature configuration.
@@ -3721,7 +3740,7 @@ impl Config {
             .clone()
             .filter(|value| !value.is_empty());
 
-        let model_provider_id = model_provider
+        let mut model_provider_id = model_provider
             .or_else(|| config_layer_stack.effective_user_config()
             .and_then(|config| {
                 config
@@ -3742,7 +3761,7 @@ impl Config {
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
-        let model_provider = model_providers
+        let mut model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
                 let message = if model_provider_id == LEGACY_OLLAMA_CHAT_PROVIDER_ID {
@@ -3886,6 +3905,18 @@ impl Config {
         let forced_login_method = cfg.forced_login_method;
 
         let model = model.or(cfg.model);
+        if let Some(required_provider_id) = model.as_deref().and_then(required_provider_id) {
+            model_provider_id = required_provider_id.to_string();
+            model_provider = model_providers
+                .get(required_provider_id)
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("Model provider `{required_provider_id}` required by model `{}` was not found", model.as_deref().unwrap_or_default()),
+                    )
+                })?
+                .clone();
+        }
         let notices = cfg.notice.unwrap_or_default();
         let service_tier = match service_tier_override {
             Some(Some(service_tier)) => Some(service_tier),

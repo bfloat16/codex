@@ -118,8 +118,10 @@ use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::openai_models::DEEPSEEK_PROVIDER_ID;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
+use codex_protocol::openai_models::required_provider_id;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::FileSystemSandboxPolicyContext;
 use codex_protocol::permissions::NetworkSandboxPolicy;
@@ -1907,10 +1909,56 @@ impl Session {
         state.session_configuration.provider.info().clone()
     }
 
-    pub(crate) async fn resolve_model_provider_update(
+    pub(crate) async fn resolve_model_provider_update_for_model(
         &self,
-        model_provider_id: String,
-    ) -> ConstraintResult<session::SessionModelProviderUpdate> {
+        model: Option<&str>,
+        requested_model_provider_id: Option<String>,
+    ) -> ConstraintResult<Option<session::SessionModelProviderUpdate>> {
+        let model_provider_id = model
+            .and_then(required_provider_id)
+            .map(str::to_string)
+            .or(requested_model_provider_id);
+        if model_provider_id.is_none() && model.is_some() {
+            let provider_update = {
+                let state = self.state.lock().await;
+                let config = &state.session_configuration.original_config_do_not_use;
+                if config.model_provider_id == DEEPSEEK_PROVIDER_ID {
+                    let configured_provider_id = config
+                        .config_layer_stack
+                        .effective_user_config()
+                        .and_then(|config| {
+                            config
+                                .get("model_provider")
+                                .and_then(toml::Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_else(|| "openai".to_string());
+                    if configured_provider_id == DEEPSEEK_PROVIDER_ID {
+                        None
+                    } else {
+                        config
+                            .model_providers
+                            .get(&configured_provider_id)
+                            .cloned()
+                            .map(|provider_info| (configured_provider_id, provider_info))
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some((model_provider_id, provider_info)) = provider_update {
+                return Ok(Some(session::SessionModelProviderUpdate {
+                    id: model_provider_id,
+                    provider: create_model_provider(
+                        provider_info,
+                        Some(Arc::clone(&self.services.auth_manager)),
+                    ),
+                }));
+            }
+        }
+        let Some(model_provider_id) = model_provider_id else {
+            return Ok(None);
+        };
         let (provider_info, allowed_provider_ids) = {
             let state = self.state.lock().await;
             let config = &state.session_configuration.original_config_do_not_use;
@@ -1941,13 +1989,13 @@ impl Session {
                 requirement_source: codex_config::RequirementSource::Unknown,
             });
         };
-        Ok(session::SessionModelProviderUpdate {
+        Ok(Some(session::SessionModelProviderUpdate {
             id: model_provider_id,
             provider: create_model_provider(
                 provider_info,
                 Some(Arc::clone(&self.services.auth_manager)),
             ),
-        })
+        }))
     }
 
     pub(crate) async fn refresh_runtime_config(&self, next_config: Config) {

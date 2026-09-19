@@ -296,6 +296,9 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
             .await;
 
         config.model = Some(selected_model_name.clone());
+        config
+            .apply_required_model_provider(&selected_model_name)
+            .map_err(FunctionCallError::RespondToModel)?;
         if let Some(reasoning_effort) = requested_reasoning_effort {
             validate_spawn_agent_reasoning_effort(
                 &selected_model_name,

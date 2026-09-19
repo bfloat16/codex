@@ -165,6 +165,53 @@ fn test_model_info(
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deepseek_model_switch_uses_the_configured_deepseek_provider() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let openai_server = MockServer::start().await;
+    let test = test_codex()
+        .with_model("gpt-5.5")
+        .with_pre_build_hook(move |home| {
+            std::fs::write(
+                home.join("config.toml"),
+                "[model_providers.deepseek]\nname = \"DeepSeek\"\nbase_url = \"https://api.deepseek.test/\"\ncompact = \"remotev2\"\n",
+            )
+            .expect("write DeepSeek provider config");
+        })
+        .build(&openai_server)
+        .await?;
+
+    core_test_support::submit_thread_settings(
+        &test.codex,
+        ThreadSettingsOverrides {
+            model: Some("deepseek-flash".to_string()),
+            model_provider: Some("openai".to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+
+    assert_eq!(
+        test.codex.config_snapshot().await.model_provider_id,
+        "deepseek"
+    );
+
+    core_test_support::submit_thread_settings(
+        &test.codex,
+        ThreadSettingsOverrides {
+            model: Some("gpt-5.5".to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+    assert_eq!(
+        test.codex.config_snapshot().await.model_provider_id,
+        "openai"
+    );
+    Ok(())
+}
+
 #[test_case(None; "model only")]
 #[test_case(Some(Personality::Pragmatic); "model and personality")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

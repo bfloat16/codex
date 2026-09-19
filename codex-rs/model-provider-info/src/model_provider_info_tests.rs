@@ -487,6 +487,32 @@ fn test_merge_configured_model_providers_applies_runtime_overrides_independently
 }
 
 #[test]
+fn test_merge_configured_model_providers_forces_deepseek_to_local_compaction() {
+    let configured_provider = ModelProviderInfo {
+        name: "DeepSeek".to_string(),
+        base_url: Some("https://api.deepseek.com/".to_string()),
+        compact: Some(CompactionMode::RemoteV2),
+        ..ModelProviderInfo::default()
+    };
+    let configured_model_providers = std::collections::HashMap::from([(
+        DEEPSEEK_PROVIDER_ID.to_string(),
+        configured_provider.clone(),
+    )]);
+    let mut expected_provider = configured_provider;
+    expected_provider.compact = Some(CompactionMode::Local);
+    let mut expected = built_in_model_providers(/*openai_base_url*/ None);
+    expected.insert(DEEPSEEK_PROVIDER_ID.to_string(), expected_provider);
+
+    assert_eq!(
+        merge_configured_model_providers(
+            built_in_model_providers(/*openai_base_url*/ None),
+            configured_model_providers,
+        ),
+        Ok(expected)
+    );
+}
+
+#[test]
 fn test_merge_configured_model_providers_applies_amazon_bedrock_transport_overrides() {
     let auth = provider_auth_for_test();
     let configured_model_providers = std::collections::HashMap::from([(

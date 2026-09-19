@@ -51,6 +51,14 @@ const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 /// Backend model-catalog specialty identifying cybersecurity-focused models.
 pub const MODEL_SPECIALTY_CYBER: &str = "cyber";
 pub const SPEED_TIER_FAST: &str = "fast";
+pub const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
+
+/// Returns the provider that must serve this model, when the model is provider-bound.
+pub fn required_provider_id(model: &str) -> Option<&'static str> {
+    model
+        .starts_with("deepseek-")
+        .then_some(DEEPSEEK_PROVIDER_ID)
+}
 
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning
 #[derive(Debug, Default, Clone, PartialEq, Eq, TS, Hash)]

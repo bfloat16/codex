@@ -12,6 +12,7 @@ use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::EnvVarError;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::openai_models::DEEPSEEK_PROVIDER_ID;
 use codex_protocol::protocol::CompactionMode;
 use codex_utils_redacted_string::RedactedString;
 use http::HeaderMap;
@@ -594,6 +595,10 @@ other non-default provider fields are not supported"
         } else {
             model_providers.entry(key).or_insert(provider);
         }
+    }
+
+    if let Some(provider) = model_providers.get_mut(DEEPSEEK_PROVIDER_ID) {
+        provider.compact = Some(CompactionMode::Local);
     }
 
     Ok(model_providers)

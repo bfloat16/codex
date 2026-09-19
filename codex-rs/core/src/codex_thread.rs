@@ -641,14 +641,10 @@ impl CodexThread {
             collaboration_mode,
             personality,
         } = overrides;
-        let model_provider = match model_provider {
-            Some(model_provider_id) => Some(
-                self.session
-                    .resolve_model_provider_update(model_provider_id)
-                    .await?,
-            ),
-            None => None,
-        };
+        let model_provider = self
+            .session
+            .resolve_model_provider_update_for_model(model.as_deref(), model_provider)
+            .await?;
         Ok(SessionSettingsUpdate {
             step_settings: StepSettingsUpdate {
                 model,

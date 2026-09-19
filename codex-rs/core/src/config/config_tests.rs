@@ -98,6 +98,7 @@ use codex_protocol::permissions::FileSystemSandboxEntry;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
+use codex_protocol::protocol::CompactionMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::NetworkAccess;
 use codex_protocol::protocol::RealtimeVoice;
@@ -1211,6 +1212,60 @@ command = "print-token"
 
     assert_eq!(config.model_provider_id, "amazon-bedrock");
     assert_eq!(config.model_provider, expected_provider);
+}
+
+#[tokio::test]
+async fn load_config_routes_deepseek_models_to_the_deepseek_provider() {
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+model = "deepseek-flash"
+model_provider = "openai"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.com/"
+compact = "remotev2"
+"#,
+    )
+    .expect("DeepSeek provider should deserialize");
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load config");
+
+    assert_eq!(
+        (
+            config.model_provider_id.as_str(),
+            config.model_provider.name.as_str(),
+            config.model_provider.compact,
+        ),
+        ("deepseek", "DeepSeek", Some(CompactionMode::Local))
+    );
+}
+
+#[tokio::test]
+async fn load_config_rejects_deepseek_models_without_the_deepseek_provider() {
+    let cfg = toml::from_str::<ConfigToml>(r#"model = "deepseek-flash""#)
+        .expect("model config should deserialize");
+
+    let error = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect_err("DeepSeek model must require its provider");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(
+        error
+            .to_string()
+            .contains("Model provider `deepseek` required by model `deepseek-flash` was not found")
+    );
 }
 
 #[tokio::test]

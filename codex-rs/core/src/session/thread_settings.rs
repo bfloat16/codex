@@ -58,14 +58,12 @@ pub(super) async fn prepare_update_for_session(
 ) -> ConstraintResult<SessionSettingsUpdate> {
     let model_provider_id = overrides.model_provider.clone();
     let mut updates = prepare_update(overrides);
-    updates.model_provider = match model_provider_id {
-        Some(model_provider_id) => Some(
-            session
-                .resolve_model_provider_update(model_provider_id)
-                .await?,
-        ),
-        None => None,
-    };
+    updates.model_provider = session
+        .resolve_model_provider_update_for_model(
+            updates.step_settings.model.as_deref(),
+            model_provider_id,
+        )
+        .await?;
     Ok(updates)
 }
 

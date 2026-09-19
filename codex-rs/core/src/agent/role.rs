@@ -125,6 +125,11 @@ async fn apply_role_to_config_inner(
         return Ok(());
     }
     *config = role_overrides::build_next_config(config, role_layer_toml, &overrides)?;
+    if let Some(model) = config.model.clone() {
+        config
+            .apply_required_model_provider(&model)
+            .map_err(anyhow::Error::msg)?;
+    }
     Ok(())
 }
 
