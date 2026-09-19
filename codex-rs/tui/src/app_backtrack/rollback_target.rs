@@ -168,7 +168,9 @@ fn align_transcript_prompts(
 
     // scores[i][j] aligns the first i transcript prompts to a suffix ending at entry j. A
     // persisted prompt cannot be skipped once alignment has started; a user-less turn can either
-    // represent a locally rendered, hook-blocked prompt or be skipped as unrelated history.
+    // represent a locally rendered, hook-blocked prompt or be skipped as unrelated history. The
+    // alignment may end before the newest persisted entry because an Esc interruption can persist
+    // its tail before the corresponding TUI transcript event is rendered.
     let mut previous_scores = vec![Some(AlignmentScore::default()); entries.len() + 1];
     let mut steps = vec![vec![AlignmentStep::Unavailable; entries.len() + 1]; prompts.len() + 1];
     for prompt_index in 1..=prompts.len() {
@@ -201,11 +203,16 @@ fn align_transcript_prompts(
         }
         previous_scores = current_scores;
     }
-    previous_scores[entries.len()]?;
+    let entry_index = previous_scores
+        .iter()
+        .enumerate()
+        .filter_map(|(entry_index, score)| score.map(|score| (entry_index, score)))
+        .max_by_key(|(_, score)| *score)?
+        .0;
 
     let mut alignment = vec![0; prompts.len()];
     let mut prompt_index = prompts.len();
-    let mut entry_index = entries.len();
+    let mut entry_index = entry_index;
     while prompt_index > 0 {
         match steps[prompt_index][entry_index] {
             AlignmentStep::Match => {
@@ -553,6 +560,30 @@ mod tests {
                 before_turn_id: "turn-1".to_string(),
                 legacy_num_turns: 1,
                 removed_turn_ids: vec!["turn-1".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn resolves_snapshot_before_late_interrupted_turn() {
+        let turns = vec![
+            turn("turn-1", TurnStatus::Completed, /*user_messages*/ 1),
+            turn("turn-2", TurnStatus::Interrupted, /*user_messages*/ 1),
+        ];
+        let transcript = vec![prompt("turn-1-prompt-0")];
+
+        assert_eq!(
+            target(
+                &turns,
+                &transcript,
+                /*newer_user_messages*/ 0,
+                "turn-1-prompt-0",
+            )
+            .expect("a persisted interrupt tail should not invalidate the transcript snapshot"),
+            BacktrackRollbackTarget {
+                before_turn_id: "turn-1".to_string(),
+                legacy_num_turns: 2,
+                removed_turn_ids: vec!["turn-1".to_string(), "turn-2".to_string()],
             }
         );
     }

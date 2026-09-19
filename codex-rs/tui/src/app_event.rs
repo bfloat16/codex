@@ -519,6 +519,7 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         nth_user_message: usize,
         newer_user_messages: usize,
+        transcript_prompts: Arc<[UserMessage]>,
         prompt: UserMessage,
     },
 

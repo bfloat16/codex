@@ -29,26 +29,20 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-        nth_user_message: usize,
-        newer_user_messages: usize,
-        mut prompt: UserMessage,
+        selection: BacktrackSelection,
+        transcript_prompts: std::sync::Arc<[UserMessage]>,
     ) -> Result<()> {
+        let thread_id = selection.thread_id;
+        let newer_user_messages = selection.newer_user_messages;
+        let mut prompt = selection.prompt.clone();
         if self.chat_widget.thread_id() != Some(thread_id) {
             return Ok(());
         }
-        let selection = BacktrackSelection {
-            thread_id,
-            nth_user_message,
-            newer_user_messages,
-            prompt: prompt.clone(),
-        };
         if self.backtrack.pending_rollback.is_none() {
             self.backtrack.pending_rollback = Some(PendingBacktrackRollback {
                 selection: selection.clone(),
             });
         }
-        let transcript_prompts = self.backtrack_transcript_prompts();
         let rollback_target = match self.thread_event_channels.get(&thread_id) {
             Some(channel) => {
                 let store = channel.store.lock().await;
@@ -97,7 +91,7 @@ impl App {
                 }
                 backtrack_rollback_target(
                     &turns,
-                    &transcript_prompts,
+                    transcript_prompts.as_ref(),
                     newer_user_messages,
                     &mut prompt,
                 )
@@ -132,7 +126,7 @@ impl App {
                 match refreshed_thread {
                     Ok(thread) => backtrack_rollback_target(
                         &thread.turns,
-                        &transcript_prompts,
+                        transcript_prompts.as_ref(),
                         newer_user_messages,
                         &mut prompt,
                     ),

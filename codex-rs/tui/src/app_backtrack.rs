@@ -160,11 +160,13 @@ impl App {
         self.backtrack.pending_rollback = Some(PendingBacktrackRollback {
             selection: selection.clone(),
         });
+        let transcript_prompts = self.backtrack_transcript_prompts().into();
         self.app_event_tx
             .send(AppEvent::RollbackSessionForPromptEdit {
                 thread_id: selection.thread_id,
                 nth_user_message: selection.nth_user_message,
                 newer_user_messages: selection.newer_user_messages,
+                transcript_prompts,
                 prompt: selection.prompt,
             });
     }
@@ -275,11 +277,13 @@ impl App {
         }
         self.chat_widget.clear_esc_backtrack_hint();
         let user_positions = user_positions_iter(&self.transcript_cells).collect::<Vec<_>>();
+        let transcript_prompts: Arc<[UserMessage]> = self.backtrack_transcript_prompts().into();
         let mut items = user_positions
             .iter()
             .enumerate()
             .filter_map(|(nth_user_message, position)| {
                 let selection = self.backtrack_selection(nth_user_message)?;
+                let transcript_prompts = Arc::clone(&transcript_prompts);
                 let end = user_positions
                     .get(nth_user_message + 1)
                     .copied()
@@ -302,6 +306,7 @@ impl App {
                             thread_id: selection.thread_id,
                             nth_user_message: selection.nth_user_message,
                             newer_user_messages: selection.newer_user_messages,
+                            transcript_prompts: Arc::clone(&transcript_prompts),
                             prompt: selection.prompt.clone(),
                         });
                     }),

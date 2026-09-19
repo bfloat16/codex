@@ -514,15 +514,20 @@ impl App {
                 thread_id,
                 nth_user_message,
                 newer_user_messages,
+                transcript_prompts,
                 prompt,
             } => {
-                Box::pin(self.handle_backtrack_rollback_request(
-                    tui,
-                    app_server,
+                let selection = crate::app_backtrack::BacktrackSelection {
                     thread_id,
                     nth_user_message,
                     newer_user_messages,
                     prompt,
+                };
+                Box::pin(self.handle_backtrack_rollback_request(
+                    tui,
+                    app_server,
+                    selection,
+                    transcript_prompts,
                 ))
                 .await?;
             }

@@ -7852,7 +7852,7 @@ fn rewind_test_runtime() -> Result<tokio::runtime::Runtime> {
 }
 
 #[test]
-fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<()> {
+fn prompt_edit_rolls_back_interrupted_prompt_from_snapshot_and_persists() -> Result<()> {
     let runtime = rewind_test_runtime()?;
     runtime.block_on(Box::pin(async {
         let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
@@ -7978,6 +7978,15 @@ fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<()> {
             text_elements: Vec::new(),
             mention_bindings: Vec::new(),
         };
+        let transcript_prompts = app.backtrack_transcript_prompts().into();
+        // Esc interruption notifications can update the live transcript after the rewind picker
+        // captured its selection but before the rollback event is handled.
+        app.transcript_cells.push(Arc::new(UserHistoryCell {
+            message: "late local prompt".to_string(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: Vec::new(),
+        }));
         let control = Box::pin(app.handle_event(
             &mut tui,
             &mut app_server,
@@ -7985,6 +7994,7 @@ fn prompt_edit_rolls_back_before_selected_prompt_and_persists() -> Result<()> {
                 thread_id: source_thread_id,
                 nth_user_message: 1,
                 newer_user_messages: 0,
+                transcript_prompts,
                 prompt: prompt.clone(),
             },
         ))
@@ -8182,6 +8192,7 @@ fn prompt_edit_rewinds_hook_blocked_prompt_with_partial_paginated_store() -> Res
         assert_eq!(user_count(&app.transcript_cells), 2);
 
         let prompt = crate::chatwidget::UserMessage::from("123456 example");
+        let transcript_prompts = app.backtrack_transcript_prompts().into();
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let control = Box::pin(app.handle_event(
             &mut tui,
@@ -8190,6 +8201,7 @@ fn prompt_edit_rewinds_hook_blocked_prompt_with_partial_paginated_store() -> Res
                 thread_id: source_thread_id,
                 nth_user_message: 1,
                 newer_user_messages: 0,
+                transcript_prompts,
                 prompt: prompt.clone(),
             },
         ))
@@ -8289,6 +8301,7 @@ fn prompt_edit_before_first_prompt_clears_thread_history() -> Result<()> {
     assert_eq!(user_count(&app.transcript_cells), 1);
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let prompt = crate::chatwidget::UserMessage::from("first prompt");
+    let transcript_prompts = app.backtrack_transcript_prompts().into();
 
     let control = Box::pin(app.handle_event(
         &mut tui,
@@ -8297,6 +8310,7 @@ fn prompt_edit_before_first_prompt_clears_thread_history() -> Result<()> {
             thread_id: source_thread_id,
             nth_user_message: 0,
             newer_user_messages: 0,
+            transcript_prompts,
             prompt,
         },
     ))
