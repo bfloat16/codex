@@ -205,9 +205,9 @@ else
   release_directory="$cargo_target_root/release"
 fi
 
-cargo_target_args=()
+cargo_arguments=(build --release --timings)
 if [[ "$uses_explicit_target" == 'true' ]]; then
-  cargo_target_args+=(--target "$target")
+  cargo_arguments+=(--target "$target")
 fi
 
 display_binaries=("${binaries[@]}")
@@ -231,7 +231,7 @@ if [[ "$build_bwrap" == 'true' ]]; then
     exit 1
   fi
 
-  cargo build --release --timings "${cargo_target_args[@]}" --bin bwrap
+  cargo "${cargo_arguments[@]}" --bin bwrap
   bwrap_path="$release_directory/bwrap"
   if [[ ! -f "$bwrap_path" ]]; then
     error "bwrap binary not found: $bwrap_path"
@@ -243,7 +243,6 @@ if [[ "$build_bwrap" == 'true' ]]; then
   printf 'Built bwrap with sha256:%s\n' "$CODEX_BWRAP_SHA256"
 fi
 
-cargo_arguments=(build --release --timings "${cargo_target_args[@]}")
 for binary in "${binaries[@]}"; do
   cargo_arguments+=(--bin "$binary")
 done

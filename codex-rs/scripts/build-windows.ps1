@@ -144,8 +144,7 @@ if ($Target -eq 'x86_64-pc-windows-msvc') {
 
 $cargoArguments = @(
     'build',
-    '--release',
-    '--timings'
+    '--release'
 )
 if ($usesExplicitTarget) {
     $cargoArguments += @('--target', $Target)
