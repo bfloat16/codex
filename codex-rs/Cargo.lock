@@ -2193,6 +2193,7 @@ dependencies = [
  "codex-external-agent-migration",
  "codex-features",
  "codex-feedback",
+ "codex-file-checkpoint",
  "codex-file-search",
  "codex-file-watcher",
  "codex-git-attribution",
@@ -2300,7 +2301,6 @@ dependencies = [
  "anyhow",
  "codex-app-server-protocol",
  "codex-app-server-transport",
- "codex-http-client",
  "codex-uds",
  "codex-utils-home-dir",
  "futures",
@@ -2308,7 +2308,6 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tempfile",
  "tokio",
  "tokio-tungstenite",
@@ -2984,6 +2983,7 @@ dependencies = [
  "codex-extension-items",
  "codex-features",
  "codex-feedback",
+ "codex-file-checkpoint",
  "codex-file-system",
  "codex-git-utils",
  "codex-guardian-context",
@@ -3432,6 +3432,25 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wiremock",
+]
+
+[[package]]
+name = "codex-file-checkpoint"
+version = "0.0.0"
+dependencies = [
+ "codex-exec-server",
+ "codex-file-system",
+ "codex-protocol",
+ "codex-utils-absolute-path",
+ "codex-utils-path-uri",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
