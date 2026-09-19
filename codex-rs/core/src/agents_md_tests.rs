@@ -1557,6 +1557,29 @@ async fn agents_local_md_preferred() {
     );
 }
 
+/// CLAUDE.md is used when AGENTS.md is absent.
+#[tokio::test]
+async fn uses_claude_md_when_agents_missing() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    fs::write(tmp.path().join(DEFAULT_CLAUDE_MD_FILENAME), "claude").unwrap();
+
+    let cfg = make_config(&tmp, /*limit*/ 4096, /*instructions*/ None).await;
+
+    let res = get_user_instructions(&cfg)
+        .await
+        .expect("CLAUDE.md fallback expected");
+
+    assert_eq!(res, "claude");
+
+    let discovery = agents_md_paths(&cfg).await.expect("discover paths");
+    assert_eq!(
+        discovery,
+        vec![PathUri::from_abs_path(
+            &tmp.path().join(DEFAULT_CLAUDE_MD_FILENAME).abs()
+        )]
+    );
+}
+
 /// When AGENTS.md is absent but a configured fallback exists, the fallback is used.
 #[tokio::test]
 async fn uses_configured_fallback_when_agents_missing() {
@@ -1583,6 +1606,7 @@ async fn uses_configured_fallback_when_agents_missing() {
 async fn agents_md_preferred_over_fallbacks() {
     let tmp = tempfile::tempdir().expect("tempdir");
     fs::write(tmp.path().join("AGENTS.md"), "primary").unwrap();
+    fs::write(tmp.path().join("CLAUDE.md"), "claude").unwrap();
     fs::write(tmp.path().join("EXAMPLE.md"), "secondary").unwrap();
 
     let cfg = make_config_with_fallback(

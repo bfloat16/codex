@@ -1,6 +1,7 @@
 //! AGENTS.md discovery and user instruction assembly.
 //!
 //! Project-level documentation is primarily stored in files named `AGENTS.md`.
+//! When `AGENTS.md` is absent, `CLAUDE.md` is used as a built-in fallback.
 //! Additional fallback filenames can be configured via `project_doc_fallback_filenames`.
 //! We include the concatenation of all files found along the path from the
 //! project root to the current working directory as follows:
@@ -38,6 +39,8 @@ use tracing::error;
 
 /// Default filename scanned for AGENTS.md instructions.
 pub const DEFAULT_AGENTS_MD_FILENAME: &str = "AGENTS.md";
+/// Built-in fallback filename scanned when AGENTS.md is absent.
+const DEFAULT_CLAUDE_MD_FILENAME: &str = "CLAUDE.md";
 /// Preferred local override for AGENTS.md instructions.
 pub const LOCAL_AGENTS_MD_FILENAME: &str = "AGENTS.override.md";
 
@@ -265,9 +268,10 @@ async fn agents_md_paths(
 }
 
 fn candidate_filenames(config: &Config) -> Vec<&str> {
-    let mut names: Vec<&str> = Vec::with_capacity(2 + config.project_doc_fallback_filenames.len());
+    let mut names: Vec<&str> = Vec::with_capacity(3 + config.project_doc_fallback_filenames.len());
     names.push(LOCAL_AGENTS_MD_FILENAME);
     names.push(DEFAULT_AGENTS_MD_FILENAME);
+    names.push(DEFAULT_CLAUDE_MD_FILENAME);
     for candidate in &config.project_doc_fallback_filenames {
         let candidate = candidate.as_str();
         if candidate.is_empty() {

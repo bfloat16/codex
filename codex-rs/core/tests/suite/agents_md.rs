@@ -228,6 +228,30 @@ async fn agents_override_is_preferred_over_agents_md() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn claude_md_is_used_when_agents_md_is_missing() -> Result<()> {
+    let instructions =
+        agents_instructions(test_codex().with_workspace_setup(|cwd, fs| async move {
+            let claude_md = executor_path_uri(cwd.join("CLAUDE.md"))?;
+            fs.write_file(
+                &claude_md,
+                b"claude project instructions".to_vec(),
+                Default::default(),
+                /*sandbox*/ None,
+            )
+            .await?;
+            Ok::<(), anyhow::Error>(())
+        }))
+        .await?;
+
+    assert!(
+        instructions.contains("claude project instructions"),
+        "expected CLAUDE.md contents: {instructions}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn configured_fallback_is_used_when_agents_candidate_is_directory() -> Result<()> {
     let instructions = agents_instructions(
         test_codex()
