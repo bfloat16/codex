@@ -107,6 +107,7 @@ fn snapshots() -> Result<()> {
                 status: EnvironmentStatus::Available,
                 shell: None,
                 is_primary: false,
+                metadata: EnvironmentMetadata::default(),
             },
         )]
         .into_iter()
@@ -245,6 +246,19 @@ fn legacy_single_environment_snapshot_does_not_change() -> Result<()> {
 }
 
 #[test]
+fn metadata_additions_are_emitted_once_for_legacy_snapshots() -> Result<()> {
+    let cwd = PathUri::parse("file:///C:/repo")?;
+    let current = EnvironmentMetadata::new(&cwd, Some("windows"), Some("bash"));
+    let legacy = EnvironmentMetadata::default();
+
+    assert!(!current.has_same_diff_value(&legacy));
+    assert!(current.has_same_diff_value(&current));
+    assert!(!legacy.has_same_diff_value(&current));
+
+    Ok(())
+}
+
+#[test]
 fn crossing_single_environment_boundary_restates_current_environments() -> Result<()> {
     let single = EnvironmentsState {
         environments: [("local".to_string(), primary("file:///local", "bash")?)]
@@ -310,6 +324,7 @@ fn available(cwd: &str, shell: &str) -> Result<EnvironmentState> {
         status: EnvironmentStatus::Available,
         shell: Some(shell.to_string()),
         is_primary: false,
+        metadata: EnvironmentMetadata::default(),
     })
 }
 
@@ -326,5 +341,6 @@ fn starting(cwd: &str) -> Result<EnvironmentState> {
         status: EnvironmentStatus::Starting,
         shell: None,
         is_primary: false,
+        metadata: EnvironmentMetadata::default(),
     })
 }

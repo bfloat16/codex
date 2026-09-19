@@ -36,6 +36,26 @@ fn environment(id: &str, cwd: PathUri, shell: impl Into<String>) -> (String, Env
             status: EnvironmentStatus::Available,
             shell: Some(shell.into()),
             is_primary: false,
+            metadata: EnvironmentMetadata::default(),
+        },
+    )
+}
+
+fn environment_with_platform(
+    id: &str,
+    cwd: PathUri,
+    shell: impl Into<String>,
+    platform_os: &str,
+) -> (String, EnvironmentState) {
+    let shell = shell.into();
+    (
+        id.to_string(),
+        EnvironmentState {
+            metadata: EnvironmentMetadata::new(&cwd, Some(platform_os), Some(&shell)),
+            cwd,
+            status: EnvironmentStatus::Available,
+            shell: Some(shell),
+            is_primary: false,
         },
     )
 }
@@ -97,10 +117,11 @@ fn serialize_workspace_write_environment_context() {
 #[test]
 fn serialize_environment_context_with_foreign_windows_cwd() {
     let mut context = environment_state(
-        [environment(
+        [environment_with_platform(
             "remote",
             PathUri::parse("file:///C:/windows").expect("Windows cwd URI"),
-            "powershell",
+            "bash",
+            "windows",
         )],
         /*current_date*/ None,
         /*timezone*/ None,
@@ -116,7 +137,10 @@ fn serialize_environment_context_with_foreign_windows_cwd() {
         context.render(),
         r#"<environment_context>
   <cwd>C:\windows</cwd>
-  <shell>powershell</shell>
+  <shell>bash</shell>
+  <platform_os>windows</platform_os>
+  <path_convention>windows</path_convention>
+  <shell_flavor>git-bash</shell_flavor>
   <filesystem><workspace_roots><root>D:\workspace</root></workspace_roots><permission_profile type="disabled"><file_system type="unrestricted" /></permission_profile></filesystem>
 </environment_context>"#
     );

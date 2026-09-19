@@ -21,6 +21,11 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
+#[path = "environment_metadata.rs"]
+mod environment_metadata;
+
+use environment_metadata::EnvironmentMetadata;
+
 static POWERSHELL_VERSIONS: LazyLock<Mutex<BTreeMap<PathBuf, Option<String>>>> =
     LazyLock::new(Mutex::default);
 
@@ -116,6 +121,7 @@ impl WorldStateSection for EnvironmentsState {
                             status: environment.status,
                             shell: environment.shell.clone(),
                             is_primary: self.environments.len() > 1 && environment.is_primary,
+                            metadata: environment.metadata.clone(),
                         },
                     )
                 })
@@ -327,6 +333,7 @@ fn push_environment_values(rendered: &mut String, environment: &EnvironmentState
         push_xml_escaped_text(rendered, shell);
         rendered.push_str("</shell>\n");
     }
+    environment.metadata.push_xml_elements(rendered, indent);
 }
 
 fn push_optional_element(rendered: &mut String, name: &str, value: Option<&str>) {
@@ -348,6 +355,7 @@ struct EnvironmentState {
     status: EnvironmentStatus,
     shell: Option<String>,
     is_primary: bool,
+    metadata: EnvironmentMetadata,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -369,6 +377,8 @@ struct EnvironmentSnapshot {
     shell: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     is_primary: bool,
+    #[serde(flatten)]
+    metadata: EnvironmentMetadata,
 }
 
 impl EnvironmentSnapshot {
@@ -381,6 +391,7 @@ impl EnvironmentSnapshot {
                 .as_ref()
                 .zip(other.shell.as_ref())
                 .is_none_or(|(current, previous)| current == previous)
+            && self.metadata.has_same_diff_value(&other.metadata)
     }
 }
 
@@ -436,15 +447,21 @@ fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, En
         .turn_environments()
         .enumerate()
         .map(|(index, environment)| {
+            let shell = environment
+                .shell
+                .as_ref()
+                .map(|shell| shell.name().to_string());
             (
                 environment.selection.environment_id.clone(),
                 EnvironmentState {
                     cwd: environment.cwd().clone(),
                     status: EnvironmentStatus::Available,
-                    shell: environment
-                        .shell
-                        .as_ref()
-                        .map(|shell| shell.name().to_string()),
+                    metadata: EnvironmentMetadata::new(
+                        environment.cwd(),
+                        environment.executor_platform_os.as_deref(),
+                        shell.as_deref(),
+                    ),
+                    shell,
                     is_primary: index == 0,
                 },
             )
@@ -458,6 +475,11 @@ fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, En
                 status: EnvironmentStatus::Starting,
                 shell: None,
                 is_primary: false,
+                metadata: EnvironmentMetadata::new(
+                    &environment.selection.cwd,
+                    /*platform_os*/ None,
+                    /*shell*/ None,
+                ),
             });
     }
     environments
