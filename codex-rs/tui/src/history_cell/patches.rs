@@ -106,6 +106,10 @@ impl HistoryCell for PatchHistoryCell {
     fn file_change_path(&self) -> Option<&Path> {
         Some(self.path.as_path())
     }
+
+    fn file_change_line_counts(&self) -> Option<(usize, usize)> {
+        Some(crate::diff_render::line_counts(&self.change))
+    }
 }
 /// Create one independently collapsible history cell per changed file.
 pub(crate) fn new_patch_events(

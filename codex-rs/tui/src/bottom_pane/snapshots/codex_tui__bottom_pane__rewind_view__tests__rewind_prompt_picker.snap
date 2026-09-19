@@ -6,12 +6,12 @@ expression: "render_lines(&view, 72)"
   Rewind
   Restore the code and/or conversation to the point before…
 
+  ↑ 2 more above
+    update the footer
+    2 files changed (+8 -3)
 
-    change the parser
-    Edited parser.rs (+3 -1)
-
-    add regression tests
-    No code changes
+    polish the diff panel
+    Edited diff_panel.rs (+4 -1)
 
   ❯ (current)
 

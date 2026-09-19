@@ -18,13 +18,13 @@ use crate::style::status_style;
 use crate::wrapping::word_wrap_line;
 
 use super::MAX_PROMPT_LINES;
+use super::MAX_REWIND_ROWS;
 use super::PROMPT_ROW_HEIGHT;
 use super::PROMPT_SCROLL_HINT_ROWS;
 use super::RewindPromptItem;
 use super::RewindRestoreOption;
 use super::RewindView;
 use super::RewindViewKind;
-use crate::bottom_pane::popup_consts::MAX_POPUP_ROWS;
 use crate::bottom_pane::selection_popup_common::render_menu_surface;
 use crate::bottom_pane::selection_popup_common::wrap_styled_line;
 
@@ -42,7 +42,7 @@ impl RewindView {
     }
 
     fn prompt_content_height(item_count: usize) -> u16 {
-        let visible_items = item_count.clamp(1, MAX_POPUP_ROWS) as u16;
+        let visible_items = item_count.clamp(1, MAX_REWIND_ROWS) as u16;
         PROMPT_SCROLL_HINT_ROWS.saturating_add(visible_items.saturating_mul(PROMPT_ROW_HEIGHT))
     }
 

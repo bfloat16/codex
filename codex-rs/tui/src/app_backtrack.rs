@@ -50,6 +50,7 @@ use crate::tui::TuiEvent;
 use codex_protocol::ThreadId;
 use codex_protocol::models::local_image_label_text;
 use color_eyre::eyre::Result;
+use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 const NO_PREVIOUS_MESSAGE_TO_EDIT: &str = "No previous message to edit.";
@@ -538,14 +539,14 @@ fn user_message_from_history_cell(cell: &UserHistoryCell) -> UserMessage {
 }
 
 fn backtrack_code_summary(cells: &[Arc<dyn crate::history_cell::HistoryCell>]) -> Line<'static> {
-    let headings = cells
+    let file_changes = cells
         .iter()
         .filter(|cell| cell.is_file_change())
-        .filter_map(|cell| cell.raw_lines().into_iter().next())
         .collect::<Vec<_>>();
-    match headings.as_slice() {
+    match file_changes.as_slice() {
         [] => "No code changes".into(),
-        [heading] => {
+        [cell] => {
+            let heading = cell.raw_lines().into_iter().next().unwrap_or_default();
             let text = heading
                 .spans
                 .iter()
@@ -553,7 +554,25 @@ fn backtrack_code_summary(cells: &[Arc<dyn crate::history_cell::HistoryCell>]) -
                 .collect::<String>();
             text.strip_prefix("● ").unwrap_or(&text).to_string().into()
         }
-        headings => format!("{} code changes", headings.len()).into(),
+        file_changes => {
+            let (added, removed) = file_changes
+                .iter()
+                .filter_map(|cell| cell.file_change_line_counts())
+                .fold((0_usize, 0_usize), |(added, removed), counts| {
+                    (
+                        added.saturating_add(counts.0),
+                        removed.saturating_add(counts.1),
+                    )
+                });
+            vec![
+                format!("{} files changed (", file_changes.len()).into(),
+                format!("+{added}").green(),
+                " ".into(),
+                format!("-{removed}").red(),
+                ")".into(),
+            ]
+            .into()
+        }
     }
 }
 
@@ -648,6 +667,7 @@ mod tests {
     use crate::history_cell::HistoryCell;
     use pretty_assertions::assert_eq;
     use ratatui::prelude::Line;
+    use ratatui::style::Color;
     use std::sync::Arc;
 
     fn render_lines(lines: &[Line<'static>]) -> Vec<String> {
@@ -705,6 +725,40 @@ mod tests {
         }) as Arc<dyn HistoryCell>);
 
         assert!(has_backtrack_target(&cells));
+    }
+
+    #[test]
+    fn backtrack_code_summary_aggregates_multiple_file_changes() {
+        let cwd = std::path::Path::new("/tmp/project");
+        let cells = crate::history_cell::new_patch_events(
+            std::collections::HashMap::from([
+                (
+                    std::path::PathBuf::from("src/new.rs"),
+                    crate::diff_model::FileChange::Add {
+                        content: "one\ntwo\n".to_string(),
+                    },
+                ),
+                (
+                    std::path::PathBuf::from("src/old.rs"),
+                    crate::diff_model::FileChange::Delete {
+                        content: "old\n".to_string(),
+                    },
+                ),
+            ]),
+            cwd,
+        )
+        .into_iter()
+        .map(|cell| Arc::new(cell) as Arc<dyn HistoryCell>)
+        .collect::<Vec<_>>();
+
+        let summary = backtrack_code_summary(&cells);
+
+        assert_eq!(
+            render_lines(std::slice::from_ref(&summary)),
+            vec!["2 files changed (+2 -1)"]
+        );
+        assert_eq!(summary.spans[1].style.fg, Some(Color::Green));
+        assert_eq!(summary.spans[3].style.fg, Some(Color::Red));
     }
 
     #[test]

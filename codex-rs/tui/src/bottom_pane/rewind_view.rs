@@ -11,7 +11,6 @@ use crate::keymap::ListKeymap;
 use super::CancellationEvent;
 use super::ViewCompletion;
 use super::bottom_pane_view::BottomPaneView;
-use super::popup_consts::MAX_POPUP_ROWS;
 use super::popup_consts::accept_cancel_hint_line;
 
 mod render;
@@ -19,6 +18,7 @@ mod render;
 const PROMPT_ROW_HEIGHT: u16 = 3;
 const PROMPT_SCROLL_HINT_ROWS: u16 = 2;
 const MAX_PROMPT_LINES: usize = 4;
+const MAX_REWIND_ROWS: usize = 3;
 
 pub(crate) type RewindAction = Box<dyn Fn(&AppEventSender) + Send + Sync>;
 
@@ -66,6 +66,7 @@ pub(crate) struct RewindView {
     kind: RewindViewKind,
     selected_idx: Option<usize>,
     completion: Option<ViewCompletion>,
+    dismiss_after_child_accept: bool,
     app_event_tx: AppEventSender,
     on_cancel: RewindAction,
     keymap: ListKeymap,
@@ -125,6 +126,7 @@ impl RewindView {
             kind,
             selected_idx,
             completion: None,
+            dismiss_after_child_accept: false,
             app_event_tx,
             on_cancel,
             keymap,
@@ -171,7 +173,7 @@ impl RewindView {
         let Some(selected_idx) = self.selected_idx else {
             return;
         };
-        self.selected_idx = Some(selected_idx.saturating_sub(MAX_POPUP_ROWS));
+        self.selected_idx = Some(selected_idx.saturating_sub(MAX_REWIND_ROWS));
     }
 
     fn page_down(&mut self) {
@@ -180,7 +182,7 @@ impl RewindView {
         };
         self.selected_idx = Some(
             selected_idx
-                .saturating_add(MAX_POPUP_ROWS)
+                .saturating_add(MAX_REWIND_ROWS)
                 .min(self.item_count().saturating_sub(1)),
         );
     }
@@ -190,16 +192,22 @@ impl RewindView {
             return;
         };
         let action = match &self.kind {
-            RewindViewKind::Prompts { items } => items.get(selected_idx).map(|item| &item.action),
-            RewindViewKind::Restore { options, .. } => {
-                options.get(selected_idx).map(|option| &option.action)
-            }
+            RewindViewKind::Prompts { items } => items
+                .get(selected_idx)
+                .map(|item| (&item.action, !item.is_current)),
+            RewindViewKind::Restore { options, .. } => options
+                .get(selected_idx)
+                .map(|option| (&option.action, false)),
         };
-        let Some(action) = action else {
+        let Some((action, waits_for_child)) = action else {
             return;
         };
         action(&self.app_event_tx);
-        self.completion = Some(ViewCompletion::Accepted);
+        if waits_for_child {
+            self.dismiss_after_child_accept = true;
+        } else {
+            self.completion = Some(ViewCompletion::Accepted);
+        }
     }
 
     fn cancel(&mut self) {
@@ -233,6 +241,14 @@ impl BottomPaneView for RewindView {
 
     fn completion(&self) -> Option<ViewCompletion> {
         self.completion
+    }
+
+    fn dismiss_after_child_accept(&self) -> bool {
+        self.dismiss_after_child_accept
+    }
+
+    fn clear_dismiss_after_child_accept(&mut self) {
+        self.dismiss_after_child_accept = false;
     }
 
     fn view_id(&self) -> Option<&'static str> {

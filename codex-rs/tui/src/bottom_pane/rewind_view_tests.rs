@@ -6,6 +6,7 @@ use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Stylize;
 use tokio::sync::mpsc::unbounded_channel;
 
 fn render_lines(view: &RewindView, width: u16) -> String {
@@ -66,6 +67,43 @@ fn prompt_picker_defaults_to_current_without_rewinding() {
 }
 
 #[test]
+fn historical_prompt_waits_for_restore_picker() {
+    let (tx, mut rx) = test_sender();
+    let mut view = RewindView::new(
+        RewindViewParams::Prompts {
+            view_id: "rewind-test",
+            items: vec![
+                RewindPromptItem {
+                    prompt: "change the parser".to_string(),
+                    code_summary: Some("Edited parser.rs (+3 -1)".into()),
+                    is_current: false,
+                    action: Box::new(|tx| tx.send(AppEvent::BacktrackRestoreBack)),
+                },
+                RewindPromptItem {
+                    prompt: String::new(),
+                    code_summary: None,
+                    is_current: true,
+                    action: Box::new(|_| {}),
+                },
+            ],
+            on_cancel: Box::new(|_| {}),
+        },
+        tx,
+        crate::keymap::RuntimeKeymap::defaults().list,
+    );
+
+    view.handle_key_event(KeyEvent::from(crossterm::event::KeyCode::Up));
+    view.handle_key_event(KeyEvent::from(crossterm::event::KeyCode::Enter));
+
+    assert_matches!(rx.try_recv(), Ok(AppEvent::BacktrackRestoreBack));
+    assert_eq!(view.completion(), None);
+    assert!(view.dismiss_after_child_accept());
+
+    view.clear_dismiss_after_child_accept();
+    assert!(!view.dismiss_after_child_accept());
+}
+
+#[test]
 fn restore_picker_cancel_returns_to_prompt_picker() {
     let (tx, mut rx) = test_sender();
     let mut view = RewindView::new(
@@ -106,6 +144,27 @@ fn rewind_prompt_picker_snapshot() {
                 RewindPromptItem {
                     prompt: "add regression tests".to_string(),
                     code_summary: Some("No code changes".into()),
+                    is_current: false,
+                    action: Box::new(|_| {}),
+                },
+                RewindPromptItem {
+                    prompt: "update the footer".to_string(),
+                    code_summary: Some(
+                        vec![
+                            "2 files changed (".into(),
+                            "+8".green(),
+                            " ".into(),
+                            "-3".red(),
+                            ")".into(),
+                        ]
+                        .into(),
+                    ),
+                    is_current: false,
+                    action: Box::new(|_| {}),
+                },
+                RewindPromptItem {
+                    prompt: "polish the diff panel".to_string(),
+                    code_summary: Some("Edited diff_panel.rs (+4 -1)".into()),
                     is_current: false,
                     action: Box::new(|_| {}),
                 },

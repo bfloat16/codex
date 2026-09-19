@@ -1,0 +1,22 @@
+---
+source: tui/src/app/tests.rs
+expression: terminal.backend()
+---
+"                                                                                "
+"                                                                                "
+"  Rewind                                                                        "
+"  Restore the code and/or conversation to the point before…                     "
+"                                                                                "
+"                                                                                "
+"    first request                                                               "
+"    No code changes                                                             "
+"                                                                                "
+"  ❯ most recent request                                                         "
+"    No code changes                                                             "
+"                                                                                "
+"    (current)                                                                   "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"  Press enter to continue or esc to cancel                                      "
