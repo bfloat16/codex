@@ -1393,6 +1393,27 @@ async fn collab_mode_shift_tab_cycles_only_when_idle() {
 }
 
 #[tokio::test]
+async fn user_mode_switch_preserves_reasoning_effort_on_entry_and_exit() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::Low));
+    chat.set_plan_mode_reasoning_effort(Some(ReasoningEffortConfig::High));
+
+    chat.cycle_collaboration_mode_preserving_model();
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+    assert_eq!(
+        chat.current_reasoning_effort(),
+        Some(ReasoningEffortConfig::Low)
+    );
+
+    chat.cycle_collaboration_mode_preserving_model();
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Default);
+    assert_eq!(
+        chat.current_reasoning_effort(),
+        Some(ReasoningEffortConfig::Low)
+    );
+}
+
+#[tokio::test]
 async fn mode_switch_does_not_emit_model_change_notification() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
@@ -1430,6 +1451,7 @@ async fn plan_slash_command_switches_to_plan_mode() {
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     let initial = chat.current_collaboration_mode().clone();
     let initial_model = chat.current_model().to_string();
+    let initial_effort = chat.current_reasoning_effort();
 
     chat.dispatch_command(SlashCommand::Plan);
 
@@ -1442,6 +1464,7 @@ async fn plan_slash_command_switches_to_plan_mode() {
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
     assert_eq!(chat.current_collaboration_mode(), &initial);
     assert_eq!(chat.current_model(), initial_model);
+    assert_eq!(chat.current_reasoning_effort(), initial_effort);
 }
 
 #[tokio::test]
@@ -1450,13 +1473,18 @@ async fn plan_slash_command_with_args_submits_prompt_in_plan_mode() {
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
 
     chat.handle_thread_session(plan_test_session(ThreadId::new()));
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
     chat.bottom_pane
         .set_composer_text("/plan build the plan".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
-    let items = match next_submit_op(&mut op_rx) {
-        Op::UserTurn { items, .. } => items,
+    let (items, collaboration_mode) = match next_submit_op(&mut op_rx) {
+        Op::UserTurn {
+            items,
+            collaboration_mode,
+            ..
+        } => (items, collaboration_mode),
         other => panic!("expected Op::UserTurn, got {other:?}"),
     };
     assert_eq!(items.len(), 1);
@@ -1466,6 +1494,10 @@ async fn plan_slash_command_with_args_submits_prompt_in_plan_mode() {
             text: "build the plan".to_string(),
             text_elements: Vec::new(),
         }
+    );
+    assert_eq!(
+        collaboration_mode.and_then(|mode| mode.settings.reasoning_effort),
+        Some(ReasoningEffortConfig::High)
     );
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
 }

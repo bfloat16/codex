@@ -694,14 +694,19 @@ impl ChatWidget {
         });
     }
 
-    pub(crate) fn set_collaboration_mask_from_user_action(&mut self, mask: CollaborationModeMask) {
-        self.set_collaboration_mask(mask);
+    pub(crate) fn set_collaboration_mask_from_user_action(
+        &mut self,
+        mut mask: CollaborationModeMask,
+    ) {
+        mask.reasoning_effort = Some(self.effective_reasoning_effort());
+        self.apply_collaboration_mask(mask);
     }
 
     /// Update the active collaboration mask.
     ///
     /// When collaboration modes are enabled and a preset is selected,
     /// the current mode is attached to submissions as `Op::UserTurn { collaboration_mode: Some(...) }`.
+    #[cfg(test)]
     pub(crate) fn set_collaboration_mask(&mut self, mut mask: CollaborationModeMask) {
         if !self.collaboration_modes_enabled() {
             return;
@@ -710,6 +715,13 @@ impl ChatWidget {
             && let Some(effort) = self.config.plan_mode_reasoning_effort.clone()
         {
             mask.reasoning_effort = Some(Some(effort));
+        }
+        self.apply_collaboration_mask(mask);
+    }
+
+    fn apply_collaboration_mask(&mut self, mask: CollaborationModeMask) {
+        if !self.collaboration_modes_enabled() {
+            return;
         }
         self.active_collaboration_mask = Some(mask);
         self.update_collaboration_mode_indicator();

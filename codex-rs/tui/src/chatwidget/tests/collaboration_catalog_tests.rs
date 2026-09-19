@@ -39,7 +39,7 @@ async fn collaboration_catalog_selection_clears_restored_prompt_and_survives_mod
             mode: ModeKind::Plan,
             settings: Settings {
                 model: "gpt-5.2".into(),
-                reasoning_effort: Some(ReasoningEffortConfig::High),
+                reasoning_effort: Some(ReasoningEffortConfig::Low),
                 developer_instructions: None,
             },
         }

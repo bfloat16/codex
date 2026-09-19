@@ -4197,7 +4197,7 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
 
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
         .expect("expected plan collaboration mode");
-    chat.set_collaboration_mask(plan_mask);
+    chat.set_collaboration_mask_from_user_action(plan_mask);
 
     let width = 80;
     let height = chat.desired_height(width);
@@ -5331,7 +5331,7 @@ async fn running_hooks_fit_around_background_activity_and_finish_without_history
             );
         }
         let rendered = hook_status_frame(&chat, /*width*/ 120);
-        assert!(rendered.contains("1 background terminal running"));
+        assert!(!rendered.contains("terminal running"));
         assert!(!rendered.contains("Running hooks"));
         assert!(!rendered.contains("checking command policy"));
         assert!(drain_insert_history(&mut rx).is_empty());
