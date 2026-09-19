@@ -2,7 +2,7 @@
 source: tui/src/chatwidget/tests/exec_flow.rs
 expression: "render_bottom_popup(&chat, 64)"
 ---
-● Inspecting repository (0s • esc to interrupt)
+● Inspecting repository (0s)
   └ checking the active branch
 
 

@@ -121,12 +121,10 @@ impl ChatWidget {
             }
             // Empty stdin means we are polling for background output.
             // Surface this in the status indicator (single "waiting" surface) instead of
-            // the transcript. Keep the header short so the interrupt hint remains visible.
+            // the transcript. Keep the header short so the elapsed time remains visible.
             self.bottom_pane.ensure_status_indicator();
             self.bottom_pane
                 .reset_waiting_animation(Duration::from_secs(180));
-            self.bottom_pane
-                .set_interrupt_hint_visible(/*visible*/ true);
             self.status_state.terminal_title_status_kind =
                 TerminalTitleStatusKind::WaitingForBackgroundTerminal;
             self.set_status(

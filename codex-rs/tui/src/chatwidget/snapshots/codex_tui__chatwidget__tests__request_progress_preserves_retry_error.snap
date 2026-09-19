@@ -2,5 +2,5 @@
 source: tui/src/chatwidget/tests/request_progress_tests.rs
 expression: "render_bottom_popup(&chat, 80).lines().take(2).collect::<Vec<_>>().join(\"\\n\")"
 ---
-• Reconnecting... 2/5 (0s • esc to interrupt • ↑ 2.000 KiB ↓ 256 B)
+• Reconnecting... 2/5 (0s • ↑ 2.000 KiB ↓ 256 B)
   └ Connection reset by peer

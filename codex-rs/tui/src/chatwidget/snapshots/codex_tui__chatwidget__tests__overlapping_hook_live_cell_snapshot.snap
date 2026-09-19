@@ -5,7 +5,7 @@ expression: "format!(\"{first_running_snapshot}\\n\\n{second_running_snapshot}\\
 pre running
 activity:
 "                                                                                "
-"• Thinking (0s • esc to interrupt) · checking command policy                    "
+"• Thinking (0s) · checking command policy                                       "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
@@ -17,7 +17,7 @@ history:
 post running
 activity:
 "                                                                                "
-"• Thinking (0s • esc to interrupt) · Running hooks                              "
+"• Thinking (0s) · Running hooks                                                 "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
@@ -29,7 +29,7 @@ history:
 pre completed
 activity:
 "                                                                                "
-"• Thinking (0s • esc to interrupt) · checking output policy                     "
+"• Thinking (0s) · checking output policy                                        "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
@@ -41,7 +41,7 @@ history:
 all completed
 activity:
 "                                                                                "
-"• Thinking (0s • esc to interrupt)                                              "
+"• Thinking (0s)                                                                 "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "

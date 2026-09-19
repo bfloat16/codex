@@ -476,9 +476,6 @@ impl BottomPane {
         let interrupt_binding = keymap.primary_hint(KeymapContext::Chat, "interrupt_turn");
         self.pending_input_preview
             .set_interrupt_binding(interrupt_binding);
-        if let Some(status) = self.status.as_mut() {
-            status.set_interrupt_binding(interrupt_binding);
-        }
         self.request_redraw();
     }
 
@@ -1211,11 +1208,6 @@ impl BottomPane {
                     ));
                 }
                 if let Some(status) = self.status.as_mut() {
-                    status.set_interrupt_hint_visible(/*visible*/ true);
-                    status.set_interrupt_binding(
-                        self.keymap
-                            .primary_hint(KeymapContext::Chat, "interrupt_turn"),
-                    );
                     status.update_model_transfer(self.model_transfer);
                 }
                 self.sync_status_inline_message();
@@ -1247,20 +1239,7 @@ impl BottomPane {
                     self.animations_enabled,
                 )
             });
-            if let Some(status) = self.status.as_mut() {
-                status.set_interrupt_binding(
-                    self.keymap
-                        .primary_hint(KeymapContext::Chat, "interrupt_turn"),
-                );
-            }
             self.sync_status_inline_message();
-            self.request_redraw();
-        }
-    }
-
-    pub(crate) fn set_interrupt_hint_visible(&mut self, visible: bool) {
-        if let Some(status) = self.status.as_mut() {
-            status.set_interrupt_hint_visible(visible);
             self.request_redraw();
         }
     }
@@ -3040,7 +3019,7 @@ mod tests {
 
         let area = Rect::new(0, 0, width, after);
         let rendered = render_snapshot(&pane, area);
-        assert!(rendered.contains("background terminal running · /ps to view"));
+        assert!(rendered.contains("1 background terminal running"));
     }
 
     #[test]

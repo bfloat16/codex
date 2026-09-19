@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/slash_commands.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
-"• Compacting remotely (v2) (0s • esc to interrupt)                              "
+"• Compacting remotely (v2) (0s)                                                 "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "

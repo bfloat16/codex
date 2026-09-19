@@ -487,8 +487,6 @@ impl ChatWidget {
         );
         self.bottom_pane.reset_status_timer(Duration::ZERO);
         self.bottom_pane.ensure_status_indicator();
-        self.bottom_pane
-            .set_interrupt_hint_visible(/*visible*/ false);
         self.set_status(
             "Setting up sandbox...".to_string(),
             Some("Hang tight, this may take a few minutes".to_string()),

@@ -1,15 +1,14 @@
 //! A live task status row rendered above the composer while the agent is busy.
 //!
-//! The row renders a separately owned clock, the optional interrupt hint, and short inline
+//! The row renders a separately owned clock and short inline
 //! context (for example, the unified-exec background-process summary). Keeping
 //! these pieces on one line avoids vertical layout churn in the bottom pane.
 //! Hook activity uses the remaining space or its own line on overflow, so it
-//! never displaces background-process controls.
+//! never displaces background-process status.
 
 use std::time::Duration;
 use std::time::Instant;
 
-use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
@@ -22,8 +21,6 @@ use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app_event_sender::AppEventSender;
-use crate::key_hint;
-use crate::key_hint::ShortcutHint;
 use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::motion::MotionMode;
@@ -68,14 +65,11 @@ pub(crate) struct StatusIndicatorWidget {
     header: String,
     details: Option<String>,
     details_max_lines: usize,
-    /// Optional suffix rendered after the elapsed/interrupt segment.
+    /// Optional suffix rendered after the elapsed segment.
     inline_message: Option<String>,
     model_transfer: Option<ModelTransferStatus>,
     /// Hook activity may move below the status row when it cannot fit in full.
     hook_status_message: Option<String>,
-    show_interrupt_hint: bool,
-    interrupt_binding: Option<ShortcutHint>,
-
     app_event_tx: AppEventSender,
     frame_requester: FrameRequester,
     animations_enabled: bool,
@@ -113,8 +107,6 @@ impl StatusIndicatorWidget {
             inline_message: None,
             model_transfer: None,
             hook_status_message: None,
-            show_interrupt_hint: true,
-            interrupt_binding: Some(key_hint::plain(KeyCode::Esc).into()),
             app_event_tx,
             frame_requester,
             animations_enabled,
@@ -129,6 +121,9 @@ impl StatusIndicatorWidget {
 
     /// Update the animated header label (left of the brackets).
     pub(crate) fn update_header(&mut self, header: String) {
+        if header != "Waiting" && !header.starts_with("Waiting ") {
+            self.waiting_animation_started_at = None;
+        }
         self.header = header;
     }
 
@@ -157,11 +152,11 @@ impl StatusIndicatorWidget {
             });
     }
 
-    /// Update the inline suffix text shown after the elapsed/interrupt hint.
+    /// Update the inline suffix text shown after the elapsed time.
     ///
     /// Callers should provide plain, already-contextualized text. Passing
     /// verbose status prose here can cause frequent width truncation and hide
-    /// the more important elapsed/interrupt hint.
+    /// the elapsed time.
     pub(crate) fn update_inline_message(&mut self, message: Option<String>) {
         self.inline_message = message
             .map(|message| message.trim().to_string())
@@ -184,14 +179,6 @@ impl StatusIndicatorWidget {
     #[cfg(test)]
     pub(crate) fn details(&self) -> Option<&str> {
         self.details.as_deref()
-    }
-
-    pub(crate) fn set_interrupt_hint_visible(&mut self, visible: bool) {
-        self.show_interrupt_hint = visible;
-    }
-
-    pub(crate) fn set_interrupt_binding(&mut self, binding: Option<ShortcutHint>) {
-        self.interrupt_binding = binding;
     }
 
     pub(crate) fn with_timer<'a>(&'a self, timer: &'a StatusTimer) -> impl Renderable + 'a {
@@ -238,7 +225,7 @@ struct StatusIndicator<'a> {
 
 impl StatusIndicator<'_> {
     // Share width decisions between height measurement and rendering, including
-    // wide Unicode characters, remapped interrupt hints, and elapsed-time text.
+    // wide Unicode characters and elapsed-time text.
     fn lines(&self, width: u16) -> Vec<Line<'static>> {
         let row = self.row;
         let now = Instant::now();
@@ -249,6 +236,10 @@ impl StatusIndicator<'_> {
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
         let motion_mode = MotionMode::from_animations_enabled(row.animations_enabled);
         let waiting = row.header == "Waiting" || row.header.starts_with("Waiting ");
+        let waiting_animation_active = waiting
+            && row.waiting_animation_started_at.is_none_or(|started_at| {
+                now.saturating_duration_since(started_at) < row.waiting_animation_duration
+            });
 
         let mut spans = Vec::with_capacity(9);
         if let Some(indicator) = activity_indicator(
@@ -257,19 +248,19 @@ impl StatusIndicator<'_> {
             ReducedMotionIndicator::Hidden,
         ) {
             let indicator = Span::styled("●", indicator.style);
-            spans.push(if waiting {
+            spans.push(if waiting_animation_active {
                 waiting_span(indicator)
             } else {
                 indicator
             });
             spans.push(" ".into());
         }
-        let header_spans = if waiting {
+        let header_spans = if waiting_animation_active {
             waiting_header_spans(
                 &row.header,
                 row.waiting_animation_started_at,
                 row.waiting_animation_duration,
-                Instant::now(),
+                now,
             )
         } else {
             shimmer_text(&row.header, motion_mode)
@@ -278,17 +269,7 @@ impl StatusIndicator<'_> {
         if !spans.is_empty() {
             spans.push(" ".into());
         }
-        if row.show_interrupt_hint
-            && let Some(interrupt_binding) = row.interrupt_binding
-        {
-            spans.extend(vec![
-                format!("({pretty_elapsed} • ").dim(),
-                interrupt_binding.into(),
-                " to interrupt".dim(),
-            ]);
-        } else {
-            spans.push(format!("({pretty_elapsed}").dim());
-        }
+        spans.push(format!("({pretty_elapsed}").dim());
         if let Some(status) = row.model_transfer {
             let sent = fmt_bytes(status.sent_bytes);
             let received = fmt_bytes(status.received_bytes);
@@ -309,8 +290,7 @@ impl StatusIndicator<'_> {
             spans.push(")".dim());
         }
         if let Some(message) = &row.inline_message {
-            // Keep optional context after elapsed/interrupt text so that core
-            // interrupt affordances stay in a fixed visual location.
+            // Keep optional context after elapsed text so the status layout stays stable.
             spans.push(" · ".dim());
             spans.push(message.clone().dim());
         }
@@ -479,7 +459,7 @@ mod tests {
             })
             .expect("draw");
         insta::assert_snapshot!(terminal.backend(), @r###"
-"Working (0s • esc to interrupt • ↑ 2.000 KiB ↓ 1.000 MiB)                       "
+"Working (0s • ↑ 2.000 KiB ↓ 1.000 MiB)                                          "
 "###);
     }
 
@@ -516,8 +496,6 @@ mod tests {
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         );
-        w.set_interrupt_hint_visible(/*visible*/ false);
-
         // Freeze time-dependent rendering (elapsed + spinner) to keep the snapshot stable.
         let mut timer = StatusTimer::default();
         timer.pause_at(timer.last_resume_at);
@@ -552,7 +530,7 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
 
-        assert!(line.starts_with("Working (0s • esc to interrupt)"));
+        assert!(line.starts_with("Working (0s)"));
     }
 
     #[test]
@@ -584,27 +562,39 @@ mod tests {
     }
 
     #[test]
-    fn renders_remapped_interrupt_hint() {
+    fn waiting_animation_expiry_restores_regular_status_rendering() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let mut w = StatusIndicatorWidget::new(
+        let mut widget = StatusIndicatorWidget::new(
             tx,
             crate::tui::FrameRequester::test_dummy(),
             /*animations_enabled*/ false,
         );
-        w.set_interrupt_binding(Some(key_hint::plain(KeyCode::F(12)).into()));
+        widget.update_header("Waiting for background terminal".to_string());
+        widget.waiting_animation_duration = Duration::from_secs(1);
+        widget.waiting_animation_started_at = Some(Instant::now() - Duration::from_secs(2));
         let mut timer = StatusTimer::default();
         timer.pause_at(timer.last_resume_at);
 
         let mut terminal = Terminal::new(TestBackend::new(80, 1)).expect("terminal");
         terminal
-            .draw(|f| w.with_timer(&timer).render(f.area(), f.buffer_mut()))
+            .draw(|frame| {
+                widget
+                    .with_timer(&timer)
+                    .render(frame.area(), frame.buffer_mut())
+            })
             .expect("draw");
-        insta::assert_snapshot!(terminal.backend());
+
+        insta::assert_snapshot!(terminal.backend(), @r###"
+"Waiting for background terminal (0s)                                            "
+"###);
+        let cell = &terminal.backend().buffer()[(0, 0)];
+        assert_eq!(cell.symbol(), "W");
+        assert_eq!(cell.fg, ratatui::style::Color::Reset);
     }
 
     #[test]
-    fn hook_status_reflows_without_displacing_controls_or_details() {
+    fn hook_status_reflows_without_displacing_status_or_details() {
         let (tx, _rx) = unbounded_channel::<AppEvent>();
         let mut w = StatusIndicatorWidget::new(
             AppEventSender::new(tx),
@@ -623,12 +613,12 @@ mod tests {
         for (background, snapshot) in [
             (None, "hook_status_reflows_without_background_activity"),
             (
-                Some("1 background terminal running · /ps to view · /stop to close"),
+                Some("1 background terminal running"),
                 "hook_status_reflows_with_background_activity",
             ),
         ] {
             w.update_inline_message(background.map(str::to_string));
-            let mut expected = "Working (0s • esc to interrupt)".to_string();
+            let mut expected = "Working (0s)".to_string();
             if let Some(background) = background {
                 expected.push_str(&format!(" · {background}"));
             }

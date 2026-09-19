@@ -14,8 +14,6 @@ impl ChatWidget {
             self.restore_user_message_to_composer(message);
         }
         self.bottom_pane.ensure_status_indicator();
-        self.bottom_pane
-            .set_interrupt_hint_visible(/*visible*/ false);
         self.set_status_header("Reconnecting to app-server…".to_string());
         self.set_footer_hint_override(Some(vec![("ctrl+c".into(), "quit".into())]));
         self.add_error_message("Connection lost. Attempting to reconnect…".into());

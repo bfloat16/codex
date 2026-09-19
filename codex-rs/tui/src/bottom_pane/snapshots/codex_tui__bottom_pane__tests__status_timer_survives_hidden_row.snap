@@ -3,7 +3,7 @@ source: tui/src/bottom_pane/mod.rs
 assertion_line: 2570
 expression: "render_snapshot(&pane, area)"
 ---
-● Working (42s • esc to interrupt)      
+● Working (42s)                         
                                         
                                         
 › Ask Codex to do anything              
