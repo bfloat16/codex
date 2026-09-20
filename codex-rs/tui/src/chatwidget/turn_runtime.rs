@@ -379,6 +379,21 @@ impl ChatWidget {
             })
     }
 
+    pub(super) fn running_interrupted_unified_exec_started_at(&self) -> Option<Instant> {
+        self.transcript
+            .active_cell
+            .as_ref()
+            .and_then(|cell| cell.as_any().downcast_ref::<ExecCell>())
+            .and_then(|cell| {
+                cell.iter_calls().find_map(|call| {
+                    (call.duration.is_none()
+                        && self.interrupted_unified_exec_calls.contains(&call.call_id))
+                    .then_some(call.start_time)
+                    .flatten()
+                })
+            })
+    }
+
     pub(super) fn on_server_overloaded_error(&mut self, message: String) {
         self.input_queue.submit_pending_steers_after_interrupt = false;
         self.finalize_turn();

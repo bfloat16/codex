@@ -1587,6 +1587,11 @@ async fn interrupt_preserves_unified_exec_wait_streak_snapshot() {
 
     handle_turn_interrupted(&mut chat, "turn-1");
     assert!(!chat.active_tool_group_state().accepting_content);
+    assert!(chat.running_interrupted_unified_exec_started_at().is_some());
+    assert!(
+        chat.active_cell_render_key()
+            .is_some_and(|key| key.animation_tick.is_some())
+    );
     let active_display = chat
         .active_cell_display(/*width*/ 80)
         .expect("interrupted background shell should remain visible");

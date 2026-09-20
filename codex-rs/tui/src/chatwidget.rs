@@ -1223,6 +1223,12 @@ impl ChatWidget {
         self.update_due_hook_visibility();
         self.schedule_hook_timer_if_needed();
         self.bottom_pane.pre_draw_tick();
+        if let Some(started_at) = self.running_interrupted_unified_exec_started_at() {
+            let elapsed = started_at.elapsed();
+            let next_tick = Duration::from_secs(elapsed.as_secs().saturating_add(1));
+            self.frame_requester
+                .schedule_frame_in(next_tick.saturating_sub(elapsed));
+        }
         if let Some(pet) = self.ambient_pet.as_ref() {
             pet.schedule_next_frame();
         }
