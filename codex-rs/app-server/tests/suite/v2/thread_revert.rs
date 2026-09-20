@@ -669,8 +669,10 @@ async fn thread_revert_interrupts_active_turn_and_keeps_thread_loaded() -> Resul
     Ok(())
 }
 
+#[test_case::test_case(false; "immediately_after_start")]
+#[test_case::test_case(true; "waiting_for_model")]
 #[tokio::test]
-async fn thread_revert_removes_an_already_interrupted_turn() -> Result<()> {
+async fn thread_revert_removes_an_already_interrupted_turn(wait_for_model: bool) -> Result<()> {
     let home = TempDir::new()?;
     let server = responses::start_mock_server().await;
     let _response_mock = responses::mount_response_sequence(
@@ -709,19 +711,21 @@ async fn thread_revert_removes_an_already_interrupted_turn() -> Result<()> {
             },
         })
         .await?;
-    timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            if server
-                .received_requests()
-                .await
-                .is_some_and(|requests| !requests.is_empty())
-            {
-                break;
+    if wait_for_model {
+        timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                if server
+                    .received_requests()
+                    .await
+                    .is_some_and(|requests| !requests.is_empty())
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await?;
+        })
+        .await?;
+    }
     mcp.interrupt_turn_and_wait_for_aborted(
         thread.id.clone(),
         turn.id.clone(),
@@ -742,6 +746,47 @@ async fn thread_revert_removes_an_already_interrupted_turn() -> Result<()> {
         })
         .await?;
     assert!(reverted_thread.turns.is_empty());
+    assert_eq!(
+        turn_ids_from_cursor(
+            &mut mcp, &thread.id, /*cursor*/ None, /*sort_direction*/ None
+        )
+        .await?,
+        Vec::<String>::new()
+    );
+    mcp.shutdown_gracefully().await?;
+    mcp = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build()
+        .await?;
+    initialize_experimental(&mut mcp).await?;
+    let _: ThreadResumeResponse = mcp
+        .request(|request_id| ClientRequest::ThreadResume {
+            request_id,
+            params: ThreadResumeParams {
+                thread_id: thread.id.clone(),
+                exclude_turns: true,
+                ..Default::default()
+            },
+        })
+        .await?;
+    server.reset().await;
+    let followup = responses::mount_sse_once(
+        &server,
+        create_final_assistant_message_sse_response("continued")?,
+    )
+    .await;
+    mcp.start_turn_and_wait_for_completion(TurnStartParams {
+        thread_id: thread.id,
+        input: vec![UserInput::Text {
+            text: "replacement prompt".to_string(),
+            text_elements: Vec::new(),
+        }],
+        ..Default::default()
+    })
+    .await?;
+    let input = serde_json::to_string(&followup.single_request().input())?;
+    assert!(input.contains("replacement prompt"));
+    assert!(!input.contains("interrupt me"));
     Ok(())
 }
 

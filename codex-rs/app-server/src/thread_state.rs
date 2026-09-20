@@ -98,6 +98,8 @@ pub(crate) struct ThreadState {
     pub(crate) pending_rollbacks: Option<ConnectionRequestId>,
     pub(crate) turn_summary: TurnSummary,
     pub(crate) last_terminal_turn_id: Option<String>,
+    /// A turn accepted by Core whose start event has not reached the listener yet.
+    pub(crate) pending_start_turn_id: Option<String>,
     /// Lets an internal runtime replacement wait until the old listener has processed Core's
     /// `ShutdownComplete` event before that listener is superseded.
     shutdown_drain_waiter: Option<oneshot::Sender<()>>,
@@ -143,6 +145,7 @@ impl ThreadState {
             let _ = cancel_tx.send(());
         }
         self.shutdown_drain_waiter = None;
+        self.pending_start_turn_id = None;
         self.listener_command_tx = None;
         self.current_turn_history.reset();
         self.listener_thread = None;
@@ -163,6 +166,10 @@ impl ThreadState {
         self.current_turn_history.active_turn_snapshot()
     }
 
+    pub(crate) fn active_turn_id(&self) -> Option<&str> {
+        self.current_turn_history.active_turn_id()
+    }
+
     pub(crate) fn register_shutdown_drain_waiter(&mut self) -> oneshot::Receiver<()> {
         let (completion_tx, completion_rx) = oneshot::channel();
         self.shutdown_drain_waiter = Some(completion_tx);
@@ -176,6 +183,9 @@ impl ThreadState {
     pub(crate) fn track_current_turn_event(&mut self, event_turn_id: &str, event: &EventMsg) {
         if let EventMsg::TurnStarted(payload) = event {
             self.turn_summary.started_at = payload.started_at;
+            if self.pending_start_turn_id.as_deref() == Some(payload.turn_id.as_str()) {
+                self.pending_start_turn_id = None;
+            }
         }
         if let EventMsg::ItemCompleted(payload) = event
             && let CoreTurnItem::AgentMessage(item) = &payload.item
@@ -189,6 +199,9 @@ impl ThreadState {
         }
         self.current_turn_history.handle_event(event);
         if matches!(event, EventMsg::TurnAborted(_) | EventMsg::TurnComplete(_)) {
+            if self.pending_start_turn_id.as_deref() == Some(event_turn_id) {
+                self.pending_start_turn_id = None;
+            }
             self.last_terminal_turn_id = Some(event_turn_id.to_string());
             if !self.current_turn_history.has_active_turn() {
                 self.current_turn_history.reset();

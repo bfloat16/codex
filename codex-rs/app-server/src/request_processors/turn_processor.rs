@@ -668,6 +668,16 @@ impl TurnRequestProcessor {
             }
         };
 
+        if started {
+            let state = self.thread_state_manager.thread_state(thread_id).await;
+            let mut state = state.lock().await;
+            if state.last_terminal_turn_id.as_deref() != Some(turn_id.as_str())
+                && state.active_turn_id() != Some(turn_id.as_str())
+            {
+                state.pending_start_turn_id = Some(turn_id.clone());
+            }
+        }
+
         if turn_has_input && started {
             let config_snapshot = thread.config_snapshot().await;
             if config_snapshot.is_primary_environment_configured() {
@@ -1587,11 +1597,16 @@ impl TurnRequestProcessor {
             let is_running = matches!(thread.agent_status().await, AgentStatus::Running);
             {
                 let mut thread_state = thread_state.lock().await;
-                if let Some(active_turn) = thread_state.active_turn_snapshot() {
-                    if active_turn.id != turn_id {
+                // Core may have accepted the turn before the listener observed TurnStarted.
+                // Interrupts are ordered after accepted submissions in Core's queue.
+                let active_turn_id = thread_state
+                    .pending_start_turn_id
+                    .as_deref()
+                    .or_else(|| thread_state.active_turn_id());
+                if let Some(active_turn_id) = active_turn_id {
+                    if active_turn_id != turn_id {
                         return Err(invalid_request(format!(
-                            "expected active turn id {turn_id} but found {}",
-                            active_turn.id
+                            "expected active turn id {turn_id} but found {active_turn_id}"
                         )));
                     }
                 } else if thread_state.last_terminal_turn_id.as_deref() == Some(turn_id.as_str())
