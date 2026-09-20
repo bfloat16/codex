@@ -240,12 +240,13 @@ impl ChatWidget {
     }
 
     fn model_family_disabled_reason(&self, model: &str) -> Option<String> {
-        (is_deepseek_model(model) != is_deepseek_model(&self.initial_thread_model)).then(|| {
-            format!(
-                "Unavailable because this thread started with `{}`.",
-                self.initial_thread_model
-            )
-        })
+        self.initial_thread_model
+            .as_deref()
+            .and_then(|initial_model| {
+                (is_deepseek_model(model) != is_deepseek_model(initial_model)).then(|| {
+                    format!("Unavailable because this thread started with `{initial_model}`.")
+                })
+            })
     }
 
     fn open_all_models_popup_with_view_id(
@@ -289,10 +290,12 @@ impl ChatWidget {
             });
         }
 
-        let header = self.model_menu_header(
-            "Select Model and Effort",
-            "Choose a model in the same family as this thread's initial model.",
-        );
+        let subtitle = if self.initial_thread_model.is_some() {
+            "Choose a model in the same family as this thread's initial model."
+        } else {
+            "Choose a model. Its family locks after this thread's first turn."
+        };
+        let header = self.model_menu_header("Select Model and Effort", subtitle);
         self.show_model_selection_view(SelectionViewParams {
             view_id: Some(view_id),
             footer_hint: Some(self.bottom_pane.standard_popup_hint_line()),

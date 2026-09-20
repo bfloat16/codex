@@ -126,6 +126,9 @@ impl ChatWidget {
             ThreadItem::UserMessage {
                 content, client_id, ..
             } => {
+                if self.initial_thread_model.is_none() {
+                    self.initial_thread_model = Some(self.current_model().to_string());
+                }
                 self.on_committed_user_message(&content, client_id.as_deref(), from_replay);
             }
             ThreadItem::AgentMessage {

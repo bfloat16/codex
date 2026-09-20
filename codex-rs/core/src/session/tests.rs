@@ -4465,7 +4465,7 @@ async fn set_rate_limits_retains_previous_credits() {
     };
     let session_configuration = SessionConfiguration {
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
-        initial_model: collaboration_mode.model().to_string(),
+        initial_model: Some(collaboration_mode.model().to_string()),
         step_settings: Arc::new(StepSettings {
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
@@ -4585,7 +4585,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
     };
     let session_configuration = SessionConfiguration {
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
-        initial_model: collaboration_mode.model().to_string(),
+        initial_model: Some(collaboration_mode.model().to_string()),
         step_settings: Arc::new(StepSettings {
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
@@ -5230,7 +5230,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
 
     SessionConfiguration {
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
-        initial_model: collaboration_mode.model().to_string(),
+        initial_model: Some(collaboration_mode.model().to_string()),
         step_settings: Arc::new(StepSettings {
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
@@ -6286,7 +6286,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_packaged_zsh() {
             config.model_provider.clone(),
             Some(Arc::clone(&auth_manager)),
         ),
-        initial_model: collaboration_mode.model().to_string(),
+        initial_model: Some(collaboration_mode.model().to_string()),
         step_settings: Arc::new(StepSettings {
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
@@ -6441,7 +6441,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             config.model_provider.clone(),
             Some(Arc::clone(&auth_manager)),
         ),
-        initial_model: collaboration_mode.model().to_string(),
+        initial_model: Some(collaboration_mode.model().to_string()),
         step_settings: Arc::new(StepSettings {
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
@@ -6780,7 +6780,7 @@ async fn make_session_with_config_and_rx(
             config.model_provider.clone(),
             Some(Arc::clone(&auth_manager)),
         ),
-        initial_model: collaboration_mode.model().to_string(),
+        initial_model: Some(collaboration_mode.model().to_string()),
         step_settings: Arc::new(StepSettings {
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
@@ -6908,7 +6908,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
             config.model_provider.clone(),
             Some(Arc::clone(&auth_manager)),
         ),
-        initial_model: collaboration_mode.model().to_string(),
+        initial_model: Some(collaboration_mode.model().to_string()),
         step_settings: Arc::new(StepSettings {
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
@@ -8783,7 +8783,7 @@ where
             config.model_provider.clone(),
             Some(Arc::clone(&auth_manager)),
         ),
-        initial_model: collaboration_mode.model().to_string(),
+        initial_model: Some(collaboration_mode.model().to_string()),
         step_settings: Arc::new(StepSettings {
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,

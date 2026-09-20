@@ -752,8 +752,7 @@ impl Session {
             .find_map(|item| match item {
                 RolloutItem::TurnContext(context) => Some(context.model.clone()),
                 _ => None,
-            })
-            .unwrap_or_else(|| model.clone());
+            });
         let session_configuration = SessionConfiguration {
             provider: create_model_provider(
                 config.model_provider.clone(),
@@ -1930,7 +1929,9 @@ impl Session {
                 let state = self.state.lock().await;
                 state.session_configuration.initial_model.clone()
             };
-            if is_deepseek_model(model) != is_deepseek_model(&initial_model) {
+            if let Some(initial_model) = initial_model
+                && is_deepseek_model(model) != is_deepseek_model(&initial_model)
+            {
                 return Err(codex_config::ConstraintError::InvalidValue {
                     field_name: "model",
                     candidate: model.to_string(),

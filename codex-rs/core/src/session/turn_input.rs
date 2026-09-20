@@ -163,6 +163,19 @@ impl PreparedTurnInputSettings {
         let Some((turn_context, settings_snapshot)) = turn_context else {
             return Ok(None);
         };
+        if matches!(kind, TurnStartKind::User | TurnStartKind::Recovery) {
+            let first_model = turn_context
+                .initial_settings
+                .selected()
+                .collaboration_mode
+                .model()
+                .to_string();
+            let mut state = session.state.lock().await;
+            state
+                .session_configuration
+                .initial_model
+                .get_or_insert(first_model);
+        }
         if let Some(turn_trigger) = turn_trigger {
             turn_context
                 .turn_metadata_state

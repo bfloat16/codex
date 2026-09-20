@@ -3640,28 +3640,41 @@ async fn model_picker_only_shows_deepseek_when_its_provider_is_configured() {
     without_provider.open_model_popup_with_presets(vec![deepseek]);
     assert_eq!(without_provider.bottom_pane.active_view_id(), None);
 
-    let (mut with_provider, mut rx, _op_rx) =
-        make_chatwidget_manual(Some("test-visible-model")).await;
+    let (mut with_provider, _rx, _op_rx) = make_chatwidget_manual(Some("test-visible-model")).await;
     with_provider.thread_id = Some(ThreadId::new());
     with_provider
         .config
         .model_providers
         .insert("deepseek".to_string(), ModelProviderInfo::default());
+    handle_turn_started(&mut with_provider, "empty-turn");
     with_provider.open_model_popup_with_presets(Vec::new());
     let popup = render_bottom_popup(&with_provider, /*width*/ 80);
 
     assert!(popup.contains("deepseek-flash"));
     assert_chatwidget_snapshot!("model_picker_with_deepseek_provider", popup);
-    with_provider.handle_key_event(KeyEvent::from(KeyCode::Enter));
-    while let Ok(event) = rx.try_recv() {
-        assert!(
-            !matches!(
-                event,
-                AppEvent::UpdateModel(_) | AppEvent::OpenReasoningPopup { .. }
-            ),
-            "disabled DeepSeek model must not emit a selection event"
-        );
-    }
+}
+
+#[tokio::test]
+async fn gpt_thread_model_picker_disables_deepseek_after_first_turn() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.config
+        .model_providers
+        .insert("deepseek".to_string(), ModelProviderInfo::default());
+    complete_user_message(&mut chat, "user-1", "start with GPT");
+
+    let deepseek: ModelPreset = codex_models_manager::bundled_models_response()
+        .expect("bundled models")
+        .models
+        .into_iter()
+        .find(|model| model.slug == "deepseek-flash")
+        .expect("deepseek-flash model")
+        .into();
+    chat.open_model_popup_with_presets(vec![deepseek]);
+    let popup = render_bottom_popup(&chat, /*width*/ 80);
+
+    assert!(popup.contains("deepseek-flash"));
+    assert_chatwidget_snapshot!("gpt_thread_model_picker_disables_deepseek", popup);
 }
 
 #[tokio::test]
@@ -3671,6 +3684,7 @@ async fn deepseek_thread_model_picker_disables_gpt_models() {
     chat.config
         .model_providers
         .insert("deepseek".to_string(), ModelProviderInfo::default());
+    complete_user_message(&mut chat, "user-1", "start with DeepSeek");
 
     let gpt: ModelPreset = codex_models_manager::bundled_models_response()
         .expect("bundled models")

@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/popups_and_settings.rs
 expression: "render_bottom_popup(&chat, 80)"
 ---
   Select Model and Effort
-  Choose a model in the same family as this thread's initial model.
+  Choose a model. Its family locks after this thread's first turn.
 
 › 1. gpt-5.5            Frontier model for complex coding, research, and real-
                         world work.

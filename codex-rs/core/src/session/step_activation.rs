@@ -244,8 +244,9 @@ impl Session {
                 let state = self.state.lock().await;
                 state.session_configuration.initial_model.clone()
             };
-            if codex_protocol::openai_models::is_deepseek_model(model)
-                != codex_protocol::openai_models::is_deepseek_model(&initial_model)
+            if let Some(initial_model) = initial_model
+                && codex_protocol::openai_models::is_deepseek_model(model)
+                    != codex_protocol::openai_models::is_deepseek_model(&initial_model)
             {
                 return TurnSettingsUpdateOutcome::Rejected {
                     reason: format!(

@@ -1,0 +1,12 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: popup
+---
+  Select Model and Effort
+  Choose a model in the same family as this thread's initial model.
+
+›    deepseek-flash (disabled)  Latest frontier agentic coding model with
+                                image input. (disabled: Unavailable because
+                                this thread started with `gpt-5.5`.)
+
+  Press enter to confirm or esc to go back

@@ -183,11 +183,23 @@ async fn gpt_thread_rejects_switching_to_deepseek() -> Result<()> {
         .build(&openai_server)
         .await?;
 
+    test.codex
+        .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
+            model: Some("deepseek-flash".to_string()),
+            model_provider: Some("deepseek".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("empty thread should allow selecting its initial model family");
+
+    let _response_mock = mount_sse_once(&openai_server, sse_completed("resp-gpt-family")).await;
+    submit_model_turn(&test.codex, "gpt-5.5", ThreadSettingsOverrides::default()).await?;
+
     let error = test
         .codex
         .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
             model: Some("deepseek-flash".to_string()),
-            model_provider: Some("openai".to_string()),
+            model_provider: Some("deepseek".to_string()),
             ..Default::default()
         })
         .await
@@ -219,17 +231,38 @@ async fn deepseek_thread_rejects_gpt_models_and_other_providers() -> Result<()> 
     skip_if_no_network!(Ok(()));
 
     let openai_server = MockServer::start().await;
+    let deepseek_base_url = format!("{}/v1", openai_server.uri());
     let test = test_codex()
         .with_model("deepseek-flash")
         .with_pre_build_hook(move |home| {
             std::fs::write(
                 home.join("config.toml"),
-                "model = \"deepseek-flash\"\nmodel_provider = \"deepseek\"\n\n[model_providers.deepseek]\nname = \"DeepSeek\"\nbase_url = \"https://api.deepseek.test/\"\ncompact = \"remotev2\"\n",
+                format!(
+                    "model = \"deepseek-flash\"\nmodel_provider = \"deepseek\"\n\n[model_providers.deepseek]\nname = \"DeepSeek\"\nbase_url = \"{deepseek_base_url}\"\ncompact = \"remotev2\"\n\n[model_providers.alpha]\nname = \"Alpha\"\nbase_url = \"{deepseek_base_url}\"\ncompact = \"remotev2\"\n"
+                ),
             )
             .expect("write DeepSeek provider config");
         })
         .build(&openai_server)
         .await?;
+
+    test.codex
+        .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
+            model: Some("gpt-5.5".to_string()),
+            model_provider: Some("alpha".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("empty thread should allow selecting its initial model family");
+
+    let _response_mock =
+        mount_sse_once(&openai_server, sse_completed("resp-deepseek-family")).await;
+    submit_model_turn(
+        &test.codex,
+        "deepseek-flash",
+        ThreadSettingsOverrides::default(),
+    )
+    .await?;
 
     let model_error = test
         .codex
@@ -248,7 +281,7 @@ async fn deepseek_thread_rejects_gpt_models_and_other_providers() -> Result<()> 
     let provider_error = test
         .codex
         .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
-            model_provider: Some("openai".to_string()),
+            model_provider: Some("alpha".to_string()),
             ..Default::default()
         })
         .await

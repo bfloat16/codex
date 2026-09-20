@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/popups_and_settings.rs
 expression: popup
 ---
   Select Model and Effort
-  Choose a model in the same family as this thread's initial model.
+  Choose a model. Its family locks after this thread's first turn.
 
   1. gpt-6-astra (default)  Our most capable model for complex, demanding
                             work.

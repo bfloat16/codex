@@ -87,8 +87,8 @@ pub(crate) struct SessionConfiguration {
     /// Runtime provider and its provider-specific execution policy.
     pub(super) provider: SharedModelProvider,
 
-    /// First model selected for this thread. Its provider family is immutable.
-    pub(super) initial_model: String,
+    /// Model used by the first user turn. Its provider family is immutable once set.
+    pub(super) initial_model: Option<String>,
 
     /// Desired configured inputs inherited by future turns.
     pub(super) step_settings: Arc<StepSettings>,
@@ -355,13 +355,14 @@ impl SessionConfiguration {
     }
 
     fn validate_model_family(&self, model: &str, provider_id: &str) -> ConstraintResult<()> {
-        if codex_protocol::openai_models::is_deepseek_model(model)
-            != codex_protocol::openai_models::is_deepseek_model(&self.initial_model)
+        if let Some(initial_model) = self.initial_model.as_deref()
+            && codex_protocol::openai_models::is_deepseek_model(model)
+                != codex_protocol::openai_models::is_deepseek_model(initial_model)
         {
             return Err(ConstraintError::InvalidValue {
                 field_name: "model",
                 candidate: model.to_string(),
-                allowed: format!("same model family as `{}`", self.initial_model),
+                allowed: format!("same model family as `{initial_model}`"),
                 requirement_source: codex_config::RequirementSource::Unknown,
             });
         }
