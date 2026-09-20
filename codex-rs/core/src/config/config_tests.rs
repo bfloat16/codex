@@ -1215,11 +1215,11 @@ command = "print-token"
 }
 
 #[tokio::test]
-async fn load_config_routes_deepseek_models_to_the_deepseek_provider() {
+async fn load_config_accepts_matching_deepseek_model_and_provider() {
     let cfg = toml::from_str::<ConfigToml>(
         r#"
 model = "deepseek-flash"
-model_provider = "openai"
+model_provider = "deepseek"
 
 [model_providers.deepseek]
 name = "DeepSeek"
@@ -1249,8 +1249,17 @@ compact = "remotev2"
 
 #[tokio::test]
 async fn load_config_rejects_deepseek_models_without_the_deepseek_provider() {
-    let cfg = toml::from_str::<ConfigToml>(r#"model = "deepseek-flash""#)
-        .expect("model config should deserialize");
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+model = "deepseek-flash"
+model_provider = "openai"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.com/"
+"#,
+    )
+    .expect("model config should deserialize");
 
     let error = Config::load_from_base_config_with_overrides(
         cfg,
@@ -1258,13 +1267,72 @@ async fn load_config_rejects_deepseek_models_without_the_deepseek_provider() {
         tempdir().expect("tempdir").abs(),
     )
     .await
-    .expect_err("DeepSeek model must require its provider");
+    .expect_err("DeepSeek model must use its provider");
 
-    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     assert!(
         error
             .to_string()
-            .contains("Model provider `deepseek` required by model `deepseek-flash` was not found")
+            .contains("Model `deepseek-flash` is incompatible with model provider `openai`")
+    );
+}
+
+#[tokio::test]
+async fn load_config_rejects_deepseek_provider_with_gpt_model() {
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+model = "gpt-5.5"
+model_provider = "deepseek"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.com/"
+"#,
+    )
+    .expect("model config should deserialize");
+
+    let error = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect_err("GPT model must not use the DeepSeek provider");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        error
+            .to_string()
+            .contains("Model `gpt-5.5` is incompatible with model provider `deepseek`")
+    );
+}
+
+#[tokio::test]
+async fn load_config_rejects_deepseek_provider_without_a_model() {
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+model_provider = "deepseek"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.com/"
+"#,
+    )
+    .expect("provider config should deserialize");
+
+    let error = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect_err("DeepSeek provider must require an explicit DeepSeek model");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        error
+            .to_string()
+            .contains("Model provider `deepseek` requires a DeepSeek model in config.toml")
     );
 }
 

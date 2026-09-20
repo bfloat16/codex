@@ -114,9 +114,11 @@ use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::models::PermissionProfile;
 pub use codex_protocol::models::PermissionProfileSnapshot;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::openai_models::DEEPSEEK_PROVIDER_ID;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::openai_models::model_provider_matches_family;
 use codex_protocol::openai_models::required_provider_id;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
@@ -3740,14 +3742,14 @@ impl Config {
             .clone()
             .filter(|value| !value.is_empty());
 
-        let mut model_provider_id = model_provider
-            .or_else(|| config_layer_stack.effective_user_config()
+        let configured_model_provider_id = config_layer_stack
+            .effective_user_config()
             .and_then(|config| {
                 config
                     .get("model_provider")
                     .and_then(TomlValue::as_str)
                     .map(str::to_string)
-            }))
+            })
             .or_else(|| {
                 config_layer_stack
                     .all_layers_low_to_high()
@@ -3757,6 +3759,23 @@ impl Config {
                     .flatten()
             })
             .unwrap_or_else(|| "openai".to_string());
+        if let Some(configured_model) = cfg.model.as_deref()
+            && !model_provider_matches_family(configured_model, &configured_model_provider_id)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Model `{configured_model}` is incompatible with model provider `{configured_model_provider_id}` in config.toml"
+                ),
+            ));
+        }
+        if cfg.model.is_none() && configured_model_provider_id == DEEPSEEK_PROVIDER_ID {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Model provider `deepseek` requires a DeepSeek model in config.toml",
+            ));
+        }
+        let mut model_provider_id = model_provider.unwrap_or(configured_model_provider_id);
         let model_providers =
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
@@ -3916,6 +3935,21 @@ impl Config {
                     )
                 })?
                 .clone();
+        }
+        if let Some(model) = model.as_deref() {
+            if !model_provider_matches_family(model, &model_provider_id) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Model `{model}` is incompatible with model provider `{model_provider_id}`"
+                    ),
+                ));
+            }
+        } else if model_provider_id == DEEPSEEK_PROVIDER_ID {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Model provider `deepseek` requires a DeepSeek model",
+            ));
         }
         let notices = cfg.notice.unwrap_or_default();
         let service_tier = match service_tier_override {

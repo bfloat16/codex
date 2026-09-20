@@ -53,11 +53,19 @@ pub const MODEL_SPECIALTY_CYBER: &str = "cyber";
 pub const SPEED_TIER_FAST: &str = "fast";
 pub const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 
+/// Returns whether the model belongs to the DeepSeek model family.
+pub fn is_deepseek_model(model: &str) -> bool {
+    model.starts_with("deepseek-")
+}
+
 /// Returns the provider that must serve this model, when the model is provider-bound.
 pub fn required_provider_id(model: &str) -> Option<&'static str> {
-    model
-        .starts_with("deepseek-")
-        .then_some(DEEPSEEK_PROVIDER_ID)
+    is_deepseek_model(model).then_some(DEEPSEEK_PROVIDER_ID)
+}
+
+/// Returns whether the model and provider belong to the same supported provider family.
+pub fn model_provider_matches_family(model: &str, provider_id: &str) -> bool {
+    is_deepseek_model(model) == (provider_id == DEEPSEEK_PROVIDER_ID)
 }
 
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning

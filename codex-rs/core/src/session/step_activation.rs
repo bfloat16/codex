@@ -239,6 +239,21 @@ impl Session {
         turn_id: &str,
         update: TurnSettingsUpdate,
     ) -> TurnSettingsUpdateOutcome {
+        if let Some(model) = update.model.as_deref() {
+            let initial_model = {
+                let state = self.state.lock().await;
+                state.session_configuration.initial_model.clone()
+            };
+            if codex_protocol::openai_models::is_deepseek_model(model)
+                != codex_protocol::openai_models::is_deepseek_model(&initial_model)
+            {
+                return TurnSettingsUpdateOutcome::Rejected {
+                    reason: format!(
+                        "model `{model}` must use the same model family as the thread's initial model `{initial_model}`"
+                    ),
+                };
+            }
+        }
         if let Some((model, required_provider_id)) = update
             .model
             .as_deref()

@@ -121,6 +121,7 @@ use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::openai_models::DEEPSEEK_PROVIDER_ID;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
+use codex_protocol::openai_models::is_deepseek_model;
 use codex_protocol::openai_models::required_provider_id;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::FileSystemSandboxPolicyContext;
@@ -744,11 +745,20 @@ impl Session {
         );
         let service_tier =
             get_service_tier(config.service_tier.clone(), fast_mode_enabled, &model_info);
+        let initial_model = conversation_history
+            .get_rollout_items()
+            .iter()
+            .find_map(|item| match item {
+                RolloutItem::TurnContext(context) => Some(context.model.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| model.clone());
         let session_configuration = SessionConfiguration {
             provider: create_model_provider(
                 config.model_provider.clone(),
                 Some(Arc::clone(&auth_manager)),
             ),
+            initial_model,
             step_settings: Arc::new(StepSettings {
                 collaboration_mode,
                 reasoning_summary: config.model_reasoning_summary,
@@ -1914,6 +1924,20 @@ impl Session {
         model: Option<&str>,
         requested_model_provider_id: Option<String>,
     ) -> ConstraintResult<Option<session::SessionModelProviderUpdate>> {
+        if let Some(model) = model {
+            let initial_model = {
+                let state = self.state.lock().await;
+                state.session_configuration.initial_model.clone()
+            };
+            if is_deepseek_model(model) != is_deepseek_model(&initial_model) {
+                return Err(codex_config::ConstraintError::InvalidValue {
+                    field_name: "model",
+                    candidate: model.to_string(),
+                    allowed: format!("same model family as `{initial_model}`"),
+                    requirement_source: codex_config::RequirementSource::Unknown,
+                });
+            }
+        }
         let model_provider_id = model
             .and_then(required_provider_id)
             .map(str::to_string)

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use codex_config::types::Personality;
 use codex_core::CodexThread;
+use codex_core::CodexThreadSettingsOverrides;
 use codex_core::ForkSnapshot;
 use codex_core::TurnInputRequest;
 use codex_core::config::Config;
@@ -166,7 +167,7 @@ fn test_model_info(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn deepseek_model_switch_uses_the_configured_deepseek_provider() -> Result<()> {
+async fn gpt_thread_rejects_switching_to_deepseek() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let openai_server = MockServer::start().await;
@@ -182,33 +183,77 @@ async fn deepseek_model_switch_uses_the_configured_deepseek_provider() -> Result
         .build(&openai_server)
         .await?;
 
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
+    let error = test
+        .codex
+        .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
             model: Some("deepseek-flash".to_string()),
             model_provider: Some("openai".to_string()),
             ..Default::default()
-        },
-    )
-    .await?;
+        })
+        .await
+        .expect_err("GPT thread must reject DeepSeek models");
 
-    assert_eq!(
-        test.codex.config_snapshot().await.model_provider_id,
-        "deepseek"
-    );
-
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            model: Some("gpt-5.5".to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
+    assert!(error.to_string().contains("same model family as `gpt-5.5`"));
     assert_eq!(
         test.codex.config_snapshot().await.model_provider_id,
         "openai"
     );
+    let provider_error = test
+        .codex
+        .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
+            model_provider: Some("deepseek".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect_err("GPT thread must reject the DeepSeek provider");
+    assert!(
+        provider_error
+            .to_string()
+            .contains("allowed set any provider except `deepseek`")
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deepseek_thread_rejects_gpt_models_and_other_providers() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let openai_server = MockServer::start().await;
+    let test = test_codex()
+        .with_model("deepseek-flash")
+        .with_pre_build_hook(move |home| {
+            std::fs::write(
+                home.join("config.toml"),
+                "model = \"deepseek-flash\"\nmodel_provider = \"deepseek\"\n\n[model_providers.deepseek]\nname = \"DeepSeek\"\nbase_url = \"https://api.deepseek.test/\"\ncompact = \"remotev2\"\n",
+            )
+            .expect("write DeepSeek provider config");
+        })
+        .build(&openai_server)
+        .await?;
+
+    let model_error = test
+        .codex
+        .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
+            model: Some("gpt-5.5".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect_err("DeepSeek thread must reject GPT models");
+    assert!(
+        model_error
+            .to_string()
+            .contains("same model family as `deepseek-flash`")
+    );
+
+    let provider_error = test
+        .codex
+        .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
+            model_provider: Some("openai".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect_err("DeepSeek thread must reject non-DeepSeek providers");
+    assert!(provider_error.to_string().contains("allowed set deepseek"));
     Ok(())
 }
 
