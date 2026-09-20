@@ -150,7 +150,8 @@ fn activity_marker(start_time: Option<Instant>, animations_enabled: bool) -> Spa
         MotionMode::from_animations_enabled(animations_enabled),
         ReducedMotionIndicator::StaticBullet,
     )
-    .unwrap_or_else(|| "•".dim())
+    .map(|indicator| Span::styled("●", indicator.style))
+    .unwrap_or_else(|| "●".dim())
 }
 
 impl HistoryCell for ExecCell {
@@ -1122,7 +1123,7 @@ mod tests {
             .join("\n");
 
         insta::assert_snapshot!(rendered, @r"
-        • Exploring
+        ● Exploring
           └ Read SKILL.md
         ");
     }
@@ -1372,7 +1373,7 @@ mod tests {
             .collect();
 
         assert_eq!(first, second);
-        assert_eq!(first, vec!["• Running echo done".to_string()]);
+        assert_eq!(first, vec!["● Running echo done".to_string()]);
     }
 
     #[test]

@@ -5,7 +5,7 @@ expression: "format!(\"{running_snapshot}\\n\\n{completed_snapshot}\")"
 running
 activity:
 "                                                                                "
-"• Checking command                                                              "
+"● Checking command                                                              "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
@@ -22,5 +22,5 @@ activity:
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
 history:
-• Blocked by hook
+● Blocked by hook
   └ command blocked by policy

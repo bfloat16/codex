@@ -3,11 +3,11 @@ source: tui/src/chatwidget/tests/status_and_layout.rs
 expression: "format!(\"exec running:\\n{exec_running}\\nexec and hook running:\\n{exec_and_hook_running}\\nhistory after exec:\\n{history_after_exec}\\nhook running after exec:\\n{hook_running_after_exec}\\nquiet hook completed:\\n{quiet_hook_completed}\")"
 ---
 exec running:
-• Running echo done
+● Running echo done
 
 exec and hook running:
 "                                                                                "
-"• Running echo done                                                             "
+"● Running echo done                                                             "
 "                                                                                "
 "● Working (0s) · checking output policy                                         "
 "                                                                                "
@@ -16,7 +16,7 @@ exec and hook running:
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
 history after exec:
-• Ran echo done
+● Ran echo done
   └ done
 
 hook running after exec:

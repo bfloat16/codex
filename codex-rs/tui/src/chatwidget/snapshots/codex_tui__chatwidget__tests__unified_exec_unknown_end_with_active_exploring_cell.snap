@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/exec_flow.rs
 expression: snapshot
 ---
 History:
-• Exploring
+● Exploring
   └ Read null
 
 ● Ran echo repro-marker

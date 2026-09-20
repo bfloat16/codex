@@ -2,5 +2,5 @@
 source: tui/src/app/tests/buffered_replay.rs
 expression: rendered
 ---
-• Called sample.inspect({})
+● Called sample.inspect({})
   └ Error: interrupted

@@ -15,7 +15,7 @@ rich before:
    code    x = 1
 
   copy me
-• Called
+● Called
   └ workspace.inspect({"path":"README.md
         "})
     structured output
@@ -51,7 +51,7 @@ rich after:
    code    x = 1
 
   copy me
-• Called
+● Called
   └ workspace.inspect({"path":"README.md
         "})
     structured output

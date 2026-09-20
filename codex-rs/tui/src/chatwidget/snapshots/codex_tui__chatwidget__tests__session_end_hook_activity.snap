@@ -10,7 +10,7 @@ before reveal:
 "  gpt-5.6-sol default · /tmp/project                                            "
 running:
 "                                                                                "
-"• Saving session summary                                                        "
+"● Saving session summary                                                        "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "

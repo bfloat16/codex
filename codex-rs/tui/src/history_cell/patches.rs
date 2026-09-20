@@ -176,7 +176,7 @@ pub(crate) fn new_image_generation_call(
     let heading = if status == "failed" {
         vec!["✗ ".red().bold(), "Image generation failed".bold()].into()
     } else {
-        vec!["• ".dim(), "Generated Image:".bold()].into()
+        vec!["● ".dim(), "Generated Image:".bold()].into()
     };
     let mut lines: Vec<Line<'static>> = vec![heading, vec!["  └ ".dim(), detail.dim()].into()];
     if let Some(saved_path) = saved_path {

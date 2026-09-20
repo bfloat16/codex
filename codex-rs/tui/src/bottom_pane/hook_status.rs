@@ -17,7 +17,7 @@ pub(super) struct HookStatus<'a> {
 
 impl Renderable for HookStatus<'_> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let mut spans = vec!["• ".dim()];
+        let mut spans = vec!["● ".dim()];
         spans.extend(shimmer_text(
             &capitalize_first(self.message),
             MotionMode::from_animations_enabled(self.animations_enabled),

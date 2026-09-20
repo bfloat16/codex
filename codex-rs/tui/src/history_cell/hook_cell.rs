@@ -511,9 +511,9 @@ fn hook_run_is_quiet_success(run: &HookRunSummary) -> bool {
 
 fn hook_completed_bullet(status: HookRunStatus) -> Span<'static> {
     match status {
-        HookRunStatus::Completed => "•".green().bold(),
-        HookRunStatus::Blocked | HookRunStatus::Failed | HookRunStatus::Stopped => "•".red().bold(),
-        HookRunStatus::Running => "•".into(),
+        HookRunStatus::Completed => "●".green().bold(),
+        HookRunStatus::Blocked | HookRunStatus::Failed | HookRunStatus::Stopped => "●".red().bold(),
+        HookRunStatus::Running => "●".into(),
     }
 }
 
@@ -639,7 +639,7 @@ mod tests {
 
             assert_eq!(
                 line_texts(&cell.display_lines(/*width*/ 20)).join("\n"),
-                "• Hook stopped\n  └ first\n    second\n    third\n    fourth\n    fifth",
+                "● Hook stopped\n  └ first\n    second\n    third\n    fourth\n    fifth",
                 "expected {kind:?} output to remain complete",
             );
         }
@@ -648,9 +648,9 @@ mod tests {
     #[test]
     fn unsuccessful_hooks_use_bold_red_bullets_and_actionable_details() {
         for (status, expected_header) in [
-            (HookRunStatus::Failed, "• Hook failed"),
-            (HookRunStatus::Blocked, "• Blocked by hook"),
-            (HookRunStatus::Stopped, "• Hook stopped"),
+            (HookRunStatus::Failed, "● Hook failed"),
+            (HookRunStatus::Blocked, "● Blocked by hook"),
+            (HookRunStatus::Stopped, "● Hook stopped"),
         ] {
             let detail = "Policy prevented this action.";
             let cell = completed_hook_cell(

@@ -533,11 +533,39 @@ fn image_generation_call_renders_saved_path() {
     assert_eq!(
         render_lines(&cell.display_lines(/*width*/ 80)),
         vec![
-            "• Generated Image:".to_string(),
+            "● Generated Image:".to_string(),
             "  └ A tiny blue square".to_string(),
             expected_saved_path,
         ],
     );
+}
+
+#[test]
+fn request_user_input_result_uses_large_status_marker() {
+    let cell = RequestUserInputResultCell {
+        questions: vec![ToolRequestUserInputQuestion {
+            id: "version".to_string(),
+            header: "Version".to_string(),
+            question: "Which dependency version should I use?".to_string(),
+            is_other: false,
+            is_secret: false,
+            options: None,
+        }],
+        answers: HashMap::from([(
+            "version".to_string(),
+            ToolRequestUserInputAnswer {
+                answers: vec!["latest stable".to_string()],
+            },
+        )]),
+        interrupted: false,
+    };
+    let rendered = render_lines(&cell.display_lines(/*width*/ 80)).join("\n");
+
+    insta::assert_snapshot!(rendered, @"
+    ● Questions 1/1 answered
+      • Which dependency version should I use?
+        answer: latest stable
+    ");
 }
 
 fn session_configured_event(model: &str) -> ThreadSessionState {
@@ -1173,7 +1201,7 @@ fn web_search_history_cell_wraps_with_indented_continuation() {
     assert_eq!(
         rendered,
         vec![
-            "• Searched the web for example search query with several generic".to_string(),
+            "● Searched the web for example search query with several generic".to_string(),
             "  words to exercise wrapping".to_string(),
         ]
     );
@@ -1194,7 +1222,7 @@ fn web_search_history_cell_short_query_does_not_wrap() {
 
     assert_eq!(
         rendered,
-        vec!["• Searched the web for short query".to_string()]
+        vec!["● Searched the web for short query".to_string()]
     );
 }
 
@@ -1269,7 +1297,7 @@ fn code_mode_tool_call_uses_title_and_preserves_full_transcript() {
     let transcript = render_lines(&cell.transcript_lines(/*width*/ 180)).join("\n");
     insta::assert_snapshot!(format!("history:\n{history}\n\ntranscript:\n{transcript}"), @r#"
     history:
-    • Called Inspect Spotify workspace
+    ● Called Inspect Spotify workspace
       └ 012345678901234567890123456789012345
             67890123456789012345678901234567
             89012345678901234567890123456789
@@ -1278,7 +1306,7 @@ fn code_mode_tool_call_uses_title_and_preserves_full_transcript() {
             45678901...
 
     transcript:
-    • Called node_repl.js({"title":"Inspect Spotify workspace","code":"await tools.exec_command({ cmd: 'git status' })"})
+    ● Called node_repl.js({"title":"Inspect Spotify workspace","code":"await tools.exec_command({ cmd: 'git status' })"})
       └ Script completed
         Wall time 0.1 seconds
         Output:
@@ -1313,13 +1341,13 @@ fn code_mode_tool_call_preserves_failure_details() {
     let transcript = render_lines(&cell.transcript_lines(/*width*/ 120)).join("\n");
     insta::assert_snapshot!(format!("history:\n{history}\n\ntranscript:\n{transcript}"), @r#"
     history:
-    • Called Inspect workspace
+    ● Called Inspect workspace
       └ Script failed
         Output:
         permission denied
 
     transcript:
-    • Called node_repl.js({"title":"Inspect workspace","code":"throw Error('denied')"})
+    ● Called node_repl.js({"title":"Inspect workspace","code":"throw Error('denied')"})
       └ Script failed
         Output:
         permission denied
@@ -1341,7 +1369,7 @@ fn mcp_inventory_loading_without_animations_is_stable() {
     let second = render_lines(&cell.display_lines(/*width*/ 80));
 
     assert_eq!(first, second);
-    assert_eq!(first, vec!["• Loading MCP inventory…".to_string()]);
+    assert_eq!(first, vec!["● Loading MCP inventory…".to_string()]);
 }
 
 #[test]
@@ -1349,7 +1377,7 @@ fn thread_recap_loading_without_animations_snapshot() {
     let cell = ThreadRecapLoadingCell::new(/*animations_enabled*/ false);
     let rendered = render_lines(&cell.display_lines(/*width*/ 80)).join("\n");
 
-    insta::assert_snapshot!(rendered, @"• Generating conversation recap…");
+    insta::assert_snapshot!(rendered, @"● Generating conversation recap…");
 }
 
 #[test]
