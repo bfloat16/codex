@@ -259,35 +259,15 @@ impl HistoryCell for ExecCell {
         if self.is_exploring_cell() {
             self.exploring_activity_lines(u16::MAX)
         } else {
-            let [call] = self.calls.as_slice() else {
-                return Vec::new();
-            };
-            let elapsed = call
-                .duration
-                .or_else(|| call.start_time.map(|start| start.elapsed()));
-            let mut spans = vec!["Ran".cyan()];
-            if let Some(elapsed) = elapsed.filter(|elapsed| *elapsed > Duration::from_secs(10)) {
-                spans.extend([
-                    " (".into(),
-                    fmt_elapsed_compact(elapsed.as_secs()).cyan(),
-                    ")".into(),
-                ]);
-            }
-            spans.push(" ".into());
-            let mut line: Line<'static> = spans.into();
-            let command = strip_bash_lc_and_escape(&call.command);
-            let highlighted = highlight_bash_to_lines(&command);
-            if let Some(first) = highlighted.first() {
-                line.extend(first.spans.clone());
-            }
-            vec![line]
+            self.calls
+                .iter()
+                .map(Self::command_tool_group_preview_line)
+                .collect()
         }
     }
 
     fn tool_group_preview_is_active(&self) -> bool {
-        self.calls
-            .last()
-            .is_some_and(|call| call.duration.is_none())
+        self.is_active()
     }
 
     fn tool_group_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -410,10 +390,40 @@ impl ExecCell {
         lines
     }
 
+    fn command_tool_group_preview_line(call: &ExecCall) -> Line<'static> {
+        let elapsed = call
+            .duration
+            .or_else(|| call.start_time.map(|start| start.elapsed()));
+        let mut spans = vec!["Ran".cyan()];
+        if let Some(elapsed) = elapsed.filter(|elapsed| *elapsed > Duration::from_secs(10)) {
+            spans.extend([
+                " (".into(),
+                fmt_elapsed_compact(elapsed.as_secs()).cyan(),
+                ")".into(),
+            ]);
+        }
+        spans.push(" ".into());
+        let mut line: Line<'static> = spans.into();
+        let command = strip_bash_lc_and_escape(&call.command);
+        let highlighted = highlight_bash_to_lines(&command);
+        if let Some(first) = highlighted.first() {
+            line.extend(first.spans.clone());
+        }
+        line
+    }
+
     fn command_display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let [call] = &self.calls.as_slice() else {
-            panic!("Expected exactly one call in a command display cell");
-        };
+        let mut lines = Vec::new();
+        for (index, call) in self.calls.iter().enumerate() {
+            if index > 0 {
+                lines.push("".into());
+            }
+            lines.extend(self.command_call_display_lines(call, width));
+        }
+        lines
+    }
+
+    fn command_call_display_lines(&self, call: &ExecCall, width: u16) -> Vec<Line<'static>> {
         let layout = EXEC_DISPLAY_LAYOUT;
         let success = call
             .duration
@@ -423,7 +433,7 @@ impl ExecCell {
             Some(false) => "●".red().bold(),
             None => activity_marker(call.start_time, self.animations_enabled()),
         };
-        let title = if self.is_active() {
+        let title = if call.duration.is_none() {
             "Running"
         } else if call.is_user_shell_command() {
             "You ran"
@@ -821,7 +831,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_group_preview_activity_tracks_the_latest_exploring_call() {
+    fn tool_group_preview_stays_active_while_any_exploring_call_runs() {
         let read = |name: &str| ParsedCommand::Read {
             cmd: format!("cat {name}"),
             name: name.to_string(),
@@ -836,8 +846,12 @@ mod tests {
         );
         assert!(cell.add_call(
             "second".to_string(),
-            vec!["cat".into(), "second".into()],
-            vec![read("second")],
+            vec!["rg".into(), "needle".into()],
+            vec![ParsedCommand::Search {
+                cmd: "rg needle".to_string(),
+                query: Some("needle".to_string()),
+                path: None,
+            }],
             ExecCommandSource::Agent,
         ));
         assert!(cell.tool_group_preview_is_active());
@@ -849,7 +863,13 @@ mod tests {
         ));
 
         assert!(cell.is_active());
-        assert!(!cell.tool_group_preview_is_active());
+        assert!(cell.tool_group_preview_is_active());
+        let latest_preview = cell
+            .tool_group_preview_lines()
+            .last()
+            .map(render_line_text)
+            .expect("exploring preview");
+        insta::assert_snapshot!(latest_preview, @"Search needle");
     }
 
     #[test]

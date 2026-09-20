@@ -239,7 +239,7 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         self.raw_lines().into_iter().take(1).collect()
     }
 
-    /// Returns whether the newest collapsed-group preview still represents running work.
+    /// Returns whether the collapsed tool group still contains running work.
     fn tool_group_preview_is_active(&self) -> bool {
         false
     }

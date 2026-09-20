@@ -1,9 +1,9 @@
 //! Data model for grouped exec-call history cells in the TUI transcript.
 //!
-//! An `ExecCell` can represent either a single command or an "exploring" group of related read/
-//! list/search commands. The chat widget relies on stable `call_id` matching to route progress and
-//! end events into the right cell, and it treats "call id not found" as a real signal (for
-//! example, an orphan end that should render as a separate history entry).
+//! An `ExecCell` can represent a single command, overlapping commands, or an "exploring" group of
+//! related read/list/search commands. The chat widget relies on stable `call_id` matching to route
+//! progress and end events into the right cell, and it treats "call id not found" as a real signal
+//! (for example, an orphan end that should render as a separate history entry).
 
 use std::borrow::Cow;
 use std::time::Duration;
@@ -101,7 +101,7 @@ impl ExecCell {
             start_time: Some(Instant::now()),
             duration: None,
         };
-        if self.is_exploring_cell() && Self::is_exploring_call(&call) {
+        if self.is_active() || self.is_exploring_cell() && Self::is_exploring_call(&call) {
             self.calls.push(call);
             true
         } else {

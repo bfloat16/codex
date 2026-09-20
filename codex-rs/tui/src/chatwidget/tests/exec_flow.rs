@@ -773,6 +773,58 @@ async fn overlapping_exploring_exec_end_is_not_misclassified_as_orphan() {
 }
 
 #[tokio::test]
+async fn overlapping_shell_commands_update_one_cell_in_place() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+
+    let first = begin_exec(&mut chat, "call-first", "sleep 5");
+    let second = begin_exec(&mut chat, "call-second", "echo failed");
+    assert!(drain_insert_history(&mut rx).is_empty());
+
+    end_exec(&mut chat, second, "", "failed\n", /*exit_code*/ 1);
+    assert!(drain_insert_history(&mut rx).is_empty());
+    let active_tool = chat
+        .active_cell_display(/*width*/ 80)
+        .and_then(|display| display.tool)
+        .expect("active collapsed tool group");
+    assert!(active_tool.preview_active);
+    assert_eq!(
+        active_tool
+            .preview_lines
+            .iter()
+            .map(|line| lines_to_single_string(std::slice::from_ref(line)))
+            .collect::<Vec<_>>(),
+        vec!["Ran sleep 5\n".to_string(), "Ran echo failed\n".to_string()]
+    );
+    let active_cell = chat
+        .transcript
+        .active_cell
+        .as_ref()
+        .expect("overlapping exec cell");
+    let active_lines = active_cell.display_lines(/*width*/ 80);
+    assert_eq!(active_lines[2].spans[0].style.fg, Some(Color::Red));
+    insta::assert_snapshot!(lines_to_single_string(&active_lines), @r"
+    ● Running sleep 5
+
+    ● Ran echo failed
+      └ failed
+    ");
+
+    end_exec(&mut chat, first, "done\n", "", /*exit_code*/ 0);
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0][0].spans[0].style.fg, Some(Color::Green));
+    assert_eq!(cells[0][3].spans[0].style.fg, Some(Color::Red));
+    insta::assert_snapshot!(lines_to_single_string(&cells[0]), @r"
+    ● Ran sleep 5
+      └ done
+
+    ● Ran echo failed
+      └ failed
+    ");
+}
+
+#[tokio::test]
 async fn exec_history_shows_unified_exec_startup_commands() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
@@ -823,7 +875,7 @@ async fn exec_history_shows_unified_exec_tool_calls() {
 }
 
 #[tokio::test]
-async fn unified_exec_unknown_end_with_active_exploring_cell_snapshot() {
+async fn overlapping_unified_exec_updates_active_cell_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
 
@@ -850,10 +902,15 @@ async fn unified_exec_unknown_end_with_active_exploring_cell_snapshot() {
         .map(|cell| lines_to_single_string(&cell.display_lines(/*width*/ 80)))
         .unwrap_or_else(|| "<none>".to_string());
     let snapshot = format!("History:\n{history}\nActive:\n{active}");
-    assert_chatwidget_snapshot!(
-        "unified_exec_unknown_end_with_active_exploring_cell",
-        snapshot
-    );
+    insta::assert_snapshot!(snapshot, @r"
+    History:
+
+    Active:
+    ● Running cat /dev/null
+
+    ● Ran echo repro-marker
+      └ repro-marker
+    ");
 }
 
 #[tokio::test]
