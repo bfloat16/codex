@@ -1,5 +1,7 @@
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
+use crate::config::model_provider_repair::correction as model_provider_correction;
+use crate::config::model_provider_repair::user_config_correction;
 use crate::context::world_state::validate_managed_developer_instructions;
 use crate::guardian::BUNDLED_GUARDIAN_POLICY;
 use crate::path_utils::normalize_for_native_workdir;
@@ -166,6 +168,7 @@ use toml_edit::DocumentMut;
 mod auth_keyring;
 pub mod edit;
 mod managed_features;
+mod model_provider_repair;
 mod network_proxy_spec;
 mod otel;
 mod permission_profile_catalog;
@@ -1453,21 +1456,58 @@ impl ConfigBuilder {
             None => AbsolutePathBuf::current_dir()?,
         };
         harness_overrides.cwd = Some(cwd.to_path_buf());
-        let config_layer_stack = load_config_layers_state(
+        let config_load_options = ConfigLoadOptions {
+            loader_overrides,
+            strict_config,
+            cloud_config_bundle,
+        };
+        let thread_config_loader = thread_config_loader
+            .as_deref()
+            .unwrap_or(&codex_config::NoopThreadConfigLoader);
+        let mut config_layer_stack = load_config_layers_state(
             LOCAL_FS.as_ref(),
             &codex_home,
-            Some(cwd),
+            Some(cwd.clone()),
             &cli_overrides,
-            ConfigLoadOptions {
-                loader_overrides,
-                strict_config,
-                cloud_config_bundle,
-            },
-            thread_config_loader
-                .as_deref()
-                .unwrap_or(&codex_config::NoopThreadConfigLoader),
+            config_load_options.clone(),
+            thread_config_loader,
         )
         .await?;
+        if let Some(correction) = user_config_correction(&config_layer_stack)
+            .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?
+        {
+            let config_path = config_layer_stack
+                .get_user_config_file()
+                .map(AbsolutePathBuf::to_path_buf)
+                .unwrap_or_else(|| codex_home.join(CONFIG_TOML_FILE).to_path_buf());
+            ConfigEditsBuilder::for_config_path(&config_path)
+                .with_edits([
+                    ConfigEdit::SetPath {
+                        segments: vec!["model".to_string()],
+                        value: toml_edit::value(correction.model),
+                    },
+                    ConfigEdit::SetPath {
+                        segments: vec!["model_provider".to_string()],
+                        value: toml_edit::value(correction.model_provider),
+                    },
+                ])
+                .apply()
+                .await
+                .map_err(|err| {
+                    std::io::Error::other(format!(
+                        "failed to automatically repair model settings in config.toml: {err}"
+                    ))
+                })?;
+            config_layer_stack = load_config_layers_state(
+                LOCAL_FS.as_ref(),
+                &codex_home,
+                Some(cwd),
+                &cli_overrides,
+                config_load_options,
+                thread_config_loader,
+            )
+            .await?;
+        }
         let merged_toml = config_layer_stack.effective_config();
 
         // Note that each layer in ConfigLayerStack should have resolved
@@ -3759,23 +3799,18 @@ impl Config {
                     .flatten()
             })
             .unwrap_or_else(|| "openai".to_string());
-        if let Some(configured_model) = cfg.model.as_deref()
-            && !model_provider_matches_family(configured_model, &configured_model_provider_id)
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!(
-                    "Model `{configured_model}` is incompatible with model provider `{configured_model_provider_id}` in config.toml"
-                ),
-            ));
-        }
-        if cfg.model.is_none() && configured_model_provider_id == DEEPSEEK_PROVIDER_ID {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Model provider `deepseek` requires a DeepSeek model in config.toml",
-            ));
-        }
+        let mut model = model.or_else(|| cfg.model.clone());
         let mut model_provider_id = model_provider.unwrap_or(configured_model_provider_id);
+        if let Some(correction) = model_provider_correction(
+            model.as_deref(),
+            &model_provider_id,
+            cfg.model_providers.keys().cloned().collect(),
+        )
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?
+        {
+            model = Some(correction.model);
+            model_provider_id = correction.model_provider;
+        }
         let model_providers =
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
@@ -3923,7 +3958,6 @@ impl Config {
 
         let forced_login_method = cfg.forced_login_method;
 
-        let model = model.or(cfg.model);
         if let Some(required_provider_id) = model.as_deref().and_then(required_provider_id) {
             model_provider_id = required_provider_id.to_string();
             model_provider = model_providers

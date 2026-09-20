@@ -164,6 +164,76 @@ async fn cli_overrides_resolve_relative_paths_against_cwd() -> std::io::Result<(
 }
 
 #[tokio::test]
+async fn repairs_incompatible_model_provider_pair_in_user_config() -> anyhow::Result<()> {
+    let codex_home = tempdir().expect("tempdir");
+    let config_path = codex_home.path().join(CONFIG_TOML_FILE);
+    let providers = r#"
+[model_providers.zeta]
+name = "Zeta"
+base_url = "https://zeta.example.com/v1"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.com/v1"
+
+[model_providers.anyrouter]
+name = "AnyRouter"
+base_url = "https://anyrouter.example.com/v1"
+"#;
+
+    tokio::fs::write(
+        &config_path,
+        format!("model = \"deepseek-flash\"\nmodel_provider = \"anyrouter\"\n{providers}"),
+    )
+    .await?;
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await?;
+    let persisted = toml::from_str::<TomlValue>(&tokio::fs::read_to_string(&config_path).await?)?;
+    assert_eq!(
+        (
+            config.model.as_deref(),
+            config.model_provider_id.as_str(),
+            persisted.get("model").and_then(TomlValue::as_str),
+            persisted.get("model_provider").and_then(TomlValue::as_str),
+        ),
+        (
+            Some("deepseek-flash"),
+            "deepseek",
+            Some("deepseek-flash"),
+            Some("deepseek"),
+        )
+    );
+
+    tokio::fs::write(
+        &config_path,
+        format!("model = \"gpt-5.6-luna\"\nmodel_provider = \"deepseek\"\n{providers}"),
+    )
+    .await?;
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await?;
+    let persisted = toml::from_str::<TomlValue>(&tokio::fs::read_to_string(&config_path).await?)?;
+    assert_eq!(
+        (
+            config.model.as_deref(),
+            config.model_provider_id.as_str(),
+            persisted.get("model").and_then(TomlValue::as_str),
+            persisted.get("model_provider").and_then(TomlValue::as_str),
+        ),
+        (
+            Some("gpt-5.6-luna"),
+            "anyrouter",
+            Some("gpt-5.6-luna"),
+            Some("anyrouter"),
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn returns_config_error_for_invalid_user_config_toml() {
     let tmp = tempdir().expect("tempdir");
     let contents = r#"model = "gpt-4"
