@@ -1223,11 +1223,11 @@ impl ChatWidget {
         self.update_due_hook_visibility();
         self.schedule_hook_timer_if_needed();
         self.bottom_pane.pre_draw_tick();
-        if let Some(started_at) = self.running_interrupted_unified_exec_started_at() {
-            let elapsed = started_at.elapsed();
-            let next_tick = Duration::from_secs(elapsed.as_secs().saturating_add(1));
+        if self.running_interrupted_unified_exec_started_at().is_some()
+            && self.local_settings.tui.animations
+        {
             self.frame_requester
-                .schedule_frame_in(next_tick.saturating_sub(elapsed));
+                .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
         }
         if let Some(pet) = self.ambient_pet.as_ref() {
             pet.schedule_next_frame();
@@ -2073,13 +2073,19 @@ impl ChatWidget {
                 .active_cell
                 .as_ref()
                 .is_none_or(|cell| cell.tool_activity().is_some());
-        let started_at = self.turn_lifecycle.goal_status_active_turn_started_at;
+        let interrupted_exec_started_at = self.running_interrupted_unified_exec_started_at();
+        let started_at = self
+            .turn_lifecycle
+            .goal_status_active_turn_started_at
+            .or(interrupted_exec_started_at);
         let animations_enabled = self.local_settings.tui.animations;
-        let animation_tick = (accepting_content && animations_enabled).then(|| {
-            started_at
-                .map(|started_at| (started_at.elapsed().as_millis() / 50) as u64)
-                .unwrap_or_default()
-        });
+        let animation_tick = ((accepting_content || interrupted_exec_started_at.is_some())
+            && animations_enabled)
+            .then(|| {
+                started_at
+                    .map(|started_at| (started_at.elapsed().as_millis() / 50) as u64)
+                    .unwrap_or_default()
+            });
         ActiveToolGroupState {
             accepting_content,
             started_at,

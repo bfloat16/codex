@@ -353,7 +353,7 @@ impl ChatWidget {
         self.finish_compaction_status();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
-        self.unified_exec_wait_streak = None;
+        self.flush_unified_exec_wait_streak();
         self.adaptive_chunking.reset();
         self.stream_controller = None;
         self.plan_stream_controller = None;
