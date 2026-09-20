@@ -441,10 +441,12 @@ fn structured_tool_cell_renders_raw_plain_text_without_prefix_or_style() {
         invocation,
         /*animations_enabled*/ false,
     );
+    assert!(cell.tool_group_preview_is_active());
     assert!(
         cell.complete(Duration::from_millis(1), Ok(result))
             .is_none()
     );
+    assert!(!cell.tool_group_preview_is_active());
 
     let lines = cell.raw_lines();
     let rendered = render_lines(&lines);
@@ -1141,6 +1143,7 @@ fn web_search_history_cell_snapshot() {
             queries: None,
         },
     );
+    assert!(!cell.tool_group_preview_is_active());
     let rendered = render_lines(&cell.display_lines(/*width*/ 64)).join("\n");
 
     insta::assert_snapshot!(rendered);

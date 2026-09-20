@@ -137,6 +137,10 @@ impl HistoryCell for WebSearchCell {
         }
         vec![spans.into()]
     }
+
+    fn tool_group_preview_is_active(&self) -> bool {
+        !self.completed
+    }
 }
 
 pub(crate) fn new_active_web_search_call(

@@ -835,6 +835,7 @@ pub(crate) struct ActiveCellRenderKey {
 pub(crate) struct ActiveToolDisplay {
     pub(crate) activity: ToolActivity,
     pub(crate) preview_lines: Vec<Line<'static>>,
+    pub(crate) preview_active: bool,
     pub(crate) detail_lines: Vec<HyperlinkLine>,
     pub(crate) is_stream_continuation: bool,
 }
@@ -2024,6 +2025,7 @@ impl ChatWidget {
             cell.tool_activity().map(|activity| ActiveToolDisplay {
                 activity,
                 preview_lines: cell.tool_group_preview_lines(),
+                preview_active: cell.tool_group_preview_is_active(),
                 detail_lines: cell.tool_group_detail_lines(width),
                 is_stream_continuation: cell.is_stream_continuation(),
             })

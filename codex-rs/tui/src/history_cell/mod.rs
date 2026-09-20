@@ -239,6 +239,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         self.raw_lines().into_iter().take(1).collect()
     }
 
+    /// Returns whether the newest collapsed-group preview still represents running work.
+    fn tool_group_preview_is_active(&self) -> bool {
+        false
+    }
+
     /// Returns cached, physically wrapped rows for an interactive file-change cell.
     fn file_change_display_lines(&self, _width: u16) -> Option<FileChangeDisplayLines> {
         None

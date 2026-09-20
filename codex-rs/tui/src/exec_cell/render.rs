@@ -283,6 +283,12 @@ impl HistoryCell for ExecCell {
         }
     }
 
+    fn tool_group_preview_is_active(&self) -> bool {
+        self.calls
+            .last()
+            .is_some_and(|call| call.duration.is_none())
+    }
+
     fn tool_group_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.display_hyperlink_lines(width)
     }
@@ -770,6 +776,7 @@ mod tests {
             );
             cell.calls[0].start_time = None;
             cell.calls[0].duration = Some(duration);
+            assert!(!cell.tool_group_preview_is_active());
             render_line_text(&cell.tool_group_preview_lines()[0])
         };
 
@@ -801,6 +808,7 @@ mod tests {
             /*animations_enabled*/ false,
         );
         active.calls[0].start_time = Some(Instant::now() - Duration::from_secs(11));
+        assert!(active.tool_group_preview_is_active());
         let active_preview = render_line_text(&active.tool_group_preview_lines()[0]);
         assert!(active_preview.starts_with("Ran ("));
         assert!(active_preview.ends_with(" cargo test -p codex-tui"));
@@ -809,6 +817,38 @@ mod tests {
                 .transcript_animation_tick()
                 .is_some_and(|tick| tick >= 11)
         );
+    }
+
+    #[test]
+    fn tool_group_preview_activity_tracks_the_latest_exploring_call() {
+        let read = |name: &str| ParsedCommand::Read {
+            cmd: format!("cat {name}"),
+            name: name.to_string(),
+            path: std::path::PathBuf::from(name),
+        };
+        let mut cell = new_active_exec_command(
+            "first".to_string(),
+            vec!["cat".into(), "first".into()],
+            vec![read("first")],
+            ExecCommandSource::Agent,
+            /*animations_enabled*/ false,
+        );
+        assert!(cell.add_call(
+            "second".to_string(),
+            vec!["cat".into(), "second".into()],
+            vec![read("second")],
+            ExecCommandSource::Agent,
+        ));
+        assert!(cell.tool_group_preview_is_active());
+
+        assert!(cell.complete_call(
+            "second",
+            CommandOutput::new(/*exit_code*/ 0, String::new()),
+            Duration::from_millis(/*millis*/ 1),
+        ));
+
+        assert!(cell.is_active());
+        assert!(!cell.tool_group_preview_is_active());
     }
 
     #[test]

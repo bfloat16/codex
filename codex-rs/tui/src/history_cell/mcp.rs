@@ -326,6 +326,10 @@ impl HistoryCell for McpToolCallCell {
         vec![line]
     }
 
+    fn tool_group_preview_is_active(&self) -> bool {
+        self.result.is_none()
+    }
+
     fn transcript_animation_tick(&self) -> Option<u64> {
         if !self.animations_enabled || self.result.is_some() {
             return None;

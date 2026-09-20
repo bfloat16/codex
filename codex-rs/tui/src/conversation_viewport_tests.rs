@@ -10,6 +10,7 @@ use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::Style;
+use ratatui::style::Stylize;
 use ratatui::text::Line;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -144,7 +145,7 @@ impl HistoryCell for PreviewToolTestCell {
     }
 
     fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
-        vec![self.preview.into()]
+        vec![self.preview.cyan().into()]
     }
 }
 
@@ -393,42 +394,39 @@ fn adjacent_tools_collapse_then_expand_and_collapse_from_the_group_background() 
         trim_rows(&collapsed),
         trim_rows(&expanded),
         trim_rows(&collapsed_again),
-    ), @r###"
-collapsed:
-before
+    ), @"
+    collapsed:
+    before
 
-  Read 2 files, ran 1 shell command
+      Read 2 files, ran 1 shell command
+      └ shell transcript detail
 
-after
-
-
-
-
-expanded:
-before
-
-read transcript detail
-
-shell transcript detail
-
-
-after
-
-collapsed again:
-before
-
-  Read 2 files, ran 1 shell command
-
-after
+    after
 
 
 
+    expanded:
+    before
 
-"###);
+    read transcript detail
+
+    shell transcript detail
+
+
+    after
+
+    collapsed again:
+    before
+
+      Read 2 files, ran 1 shell command
+      └ shell transcript detail
+
+    after
+    ");
 }
 
 #[test]
-fn active_tool_group_merges_live_activity_and_hides_previews_when_closed() {
+fn active_tool_group_merges_live_activity_and_keeps_latest_completed_preview() {
     let live_preview = "Call repo.inspect with a deliberately long argument list that would otherwise occupy more than ten preview rows in the collapsed block";
     let live_activity = ToolActivity {
         call_count: 1,
@@ -485,7 +483,8 @@ fn active_tool_group_merges_live_activity_and_hides_previews_when_closed() {
                 auxiliary_lines: Vec::new(),
                 tool: Some(ActiveToolDisplay {
                     activity: live_activity,
-                    preview_lines: vec![live_preview.into()],
+                    preview_lines: vec![live_preview.cyan().into()],
+                    preview_active: true,
                     detail_lines: vec![HyperlinkLine::from("live MCP detail")],
                     is_stream_continuation: false,
                 }),
@@ -543,7 +542,7 @@ fn active_tool_group_merges_live_activity_and_hides_previews_when_closed() {
     );
     let inactive = render(&mut viewport);
     assert!(!inactive.contains("Search hook discovery"));
-    assert!(!inactive.contains("Call repo.inspect"));
+    assert!(inactive.contains("Call repo.inspect"));
 
     assert_snapshot!(format!(
         "active collapsed:\n{active_collapsed}\nactive expanded:\n{active_expanded}\nactive between tools:\n{active_between_tools}\ninactive:\n{inactive}",
@@ -592,15 +591,105 @@ before
 
   Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
   shell command
+  └ Call repo.inspect with a deliberately long argument list
+    that would otherwise occupy more than ten preview rows in
+    the collapsed block
 
 
 
 
 
+"###);
+}
 
+#[test]
+fn latest_tool_preview_turns_gray_when_work_completes() {
+    let activity = ToolActivity {
+        call_count: 1,
+        mcp_calls: 1,
+        ..ToolActivity::default()
+    };
+    let active_state = ActiveToolGroupState {
+        accepting_content: true,
+        started_at: None,
+        animations_enabled: false,
+        animation_tick: None,
+    };
+    let mut viewport = viewport(Vec::new());
+    viewport.sync_live_tail(
+        /*width*/ 48,
+        Some(ActiveCellRenderKey {
+            revision: 1,
+            is_stream_continuation: false,
+            animation_tick: None,
+        }),
+        active_state,
+        |_| {
+            Some(ActiveCellDisplay {
+                lines: vec![HyperlinkLine::from("live MCP detail")],
+                auxiliary_lines: Vec::new(),
+                tool: Some(ActiveToolDisplay {
+                    activity,
+                    preview_lines: vec!["Call repo.inspect".cyan().into()],
+                    preview_active: true,
+                    detail_lines: vec![HyperlinkLine::from("live MCP detail")],
+                    is_stream_continuation: false,
+                }),
+            })
+        },
+    );
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 48, /*height*/ 3,
+    );
+    let mut running = Buffer::empty(area);
+    viewport.render(area, &mut running);
 
+    viewport.push_cell(preview_tool_cell(
+        "completed MCP detail",
+        "Call repo.inspect",
+        activity,
+    ));
+    viewport.sync_live_tail(
+        /*width*/ 48,
+        /*active_key*/ None,
+        active_state,
+        |_| None,
+    );
+    let mut completed = Buffer::empty(area);
+    viewport.render(area, &mut completed);
 
-
+    let running_preview = &running[(4, 1)];
+    assert_eq!(running_preview.fg, Color::Cyan);
+    assert!(
+        !running_preview
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
+    let completed_preview = &completed[(4, 1)];
+    assert_eq!(completed_preview.fg, Color::Reset);
+    assert!(
+        completed_preview
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
+    let visible_text = |buffer: &Buffer| {
+        buffer_text(buffer, area)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_snapshot!(format!(
+        "running:\n{}completed:\n{}",
+        visible_text(&running),
+        visible_text(&completed),
+    ), @r###"
+running:
+● Called 1 MCP tool
+  └ Call repo.inspect
+completed:
+● Called 1 MCP tool
+  └ Call repo.inspect
 "###);
 }
 
@@ -631,6 +720,7 @@ fn active_tool_preview_is_limited_to_ten_rows() {
                         ..ToolActivity::default()
                     },
                     preview_lines: vec!["preview ".repeat(100).into()],
+                    preview_active: true,
                     detail_lines: vec![HyperlinkLine::from("live detail")],
                     is_stream_continuation: false,
                 }),
@@ -679,6 +769,7 @@ fn first_live_tool_uses_the_clickable_collapsed_group() {
                         ..ToolActivity::default()
                     },
                     preview_lines: vec!["Run just test".into()],
+                    preview_active: true,
                     detail_lines: vec![HyperlinkLine::from("live detail")],
                     is_stream_continuation: false,
                 }),
@@ -745,15 +836,15 @@ fn single_tools_and_file_edits_are_collapsed_by_default() {
             .map(str::trim_end)
             .collect::<Vec<_>>()
             .join("\n"),
-        @r###"
-  Read 1 file
+        @"
+      Read 1 file
+      └ read transcript detail
 
-● Added src/lib.rs (+1 -0)
+    ● Added src/lib.rs (+1 -0)
 
-  Ran 1 shell command
-
-
-"###
+      Ran 1 shell command
+      └ shell transcript detail
+    "
     );
 }
 
@@ -1009,22 +1100,22 @@ fn appending_and_backfilling_tools_rebuild_only_the_adjacent_group() {
         "appended:\n{}\nbackfilled:\n{}",
         trim_rows(&appended_buffer),
         trim_rows(&backfilled_buffer),
-    ), @r###"
-appended:
-before
+    ), @"
+    appended:
+    before
 
-  Read 1 file, ran 1 shell command
+      Read 1 file, ran 1 shell command
+      └ shell transcript
 
 
+    backfilled:
+    before
 
-backfilled:
-before
+      Read 1 file, ran 1 shell command
+      └ shell transcript
 
-  Read 1 file, ran 1 shell command
-
-after
-
-"###);
+    after
+    ");
 }
 
 #[test]

@@ -407,20 +407,24 @@ impl ToolActivityGroupRenderable {
     }
 
     fn preview_lines(&self, width: u16) -> Vec<Line<'static>> {
-        if !self.active {
-            return Vec::new();
-        }
         let mut lines = self
             .cells
             .iter()
             .flat_map(|cell| cell.tool_group_preview_lines())
             .collect::<Vec<_>>();
+        let mut preview_active = false;
         if let Some(live_tool) = &self.live_tool {
             lines.extend(live_tool.preview_lines.clone());
+            preview_active = live_tool.preview_active && !live_tool.preview_lines.is_empty();
         }
-        let Some(latest) = lines.pop() else {
+        let Some(mut latest) = lines.pop() else {
             return Vec::new();
         };
+        if !preview_active {
+            for span in &mut latest.spans {
+                span.style = Style::default().dim();
+            }
+        }
         let width = usize::from(width.max(1));
         let mut wrapped = adaptive_wrap_lines(
             [latest],
