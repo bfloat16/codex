@@ -76,3 +76,44 @@ async fn provider_popup_reports_when_config_has_no_user_providers() {
         "expected missing-provider info message"
     );
 }
+
+#[tokio::test]
+async fn provider_popup_disables_providers_outside_the_model_family() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("deepseek-flash")).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.config.model_providers.insert(
+        "alpha".to_string(),
+        provider("Alpha", "https://alpha.example/v1"),
+    );
+    chat.config.model_providers.insert(
+        "deepseek".to_string(),
+        provider("DeepSeek", "https://api.deepseek.example/v1"),
+    );
+    chat.config.model_provider_id = "deepseek".to_string();
+
+    let config_path = tempdir().expect("tempdir");
+    let config_path = config_path.path().join("config.toml").abs();
+    chat.config.config_layer_stack = ConfigLayerStack::default()
+        .with_user_config(
+            &config_path,
+            toml::from_str::<TomlValue>(
+                r#"
+[model_providers.alpha]
+name = "Alpha"
+base_url = "https://alpha.example/v1"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.example/v1"
+"#,
+            )
+            .expect("provider config"),
+        )
+        .expect("user config");
+
+    chat.open_provider_popup();
+    let popup = render_bottom_popup(&chat, /*width*/ 100);
+
+    assert!(popup.contains("alpha"));
+    assert_chatwidget_snapshot!("deepseek_provider_popup_disables_other_providers", popup);
+}

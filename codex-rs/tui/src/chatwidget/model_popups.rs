@@ -6,6 +6,7 @@
 use super::*;
 use crate::model_catalog::LUNA_RESERVE_MODEL;
 use codex_models_manager::bundled_models_response;
+use codex_protocol::openai_models::is_deepseek_model;
 use codex_protocol::openai_models::required_provider_id;
 
 const ULTRA_REASONING_CONCURRENCY_WARNING_THRESHOLD: usize = 8;
@@ -111,6 +112,7 @@ impl ChatWidget {
         let mut items: Vec<SelectionItem> = auto_presets
             .into_iter()
             .map(|preset| {
+                let disabled_reason = self.model_family_disabled_reason(&preset.model);
                 let description =
                     (!preset.description.is_empty()).then_some(preset.description.clone());
                 let model = preset.model.clone();
@@ -144,6 +146,7 @@ impl ChatWidget {
                     description,
                     is_current: model.as_str() == current_model,
                     is_default: preset.is_default,
+                    disabled_reason,
                     actions,
                     dismiss_on_select: !requires_advanced_selection,
                     dismiss_parent_on_child_accept: requires_advanced_selection,
@@ -236,6 +239,15 @@ impl ChatWidget {
         presets
     }
 
+    fn model_family_disabled_reason(&self, model: &str) -> Option<String> {
+        (is_deepseek_model(model) != is_deepseek_model(&self.initial_thread_model)).then(|| {
+            format!(
+                "Unavailable because this thread started with `{}`.",
+                self.initial_thread_model
+            )
+        })
+    }
+
     fn open_all_models_popup_with_view_id(
         &mut self,
         presets: Vec<ModelPreset>,
@@ -252,6 +264,7 @@ impl ChatWidget {
 
         let mut items: Vec<SelectionItem> = Vec::new();
         for preset in presets.into_iter() {
+            let disabled_reason = self.model_family_disabled_reason(&preset.model);
             let description =
                 (!preset.description.is_empty()).then_some(preset.description.to_string());
             let is_current = preset.model.as_str() == self.current_model();
@@ -268,6 +281,7 @@ impl ChatWidget {
                 description,
                 is_current,
                 is_default: preset.is_default,
+                disabled_reason,
                 actions,
                 dismiss_on_select: single_supported_effort,
                 dismiss_parent_on_child_accept: !single_supported_effort,
@@ -277,7 +291,7 @@ impl ChatWidget {
 
         let header = self.model_menu_header(
             "Select Model and Effort",
-            "Access legacy models by running codex -m <model_name> or in your config.toml",
+            "Choose a model in the same family as this thread's initial model.",
         );
         self.show_model_selection_view(SelectionViewParams {
             view_id: Some(view_id),

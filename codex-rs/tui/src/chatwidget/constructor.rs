@@ -130,7 +130,7 @@ impl ChatWidget {
             permission_profiles_menu_opened: false,
             model_popup_model_ids: Vec::new(),
             session_telemetry,
-            session_header: SessionHeader::new(header_model),
+            session_header: SessionHeader::new(header_model.clone()),
             initial_user_message,
             status_account_display,
             remote_connection: None,
@@ -213,6 +213,7 @@ impl ChatWidget {
             #[cfg(test)]
             pet_image_support_override: None,
             thread_id: None,
+            initial_thread_model: header_model,
             thread_name: None,
             thread_rename_block_message: None,
             active_side_conversation: false,

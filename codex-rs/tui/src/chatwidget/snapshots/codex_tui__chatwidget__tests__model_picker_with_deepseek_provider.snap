@@ -3,8 +3,11 @@ source: tui/src/chatwidget/tests/popups_and_settings.rs
 expression: popup
 ---
   Select Model and Effort
-  Access legacy models by running codex -m <model_name> or in your config.toml
+  Choose a model in the same family as this thread's initial model.
 
-› 1. deepseek-flash  Latest frontier agentic coding model with image input.
+›    deepseek-flash (disabled)  Latest frontier agentic coding model with
+                                image input. (disabled: Unavailable because
+                                this thread started with `test-visible-
+                                model`.)
 
   Press enter to confirm or esc to go back

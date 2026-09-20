@@ -1,6 +1,7 @@
 //! Provider selection for the active thread.
 
 use super::*;
+use codex_protocol::openai_models::model_provider_matches_family;
 
 impl ChatWidget {
     pub(crate) fn open_provider_popup(&mut self) {
@@ -57,10 +58,20 @@ impl ChatWidget {
                         |base_url| Some(format!("{} - {base_url}", provider.name)),
                     );
                 let selected_provider_id = provider_id.clone();
+                let disabled_reason =
+                    (!model_provider_matches_family(self.current_model(), &provider_id)).then(
+                        || {
+                            format!(
+                                "Unavailable for the current model `{}`.",
+                                self.current_model()
+                            )
+                        },
+                    );
                 Some(SelectionItem {
                     name: provider_id.clone(),
                     description,
                     is_current: provider_id == current_provider_id,
+                    disabled_reason,
                     actions: vec![Box::new(move |tx| {
                         tx.send(AppEvent::UpdateModelProvider(selected_provider_id.clone()));
                     })],

@@ -1,0 +1,15 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: popup
+---
+  Select Model and Effort
+  Choose a model in the same family as this thread's initial model.
+
+     gpt-5.5 (disabled)        Frontier model for complex coding, research,
+                               and real-world work. (disabled: Unavailable
+                               because this thread started with `deepseek-
+                               flash`.)
+› 1. deepseek-flash (current)  Latest frontier agentic coding model with image
+                               input.
+
+  Press enter to confirm or esc to go back

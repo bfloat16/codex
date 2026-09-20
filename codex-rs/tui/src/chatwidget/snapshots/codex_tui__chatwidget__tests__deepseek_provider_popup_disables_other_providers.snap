@@ -1,0 +1,12 @@
+---
+source: tui/src/chatwidget/tests/provider_popup.rs
+expression: popup
+---
+  Select Provider
+  Choose a provider configured in config.toml for this session.
+
+     alpha (disabled)    Alpha - https://alpha.example/v1 (disabled: Unavailable for the current
+                         model `deepseek-flash`.)
+› 1. deepseek (current)  DeepSeek - https://api.deepseek.example/v1
+
+  Press enter to confirm or esc to go back
