@@ -18,7 +18,7 @@ pub struct SharedCliOptions {
     )]
     pub images: Vec<PathBuf>,
 
-    /// Model the agent should use.
+    /// Deprecated compatibility option. Parsed but ignored; model selection uses config.toml.
     #[arg(long, short = 'm')]
     pub model: Option<String>,
 

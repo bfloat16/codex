@@ -124,7 +124,7 @@ pub(super) async fn run_main_inner(
         load_config_or_exit(
             cli_kv_overrides.clone(),
             ConfigOverrides {
-                model: cli.model.clone(),
+                model: None,
                 approval_policy,
                 sandbox_mode,
                 cwd: validation_cwd.map(AbsolutePathBuf::into_path_buf),
@@ -332,9 +332,7 @@ pub(super) async fn run_main_inner(
     };
 
     // When using `--oss`, let the bootstrapper pick the model based on selected provider
-    let model = if let Some(model) = &cli.model {
-        Some(model.clone())
-    } else if cli.oss {
+    let model = if cli.oss {
         // Use the provider from model_provider_override
         model_provider_override
             .as_ref()

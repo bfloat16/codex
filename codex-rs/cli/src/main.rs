@@ -2189,7 +2189,7 @@ async fn run_debug_prompt_input_command(
         shared.sandbox_mode.map(Into::into)
     };
     let overrides = ConfigOverrides {
-        model: shared.model,
+        model: None,
         approval_policy,
         sandbox_mode,
         cwd: shared.cwd,

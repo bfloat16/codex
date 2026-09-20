@@ -747,10 +747,15 @@ async fn exec_resume_by_id_appends_to_existing_file() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn exec_resume_preserves_cli_configuration_overrides() -> anyhow::Result<()> {
+async fn exec_resume_ignores_cli_model_but_preserves_other_configuration_overrides()
+-> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let test = test_codex_exec();
+    std::fs::write(
+        test.home_path().join("config.toml"),
+        "model = \"gpt-5.5\"\n",
+    )?;
     let server = MockServer::start().await;
     let _response_mock = mount_exec_responses(&server, /*count*/ 2).await;
     let repo_root = exec_repo_root()?;
@@ -796,9 +801,10 @@ async fn exec_resume_preserves_cli_configuration_overrides() -> anyhow::Result<(
 
     let stderr = String::from_utf8(output.stderr)?;
     assert!(
-        stderr.contains("model: gpt-5.1-high"),
-        "stderr missing model override: {stderr}"
+        stderr.contains("model: gpt-5.5"),
+        "stderr did not preserve the configured model: {stderr}"
     );
+    assert!(!stderr.contains("model: gpt-5.1-high"));
     if cfg!(target_os = "windows") {
         assert!(
             stderr.contains("sandbox: read-only"),

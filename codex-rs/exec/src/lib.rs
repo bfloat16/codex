@@ -281,7 +281,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     shared.take_auto_review_config_overrides(&mut config_overrides);
     let SharedCliOptions {
         images,
-        model: model_cli_arg,
+        model: _,
         oss,
         oss_provider,
         config_profile_v2,
@@ -549,9 +549,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     };
 
     // When using `--oss`, let the bootstrapper pick the model based on selected provider
-    let model = if let Some(model) = model_cli_arg {
-        Some(model)
-    } else if oss {
+    let model = if oss {
         model_provider
             .as_ref()
             .and_then(|provider_id| get_default_model_for_oss_provider(provider_id))
