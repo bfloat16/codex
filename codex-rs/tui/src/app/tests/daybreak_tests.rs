@@ -98,6 +98,7 @@ async fn cyber_refusal_reads_eligibility_without_changing_the_model() -> Result<
                             additional_details: None,
                         },
                         will_retry: false,
+                        retry_after_ms: None,
                         thread_id: thread_id.to_string(),
                         turn_id: "turn".into(),
                     },

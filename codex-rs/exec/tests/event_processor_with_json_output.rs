@@ -1632,6 +1632,7 @@ fn turn_failure_prefers_structured_error_message() {
             additional_details: Some("request id abc".to_string()),
         },
         will_retry: false,
+        retry_after_ms: None,
         thread_id: "thread-1".to_string(),
         turn_id: "turn-1".to_string(),
     }));

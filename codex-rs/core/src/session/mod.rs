@@ -6,6 +6,7 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -4728,6 +4729,7 @@ impl Session {
         turn_context: &TurnContext,
         message: impl Into<String>,
         codex_error: CodexErr,
+        retry_delay: Duration,
     ) {
         let additional_details = codex_error.to_string();
         let codex_error_info = CodexErrorInfo::ResponseStreamDisconnected {
@@ -4736,6 +4738,7 @@ impl Session {
         let event = EventMsg::StreamError(StreamErrorEvent {
             message: message.into(),
             codex_error_info: Some(codex_error_info),
+            retry_after_ms: Some(retry_delay.as_millis().min(u128::from(u64::MAX)) as u64),
             additional_details: Some(additional_details),
         });
         self.send_event(turn_context, event).await;

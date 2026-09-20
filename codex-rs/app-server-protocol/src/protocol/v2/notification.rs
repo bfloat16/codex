@@ -64,6 +64,9 @@ pub struct ErrorNotification {
     // Set to true if the error is transient and the app-server process will automatically retry.
     // If true, this will not interrupt a turn.
     pub will_retry: bool,
+    /// Delay before the automatic retry begins, in milliseconds.
+    #[ts(type = "number | null")]
+    pub retry_after_ms: Option<u64>,
     pub thread_id: String,
     pub turn_id: String,
 }

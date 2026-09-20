@@ -10812,6 +10812,15 @@
           "error": {
             "$ref": "#/definitions/v2/TurnError"
           },
+          "retryAfterMs": {
+            "description": "Delay before the automatic retry begins, in milliseconds.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "threadId": {
             "type": "string"
           },

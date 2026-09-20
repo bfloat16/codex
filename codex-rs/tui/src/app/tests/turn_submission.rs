@@ -341,6 +341,7 @@ async fn misalignment_policy_in_parent_stops_active_side_conversation() -> Resul
                 additional_details: None,
             },
             will_retry: false,
+            retry_after_ms: None,
             thread_id: parent_thread_id.to_string(),
             turn_id: "parent-turn".to_string(),
         }),

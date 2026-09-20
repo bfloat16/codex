@@ -152,6 +152,9 @@ impl ChatWidget {
                         self.on_stream_error(
                             notification.error.message,
                             notification.error.additional_details,
+                            notification
+                                .retry_after_ms
+                                .map_or(Duration::ZERO, Duration::from_millis),
                         );
                     }
                 } else {

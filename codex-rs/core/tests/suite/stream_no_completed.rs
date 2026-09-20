@@ -136,6 +136,7 @@ async fn connection_failure_pauses_retry_budget_until_provider_is_reachable() ->
         connection_error.message,
         "Reconnecting... waiting for network"
     );
+    assert_eq!(connection_error.retry_after_ms, Some(3_000));
 
     let recovered_server = MockServer::builder()
         .listener(TcpListener::bind(unavailable_address)?)
@@ -153,6 +154,7 @@ async fn connection_failure_pauses_retry_budget_until_provider_is_reachable() ->
         unreachable!("predicate guarantees a stream error event");
     };
     assert_eq!(stream_error.message, "Reconnecting... 1/1");
+    assert_eq!(stream_error.retry_after_ms, Some(3_000));
 
     let EventMsg::TurnComplete(completed) =
         wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await

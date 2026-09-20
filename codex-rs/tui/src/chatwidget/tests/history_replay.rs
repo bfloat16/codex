@@ -1157,6 +1157,7 @@ async fn replayed_retryable_app_server_error_keeps_turn_running() {
                 additional_details: Some("Idle timeout waiting for SSE".to_string()),
             },
             will_retry: true,
+            retry_after_ms: Some(3_000),
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
         }),
