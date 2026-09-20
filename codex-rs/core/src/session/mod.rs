@@ -616,7 +616,11 @@ impl Session {
         };
 
         let mut config = Arc::new(config);
-        let refresh_strategy = if session_source.is_non_root_agent() {
+        let refresh_strategy = if session_source.is_non_root_agent()
+            || thread_extension_init
+                .get::<crate::thread_manager::InternalThreadReload>()
+                .is_some()
+        {
             codex_models_manager::manager::RefreshStrategy::Offline
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
@@ -1460,7 +1464,7 @@ impl Session {
                 if self
                     .services
                     .thread_extension_data
-                    .get::<crate::thread_manager::SuppressResumeModelWarning>()
+                    .get::<crate::thread_manager::InternalThreadReload>()
                     .is_none()
                     && let Some(prev) = previous_turn_settings
                         .as_ref()

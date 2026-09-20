@@ -44,6 +44,7 @@ use codex_rollout::RolloutItem;
 use codex_rollout::read_session_meta_line;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::load_default_config_for_test;
+use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -665,6 +666,82 @@ async fn thread_revert_interrupts_active_turn_and_keeps_thread_loaded() -> Resul
         ..Default::default()
     })
     .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_revert_removes_an_already_interrupted_turn() -> Result<()> {
+    let home = TempDir::new()?;
+    let server = responses::start_mock_server().await;
+    let _response_mock = responses::mount_response_sequence(
+        &server,
+        vec![
+            responses::sse_response(responses::sse(vec![responses::ev_response_created(
+                "pending",
+            )]))
+            .set_delay(DEFAULT_READ_TIMEOUT),
+        ],
+    )
+    .await;
+    MockResponsesConfig::new(&server.uri()).write(home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build()
+        .await?;
+    initialize_experimental(&mut mcp).await?;
+
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            history_mode: Some(ThreadHistoryMode::Paginated),
+            ..Default::default()
+        })
+        .await?;
+    let TurnStartResponse { turn } = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "interrupt me".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    timeout(DEFAULT_READ_TIMEOUT, async {
+        loop {
+            if server
+                .received_requests()
+                .await
+                .is_some_and(|requests| !requests.is_empty())
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    mcp.interrupt_turn_and_wait_for_aborted(
+        thread.id.clone(),
+        turn.id.clone(),
+        DEFAULT_READ_TIMEOUT,
+    )
+    .await?;
+
+    let ThreadRevertResponse {
+        thread: reverted_thread,
+        ..
+    } = mcp
+        .request(|request_id| ClientRequest::ThreadRevert {
+            request_id,
+            params: ThreadRevertParams {
+                thread_id: thread.id.clone(),
+                before_turn_id: turn.id,
+            },
+        })
+        .await?;
+    assert!(reverted_thread.turns.is_empty());
     Ok(())
 }
 

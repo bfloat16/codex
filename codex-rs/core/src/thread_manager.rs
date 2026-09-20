@@ -251,7 +251,7 @@ enum ResumeStartup {
     InternalReload,
 }
 
-pub(crate) struct SuppressResumeModelWarning;
+pub(crate) struct InternalThreadReload;
 
 impl StartThreadOptions {
     pub fn new(config: Config) -> Self {
@@ -1206,9 +1206,7 @@ impl ThreadManager {
             ..StartThreadOptions::new(config)
         };
         if startup == ResumeStartup::InternalReload {
-            options
-                .thread_extension_init
-                .insert(SuppressResumeModelWarning);
+            options.thread_extension_init.insert(InternalThreadReload);
         }
         Box::pin(self.state.spawn_thread(ThreadSpawnRequest::new(
             options,
