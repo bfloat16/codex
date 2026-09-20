@@ -312,6 +312,13 @@ impl ChatWidget {
         notification: TurnCompletedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        if replay_kind.is_none()
+            && self.turn_lifecycle.last_turn_id.as_deref() != Some(notification.turn.id.as_str())
+        {
+            // Completion from a discarded runtime can arrive after rewind or a newer turn.
+            // It must not finish the new turn or restore its prompt under the old turn's id.
+            return;
+        }
         // User-message dedupe only suppresses the app-server echo of a prompt
         // this TUI already rendered locally. Once that turn ends, another
         // client can submit the same text and it still needs its own user cell.
@@ -402,7 +409,10 @@ impl ChatWidget {
         notification: ItemStartedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
-        if replay_kind.is_none() && thread_item_has_effective_model_output(&notification.item) {
+        if replay_kind.is_none()
+            && self.turn_lifecycle.last_turn_id.as_deref() == Some(notification.turn_id.as_str())
+            && thread_item_has_effective_model_output(&notification.item)
+        {
             self.transcript.saw_effective_model_output_this_turn = true;
         }
         match notification.item {
@@ -488,7 +498,10 @@ impl ChatWidget {
         {
             self.add_async_questions(id, questions);
         }
-        if replay_kind.is_none() && thread_item_has_effective_model_output(&notification.item) {
+        if replay_kind.is_none()
+            && self.turn_lifecycle.last_turn_id.as_deref() == Some(notification.turn_id.as_str())
+            && thread_item_has_effective_model_output(&notification.item)
+        {
             self.transcript.saw_effective_model_output_this_turn = true;
         }
         let is_context_compaction =

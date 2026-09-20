@@ -2573,3 +2573,50 @@ async fn reconnect_holds_only_recovered_input_until_manually_edited() {
         assert_matches!(next_submit_op(&mut ops), Op::UserTurn { .. });
     }
 }
+
+#[tokio::test]
+async fn output_free_interrupt_ignores_previous_turn_terminal_completion() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.submit_user_message(UserMessage::from("old prompt"));
+    assert_matches!(next_submit_op(&mut op_rx), Op::UserTurn { .. });
+    handle_turn_started(&mut chat, "old-turn");
+    let mut command = begin_unified_exec_startup(&mut chat, "old-command", "1", "sleep 5");
+    handle_turn_interrupted(&mut chat, "old-turn");
+    while rx.try_recv().is_ok() {}
+
+    chat.submit_user_message(UserMessage::from("replacement prompt"));
+    assert_matches!(next_submit_op(&mut op_rx), Op::UserTurn { .. });
+    handle_turn_started(&mut chat, "new-turn");
+    if let AppServerThreadItem::CommandExecution {
+        status,
+        exit_code,
+        duration_ms,
+        ..
+    } = &mut command
+    {
+        *status = AppServerCommandExecutionStatus::Completed;
+        *exit_code = Some(0);
+        *duration_ms = Some(10);
+    }
+    chat.handle_server_notification(
+        ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: chat.thread_id.unwrap().to_string(),
+            turn_id: "old-turn".to_string(),
+            completed_at_ms: 0,
+            item: command,
+        }),
+        /*replay_kind*/ None,
+    );
+    assert!(!chat.current_turn_has_model_output());
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    handle_turn_interrupted(&mut chat, "new-turn");
+    let rollback_turns = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::RollbackOutputFreeTurnForPromptRestore { turn_id, .. } => Some(turn_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rollback_turns, vec!["new-turn"]);
+    insta::assert_snapshot!(chat.bottom_pane.composer_text(), @"replacement prompt");
+}

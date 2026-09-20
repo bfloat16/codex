@@ -2107,3 +2107,23 @@ async fn apply_patch_request_omits_diff_summary_from_modal() -> anyhow::Result<(
 
     Ok(())
 }
+
+#[tokio::test]
+async fn rewind_discards_running_terminal_and_late_completion() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    handle_turn_started(&mut chat, "removed-turn");
+    let command = begin_unified_exec_startup(&mut chat, "removed-command", "1", "sleep 5");
+    handle_turn_interrupted(&mut chat, "removed-turn");
+    drain_insert_history(&mut rx);
+    chat.clear_reverted_turn();
+    assert!(chat.transcript.active_cell.is_none());
+    assert!(chat.unified_exec_processes.is_empty());
+    assert!(!chat.is_task_running_for_test());
+    handle_turn_started(&mut chat, "replacement-turn");
+    handle_turn_interrupted(&mut chat, "removed-turn");
+    assert!(chat.is_task_running_for_test());
+    end_exec(&mut chat, command, "late output", "", /*exit_code*/ 0);
+    let history = drain_insert_history(&mut rx);
+    assert!(history.is_empty());
+    assert!(chat.transcript.active_cell.is_none());
+}

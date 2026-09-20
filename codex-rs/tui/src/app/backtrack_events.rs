@@ -162,7 +162,7 @@ impl App {
             }
             Err(err) => {
                 self.handle_backtrack_rollback_failed();
-                self.restore_backtrack_prompt_after_rollback_error(prompt, err);
+                self.restore_backtrack_prompt_after_rollback_error(prompt, format!("{err:#}"));
             }
         }
         tui.frame_requester().schedule_frame();
@@ -182,6 +182,18 @@ impl App {
             prompt,
             mode,
         } = request;
+        if self
+            .backtrack
+            .pending_rollback
+            .as_ref()
+            .is_none_or(|pending| {
+                pending.selection.thread_id != thread_id
+                    || pending.selection.nth_user_message != nth_user_message
+            })
+        {
+            // A completed rewind or cancellation invalidates already queued picker actions.
+            return Ok(());
+        }
         if self.chat_widget.thread_id() != Some(thread_id) {
             self.handle_backtrack_rollback_failed();
             return Ok(());
@@ -203,6 +215,27 @@ impl App {
         } else {
             None
         };
+
+        // Keep both the conversation and its checkpoints retryable until every requested file
+        // has been restored. Reverting history also discards the checkpoints on the server.
+        let file_restore_error = match &file_restore {
+            Some(Err(err)) => Some(format!("Failed to restore tracked files: {err:#}")),
+            Some(Ok(response)) if !response.skipped.is_empty() || !response.failed.is_empty() => {
+                Some(format!(
+                    "File restore incomplete: restored {}; skipped {}; failed {}. Conversation history and checkpoints were kept for retry.",
+                    response.restored.len(),
+                    response.skipped.len(),
+                    response.failed.len()
+                ))
+            }
+            Some(Ok(_)) | None => None,
+        };
+        if let Some(message) = file_restore_error {
+            self.handle_backtrack_rollback_failed();
+            self.chat_widget.add_error_message(message);
+            tui.frame_requester().schedule_frame();
+            return Ok(());
+        }
 
         if restore_conversation {
             match app_server
@@ -238,7 +271,7 @@ impl App {
                 }
                 Err(err) => {
                     self.handle_backtrack_rollback_failed();
-                    self.restore_backtrack_prompt_after_rollback_error(prompt, err);
+                    self.restore_backtrack_prompt_after_rollback_error(prompt, format!("{err:#}"));
                 }
             }
         } else {

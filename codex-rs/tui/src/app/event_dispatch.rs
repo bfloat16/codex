@@ -90,22 +90,22 @@ impl App {
                         Ok(history_mode) => {
                             if let Some(channel) = self.thread_event_channels.get(&thread_id) {
                                 let mut store = channel.store.lock().await;
-                                if history_mode == ThreadHistoryMode::Paginated {
-                                    if store.truncate_before_turn(&turn_id) {
-                                        app_server.mark_thread_history_complete(thread_id);
-                                    }
-                                } else {
-                                    store.truncate_before_turn(&turn_id);
+                                let boundary_loaded = store.truncate_before_turn(&turn_id);
+                                if history_mode == ThreadHistoryMode::Paginated && boundary_loaded {
+                                    app_server.mark_thread_history_complete(thread_id);
                                 }
                             }
                             self.scrollback_has_older_history =
                                 app_server.has_older_history(thread_id);
+                            // An automatic Esc restore removes this turn only. A rewind picker
+                            // opened in the meantime must not override its transcript boundary.
+                            self.backtrack.pending_rollback = None;
                             if let Some(nth_user_message) = user_total.checked_sub(1) {
                                 self.handle_backtrack_rollback_succeeded(nth_user_message);
                             }
                         }
                         Err(err) => self.chat_widget.add_error_message(format!(
-                            "Failed to remove the interrupted turn from conversation history: {err}"
+                            "Failed to remove the interrupted turn from conversation history: {err:#}"
                         )),
                     }
                 }

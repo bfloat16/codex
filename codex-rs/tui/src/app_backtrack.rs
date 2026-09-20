@@ -54,8 +54,8 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 const NO_PREVIOUS_MESSAGE_TO_EDIT: &str = "No previous message to edit.";
-const BACKTRACK_MESSAGE_VIEW_ID: &str = "backtrack-message";
-const BACKTRACK_RESTORE_VIEW_ID: &str = "backtrack-restore";
+pub(crate) const BACKTRACK_MESSAGE_VIEW_ID: &str = "backtrack-message";
+pub(crate) const BACKTRACK_RESTORE_VIEW_ID: &str = "backtrack-restore";
 pub(crate) const SIDE_EDIT_PREVIOUS_UNAVAILABLE_MESSAGE: &str =
     "Editing previous prompts is unavailable in side conversations.";
 
@@ -172,6 +172,7 @@ impl App {
     }
 
     pub(crate) fn handle_backtrack_rollback_succeeded(&mut self, nth_user_message: usize) {
+        self.chat_widget.clear_reverted_turn();
         let pending = self.backtrack.pending_rollback.take();
         let nth_user_message = pending
             .map(|pending| pending.selection.nth_user_message)
@@ -383,7 +384,7 @@ impl App {
             action: Box::new(|tx| tx.send(AppEvent::CancelBacktrackRestore)),
         });
         let footer_note = if file_restore.blocked == 0 {
-            "Only changes made through Codex apply_patch are restored; shell and manual edits are left untouched."
+            "Tracked files are restored from disk checkpoints, overwriting later edits. Files without checkpoints are left untouched."
                 .to_string()
         } else {
             let blocked_file_label = if file_restore.blocked == 1 {
@@ -392,7 +393,7 @@ impl App {
                 "files"
             };
             format!(
-                "Only safe Codex apply_patch changes are restored; {} conflicting or unavailable tracked {} will be left untouched.",
+                "Tracked files are restored from disk checkpoints. {} unavailable tracked {} must be resolved before restoring the conversation.",
                 file_restore.blocked, blocked_file_label
             )
         };

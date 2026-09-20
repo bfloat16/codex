@@ -140,12 +140,14 @@ impl ThreadEventStore {
     }
 
     pub(super) fn truncate_before_turn(&mut self, before_turn_id: &str) -> bool {
-        let Some(index) = self.turns.iter().position(|turn| turn.id == before_turn_id) else {
-            return false;
-        };
-        self.turns.truncate(index);
+        let index = self.turns.iter().position(|turn| turn.id == before_turn_id);
+        if let Some(index) = index {
+            self.turns.truncate(index);
+        }
+        // A live turn may exist only in the bounded event buffer, not the hydrated history.
+        // Its lifecycle and events must be cleared even when the boundary is not loaded.
         self.reset_after_history_truncation();
-        true
+        index.is_some()
     }
 
     pub(super) fn remove_reverted_turns(
@@ -899,6 +901,24 @@ mod tests {
         assert_eq!(store.latest_turn_id.as_deref(), Some("turn-1"));
         assert_eq!(store.active_turn_id, None);
         assert_eq!(store.pending_interrupt_turn_id, None);
+    }
+
+    #[test]
+    fn thread_event_store_truncates_output_free_turn_in_buffer_only() {
+        let thread_id = ThreadId::new();
+        let mut store = ThreadEventStore::new(/*capacity*/ 8);
+        store.push_notification(turn_started_notification(thread_id, "live-turn"));
+        store.pending_interrupt_turn_id = Some("live-turn".to_string());
+        assert!(!store.truncate_before_turn("live-turn"));
+        assert_eq!(
+            (
+                store.latest_turn_id,
+                store.active_turn_id,
+                store.pending_interrupt_turn_id
+            ),
+            (None, None, None)
+        );
+        assert!(store.buffer.is_empty());
     }
 
     #[test]

@@ -1,0 +1,5 @@
+---
+source: tui/src/app/tests/rewind_checkpoint_tests.rs
+expression: errors
+---
+■ File restore incomplete: restored 0; skipped 1; failed 0. Conversation history and checkpoints were kept for retry.
