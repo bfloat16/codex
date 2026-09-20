@@ -252,21 +252,27 @@ impl ChatWidget {
         let prompt_to_restore = output_free_turn_id
             .as_ref()
             .and_then(|_| self.safety_buffering_prompt.clone());
+        let preserve_running_unified_exec = self.has_running_interrupted_unified_exec();
         // Finalize, log a gentle prompt, and clear running state.
         self.finalize_turn();
         let send_pending_steers_immediately =
             self.input_queue.submit_pending_steers_after_interrupt;
         self.input_queue.submit_pending_steers_after_interrupt = false;
         if self.interrupted_turn_notice_mode != InterruptedTurnNoticeMode::Suppress {
-            if send_pending_steers_immediately {
-                self.add_to_history(history_cell::new_info_event(
+            let notice: Box<dyn HistoryCell> = if send_pending_steers_immediately {
+                Box::new(history_cell::new_info_event(
                     "Model interrupted to submit steer instructions.".to_owned(),
                     /*hint*/ None,
-                ));
+                ))
             } else {
-                self.add_to_history(history_cell::new_error_event(
+                Box::new(history_cell::new_error_event(
                     self.interrupted_turn_message(reason),
-                ));
+                ))
+            };
+            if preserve_running_unified_exec {
+                self.app_event_tx.send(AppEvent::InsertHistoryCell(notice));
+            } else {
+                self.add_boxed_history(notice);
             }
         }
 

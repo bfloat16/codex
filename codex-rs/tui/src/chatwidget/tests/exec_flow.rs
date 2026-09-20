@@ -74,7 +74,7 @@ async fn replayed_command_completion_preserves_tracking_without_duplicate_starts
         .collect::<Vec<_>>();
     assert_eq!(
         history,
-        vec!["• Ran cat replay\n  └ (no output)\n".to_string()]
+        vec!["● Ran cat replay\n  └ (no output)\n".to_string()]
     );
 }
 
@@ -145,7 +145,7 @@ async fn failed_exploration_keeps_overlapping_commands_active_until_all_finish()
     assert_eq!(cells.len(), 1);
     let history = lines_to_single_string(&cells[0]);
     insta::assert_snapshot!(history, @r"
-• Explored
+● Explored
   └ List missing
     Read foo.txt, bar.txt
 ");
@@ -153,7 +153,7 @@ async fn failed_exploration_keeps_overlapping_commands_active_until_all_finish()
     let later = begin_exec(&mut chat, "call-after-failure", "cat later.txt");
     end_exec(&mut chat, later, "later\n", "", /*exit_code*/ 0);
     insta::assert_snapshot!(active_blob(&chat), @r"
-• Explored
+● Explored
   └ Read later.txt
 ");
 }
@@ -563,7 +563,7 @@ async fn exec_history_cell_shows_working_then_completed() {
     let blob = lines_to_single_string(lines);
     // New behavior: no glyph markers; ensure command is shown and no panic.
     assert!(
-        blob.contains("• Ran"),
+        blob.contains("● Ran"),
         "expected summary header present: {blob:?}"
     );
     assert!(
@@ -590,7 +590,7 @@ async fn exec_history_cell_shows_working_then_failed() {
     let lines = &cells[0];
     let blob = lines_to_single_string(lines);
     assert!(
-        blob.contains("• Ran false"),
+        blob.contains("● Ran false"),
         "expected command and header text present: {blob:?}"
     );
     assert!(blob.to_lowercase().contains("bloop"), "expected error text");
@@ -631,7 +631,7 @@ async fn exec_end_without_begin_uses_event_command() {
     assert_eq!(cells.len(), 1, "expected finalized exec cell to flush");
     let blob = lines_to_single_string(&cells[0]);
     assert!(
-        blob.contains("• Ran echo orphaned"),
+        blob.contains("● Ran echo orphaned"),
         "expected command text to come from event: {blob:?}"
     );
     assert!(
@@ -682,12 +682,12 @@ async fn exec_end_without_begin_does_not_flush_unrelated_running_exploring_cell(
     assert_eq!(cells.len(), 1, "only the orphan end should be inserted");
     let orphan_blob = lines_to_single_string(&cells[0]);
     assert!(
-        orphan_blob.contains("• Ran echo repro-marker"),
+        orphan_blob.contains("● Ran echo repro-marker"),
         "expected orphan end to render a standalone entry: {orphan_blob:?}"
     );
     let active = active_blob(&chat);
     assert!(
-        active.contains("• Exploring"),
+        active.contains("● Exploring"),
         "expected unrelated exploring call to remain active: {active:?}"
     );
     assert!(
@@ -722,7 +722,7 @@ async fn exec_end_without_begin_flushes_completed_unrelated_exploring_cell() {
     let first = lines_to_single_string(&cells[0]);
     let second = lines_to_single_string(&cells[1]);
     assert!(
-        first.contains("• Explored"),
+        first.contains("● Explored"),
         "expected flushed exploring cell: {first:?}"
     );
     assert!(
@@ -730,7 +730,7 @@ async fn exec_end_without_begin_flushes_completed_unrelated_exploring_cell() {
         "expected flushed exploring cell: {first:?}"
     );
     assert!(
-        second.contains("• Ran echo after"),
+        second.contains("● Ran echo after"),
         "expected orphan end entry after flush: {second:?}"
     );
     assert!(
@@ -764,7 +764,7 @@ async fn overlapping_exploring_exec_end_is_not_misclassified_as_orphan() {
         "expected second running command to stay in the same active cell: {active:?}"
     );
     assert!(
-        active.contains("• Exploring"),
+        active.contains("● Exploring"),
         "expected grouped exploring header to remain active: {active:?}"
     );
 
@@ -1586,6 +1586,17 @@ async fn interrupt_preserves_unified_exec_wait_streak_snapshot() {
     terminal_interaction(&mut chat, "call-1a", "process-1", "");
 
     handle_turn_interrupted(&mut chat, "turn-1");
+    assert!(!chat.active_tool_group_state().accepting_content);
+    let active_display = chat
+        .active_cell_display(/*width*/ 80)
+        .expect("interrupted background shell should remain visible");
+    let active_tool = active_display
+        .tool
+        .expect("interrupted background shell should remain an active tool");
+    assert!(active_tool.preview_active);
+    let active = active_blob(&chat);
+    assert_eq!(active, "● Running just fix\n");
+    assert_chatwidget_snapshot!("interrupt_keeps_unified_exec_running", active);
 
     end_exec(
         &mut chat,

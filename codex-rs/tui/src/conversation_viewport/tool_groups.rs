@@ -125,11 +125,13 @@ impl ConversationViewport {
                     merged.merge(live_tool.activity);
                 }
                 if merged.call_count >= MIN_GROUPED_TOOL_CALLS {
+                    let live_tool_active = live_tool.is_some_and(|tool| tool.preview_active);
                     renderables.push(Box::new(ToolActivityGroupRenderable {
                         cells: cells[start..index].to_vec(),
                         live_tool: live_tool.cloned(),
                         activity: merged,
-                        active: index == cells.len() && state.tail.state.accepting_content,
+                        active: index == cells.len()
+                            && (state.tail.state.accepting_content || live_tool_active),
                         active_started_at: state.tail.state.started_at,
                         animations_enabled: state.tail.state.animations_enabled,
                         hovered: state.hovered_tool_group == Some(start),
@@ -228,8 +230,8 @@ impl ConversationViewport {
         Some(Box::new(ToolActivityGroupRenderable {
             cells: Vec::new(),
             activity: tool.activity,
+            active: self.live_tool_group_state.accepting_content || tool.preview_active,
             live_tool: Some(tool),
-            active: self.live_tool_group_state.accepting_content,
             active_started_at: self.live_tool_group_state.started_at,
             animations_enabled: self.live_tool_group_state.animations_enabled,
             hovered: self.hovered_tool_group == Some(start),
@@ -407,6 +409,9 @@ impl ToolActivityGroupRenderable {
     }
 
     fn preview_lines(&self, width: u16) -> Vec<Line<'static>> {
+        if !self.active {
+            return Vec::new();
+        }
         let mut lines = self
             .cells
             .iter()

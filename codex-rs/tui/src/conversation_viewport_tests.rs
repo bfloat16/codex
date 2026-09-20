@@ -399,9 +399,9 @@ fn adjacent_tools_collapse_then_expand_and_collapse_from_the_group_background() 
     before
 
       Read 2 files, ran 1 shell command
-      └ shell transcript detail
 
     after
+
 
 
 
@@ -419,7 +419,6 @@ fn adjacent_tools_collapse_then_expand_and_collapse_from_the_group_background() 
     before
 
       Read 2 files, ran 1 shell command
-      └ shell transcript detail
 
     after
     ");
@@ -542,7 +541,7 @@ fn active_tool_group_merges_live_activity_and_keeps_latest_completed_preview() {
     );
     let inactive = render(&mut viewport);
     assert!(!inactive.contains("Search hook discovery"));
-    assert!(inactive.contains("Call repo.inspect"));
+    assert!(!inactive.contains("Call repo.inspect"));
 
     assert_snapshot!(format!(
         "active collapsed:\n{active_collapsed}\nactive expanded:\n{active_expanded}\nactive between tools:\n{active_between_tools}\ninactive:\n{inactive}",
@@ -591,13 +590,58 @@ before
 
   Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
   shell command
-  └ Call repo.inspect with a deliberately long argument list
-    that would otherwise occupy more than ten preview rows in
-    the collapsed block
 
 
 
 
+
+"###);
+}
+
+#[test]
+fn running_shell_preview_is_visible_without_an_accepting_model_turn() {
+    let mut viewport = viewport(Vec::new());
+    viewport.sync_live_tail(
+        /*width*/ 48,
+        Some(ActiveCellRenderKey {
+            revision: 1,
+            is_stream_continuation: false,
+            animation_tick: None,
+        }),
+        ActiveToolGroupState::default(),
+        |_| {
+            Some(ActiveCellDisplay {
+                lines: vec![HyperlinkLine::from("running shell detail")],
+                auxiliary_lines: Vec::new(),
+                tool: Some(ActiveToolDisplay {
+                    activity: ToolActivity {
+                        call_count: 1,
+                        shell_commands: 1,
+                        ..ToolActivity::default()
+                    },
+                    preview_lines: vec!["Ran cargo test -p codex-tui".cyan().into()],
+                    preview_active: true,
+                    detail_lines: vec![HyperlinkLine::from("running shell detail")],
+                    is_stream_continuation: false,
+                }),
+            })
+        },
+    );
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 48, /*height*/ 3,
+    );
+    let mut buffer = Buffer::empty(area);
+    viewport.render(area, &mut buffer);
+    let rendered = buffer_text(&buffer, area)
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("Ran cargo test -p codex-tui"));
+    assert_snapshot!(rendered, @r###"
+● Ran 1 shell command
+  └ Ran cargo test -p codex-tui
 
 "###);
 }
@@ -838,12 +882,10 @@ fn single_tools_and_file_edits_are_collapsed_by_default() {
             .join("\n"),
         @"
       Read 1 file
-      └ read transcript detail
 
     ● Added src/lib.rs (+1 -0)
 
       Ran 1 shell command
-      └ shell transcript detail
     "
     );
 }
@@ -1105,14 +1147,13 @@ fn appending_and_backfilling_tools_rebuild_only_the_adjacent_group() {
     before
 
       Read 1 file, ran 1 shell command
-      └ shell transcript
+
 
 
     backfilled:
     before
 
       Read 1 file, ran 1 shell command
-      └ shell transcript
 
     after
     ");
