@@ -512,6 +512,25 @@ impl CodexThread {
         let file_systems = self.file_checkpoint_file_systems().await;
         let _access_permit = self.file_checkpoint_access_permit().await?;
         self.ensure_file_checkpoint_idle().await?;
+        // Esc leaves background terminals alive. Stop them before replacing workspace files so
+        // a command from the discarded work cannot immediately overwrite a restored checkpoint.
+        for terminal in self.list_background_terminals().await {
+            let process_id = terminal.process_id.parse().map_err(|err| {
+                FileCheckpointError::InvalidData(format!("invalid background process id: {err}"))
+            })?;
+            if !self.terminate_background_terminal(process_id).await
+                && self
+                    .list_background_terminals()
+                    .await
+                    .iter()
+                    .any(|running| running.process_id == terminal.process_id)
+            {
+                return Err(FileCheckpointError::InvalidData(format!(
+                    "could not stop background terminal {} before file restore",
+                    terminal.process_id
+                )));
+            }
+        }
         store.restore(before_turn_id, &file_systems).await
     }
 

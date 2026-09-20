@@ -308,7 +308,7 @@ impl FileCheckpointStore {
         file_systems: &FileSystemsByEnvironment,
     ) -> Vec<InspectedRestore> {
         let mut inspected = Vec::with_capacity(plan.len());
-        for plan in plan {
+        for mut plan in plan {
             let mut preview = FileRestorePreviewEntry {
                 environment_id: plan.file.environment_id.clone(),
                 path: plan.file.path.clone(),
@@ -330,13 +330,11 @@ impl FileCheckpointStore {
                 Ok(current) if current == plan.target.identity() => continue,
                 Ok(current) => {
                     preview.change_kind = change_kind(&current, &plan.target);
-                    if plan.expected_current.as_ref() == Some(&current) {
-                        preview.disposition = FileRestoreDisposition::Restorable;
-                    } else {
-                        preview.disposition = FileRestoreDisposition::Conflict;
-                        preview.detail =
-                            Some("file changed outside Codex after the tracked edit".to_string());
-                    }
+                    // An explicit rewind restores the durable before-image, including when the
+                    // tracked file was edited again outside the tool. Still detect writes racing
+                    // this restore's inspection before replacing the file.
+                    plan.expected_current = Some(current);
+                    preview.disposition = FileRestoreDisposition::Restorable;
                 }
                 Err(err) => {
                     preview.detail = Some(err.to_string());

@@ -167,12 +167,13 @@ async fn restores_created_file_by_deleting_it() {
 }
 
 #[tokio::test]
-async fn skips_file_changed_outside_managed_tools() {
+async fn restores_disk_checkpoint_over_subsequent_edits() {
     let home = TempDir::new().expect("temp dir");
     let workspace = TempDir::new().expect("temp dir");
     let path = path_uri(&workspace.path().join("sample.txt"));
     write(&path, "original\n").await;
-    let store = FileCheckpointStore::open(&absolute(home.path()), ThreadId::new())
+    let thread_id = ThreadId::new();
+    let store = FileCheckpointStore::open(&absolute(home.path()), thread_id)
         .await
         .expect("open checkpoint store");
     store.begin_turn("turn-1").await.expect("begin turn");
@@ -198,19 +199,49 @@ async fn skips_file_changed_outside_managed_tools() {
         .expect("record managed file");
     write(&path, "manual\n").await;
 
-    let outcome = store
+    drop(store);
+    let store = FileCheckpointStore::open(&absolute(home.path()), thread_id)
+        .await
+        .expect("reopen durable checkpoint");
+    let blob = store.blobs_dir.join(super::model::sha256(b"original\n"));
+    std::fs::write(&blob, "corrupted checkpoint").expect("corrupt blob");
+    let failed = store
         .restore("turn-1", &file_systems())
         .await
-        .expect("restore files");
-    assert_eq!(outcome.restored, Vec::new());
-    assert_eq!(outcome.skipped.len(), 1);
+        .expect("restore outcome");
     assert_eq!(
-        outcome.skipped[0].disposition,
-        FileRestoreDisposition::Conflict
+        (
+            failed.restored.len(),
+            failed.skipped.len(),
+            failed.failed.len()
+        ),
+        (0, 0, 1)
     );
     assert_eq!(
         std::fs::read_to_string(path.to_path_buf()).unwrap(),
         "manual\n"
+    );
+    std::fs::write(blob, "original\n").expect("repair blob for retry");
+    let preview = store
+        .preview("turn-1", &file_systems())
+        .await
+        .expect("preview");
+    let outcome = store
+        .restore("turn-1", &file_systems())
+        .await
+        .expect("restore files");
+    assert_eq!(
+        outcome,
+        super::FileRestoreOutcome {
+            restored: preview.files,
+            skipped: Vec::new(),
+            failed: Vec::new(),
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(path.to_path_buf()).unwrap(),
+        "original
+"
     );
 }
 

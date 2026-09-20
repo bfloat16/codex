@@ -31,8 +31,10 @@ use wiremock::Mock;
 use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
 
+#[test_case::test_case(false; "completed")]
+#[test_case::test_case(true; "background_terminal_running")]
 #[tokio::test]
-async fn restores_apply_patch_changes_before_selected_turn() -> Result<()> {
+async fn restores_apply_patch_changes_before_selected_turn(background: bool) -> Result<()> {
     skip_if_remote!(
         Ok(()),
         "apply-patch workspace fixture is only materialized on the host"
@@ -47,12 +49,31 @@ async fn restores_apply_patch_changes_before_selected_turn() -> Result<()> {
     let moved_file = workspace.join("moved.txt");
     std::fs::write(&file, "original\n")?;
     let patch = "*** Begin Patch\n*** Update File: sample.txt\n*** Move to: moved.txt\n@@\n-original\n+managed\n*** End Patch";
-    let server = create_mock_responses_server_sequence(vec![
-        create_apply_patch_sse_response(patch, "patch-call")?,
-        create_final_assistant_message_sse_response("done")?,
-    ])
-    .await;
+    let mut replies = vec![create_apply_patch_sse_response(patch, "patch-call")?];
+    if background {
+        let cmd = if cfg!(windows) {
+            "Start-Sleep -Seconds 60"
+        } else {
+            "sleep 60"
+        };
+        let shell = if cfg!(windows) {
+            "powershell.exe"
+        } else {
+            "/bin/sh"
+        };
+        let args = serde_json::to_string(
+            &serde_json::json!({"cmd": cmd, "shell": shell, "login": false, "yield_time_ms": 10}),
+        )?;
+        replies.push(responses::sse(vec![
+            responses::ev_response_created("background"),
+            responses::ev_function_call("background-call", "exec_command", &args),
+            responses::ev_completed("background"),
+        ]));
+    }
+    replies.push(create_final_assistant_message_sse_response("done")?);
+    let server = create_mock_responses_server_sequence(replies).await;
     MockResponsesConfig::new(&server.uri())
+        .enable_feature(codex_features::Feature::UnifiedExec)
         .with_approval_policy("never")
         .with_sandbox_mode("workspace-write")
         .write(&codex_home)?;
@@ -87,6 +108,23 @@ async fn restores_apply_patch_changes_before_selected_turn() -> Result<()> {
     assert!(!file.exists());
     assert_eq!(std::fs::read_to_string(&moved_file)?, "managed\n");
 
+    // Rewind must use the checkpoint even when the tracked file was edited again.
+    std::fs::write(
+        &moved_file,
+        "later manual edit
+",
+    )?;
+    let terminals: codex_app_server_protocol::ThreadBackgroundTerminalsListResponse = app
+        .request(|request_id| ClientRequest::ThreadBackgroundTerminalsList {
+            request_id,
+            params: codex_app_server_protocol::ThreadBackgroundTerminalsListParams {
+                thread_id: thread.id.clone(),
+                cursor: None,
+                limit: None,
+            },
+        })
+        .await?;
+    assert_eq!(terminals.data.len(), usize::from(background));
     let preview: ThreadFileChangeReadResponse = app
         .request(|request_id| ClientRequest::ThreadFileChangeRead {
             request_id,
@@ -124,7 +162,7 @@ async fn restores_apply_patch_changes_before_selected_turn() -> Result<()> {
         .request(|request_id| ClientRequest::ThreadFileChangeRestore {
             request_id,
             params: ThreadFileChangeRestoreParams {
-                thread_id: thread.id,
+                thread_id: thread.id.clone(),
                 before_turn_id: completed.turn.id,
             },
         })
@@ -134,6 +172,17 @@ async fn restores_apply_patch_changes_before_selected_turn() -> Result<()> {
     assert_eq!(restored.failed, Vec::new());
     assert_eq!(std::fs::read_to_string(file)?, "original\n");
     assert!(!moved_file.exists());
+    let terminals: codex_app_server_protocol::ThreadBackgroundTerminalsListResponse = app
+        .request(|request_id| ClientRequest::ThreadBackgroundTerminalsList {
+            request_id,
+            params: codex_app_server_protocol::ThreadBackgroundTerminalsListParams {
+                thread_id: thread.id,
+                cursor: None,
+                limit: None,
+            },
+        })
+        .await?;
+    assert!(terminals.data.is_empty());
     Ok(())
 }
 
