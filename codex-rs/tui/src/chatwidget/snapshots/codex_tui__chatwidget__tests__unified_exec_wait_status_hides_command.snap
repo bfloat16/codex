@@ -6,7 +6,6 @@ expression: normalize_snapshot_paths(rendered)
   │ some::very::long::test::name
 
 ● Waiting for terminal (0s)
-  └ cargo test -p codex-core -- --exact…
 
 
 › Ask Codex to do anything

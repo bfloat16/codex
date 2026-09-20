@@ -76,12 +76,11 @@ impl ChatWidget {
         if !self.bottom_pane.is_task_running() {
             return;
         }
-        let command_display = self
+        let process_is_running = self
             .unified_exec_processes
             .iter()
-            .find(|process| process.key == process_id)
-            .map(|process| process.command_display.clone());
-        if stdin.is_empty() && command_display.is_none() {
+            .any(|process| process.key == process_id);
+        if stdin.is_empty() && !process_is_running {
             return;
         }
 
@@ -115,7 +114,7 @@ impl ChatWidget {
                 TerminalTitleStatusKind::WaitingForTerminal;
             self.set_status(
                 "Waiting for terminal".to_string(),
-                command_display,
+                /*details*/ None,
                 StatusDetailsCapitalization::Preserve,
                 /*details_max_lines*/ 1,
             );

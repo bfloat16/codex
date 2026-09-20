@@ -982,7 +982,7 @@ async fn final_worked_for_uses_cumulative_turn_duration_snapshot() {
 }
 
 #[tokio::test]
-async fn unified_exec_wait_status_header_updates_on_late_command_display() {
+async fn unified_exec_wait_status_hides_command_display() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
     chat.unified_exec_processes.push(UnifiedExecProcessSummary {
@@ -1004,7 +1004,7 @@ async fn unified_exec_wait_status_header_updates_on_late_command_display() {
         .status_widget()
         .expect("status indicator should be visible");
     assert_eq!(status.header(), "Waiting for terminal");
-    assert_eq!(status.details(), Some("sleep 5"));
+    assert_eq!(status.details(), None);
 }
 
 #[tokio::test]
@@ -1056,7 +1056,7 @@ async fn unified_exec_empty_poll_for_finished_process_does_not_show_waiting_stat
 }
 
 #[tokio::test]
-async fn unified_exec_wait_status_renders_command_in_single_details_row_snapshot() {
+async fn unified_exec_wait_status_hides_command_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
     begin_unified_exec_startup(
@@ -1070,7 +1070,7 @@ async fn unified_exec_wait_status_renders_command_in_single_details_row_snapshot
 
     let rendered = render_bottom_popup(&chat, /*width*/ 48);
     assert_chatwidget_snapshot!(
-        "unified_exec_wait_status_renders_command_in_single_details_row",
+        "unified_exec_wait_status_hides_command",
         normalize_snapshot_paths(rendered)
     );
 }
