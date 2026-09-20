@@ -6,52 +6,52 @@ expression: styles
     (
         "R",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "e",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "c",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "o",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "n",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "n",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "e",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "c",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "t",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "i",
         LightRed,
-        BOLD,
+        NONE,
     ),
     (
         "n",

@@ -341,9 +341,7 @@ fn attention_header_spans(
         .enumerate()
         .map(|(index, character)| {
             let mut span = Span::from(character.to_string()).fg(color);
-            if index < highlighted {
-                span = span.bold();
-            } else {
+            if index >= highlighted {
                 span = span.dim();
             }
             span
@@ -592,7 +590,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(styles.iter().all(|(_, color, _)| *color == Color::LightRed));
-        assert!(styles[0].2.contains(ratatui::style::Modifier::BOLD));
+        assert!(
+            styles
+                .iter()
+                .all(|(_, _, modifier)| !modifier.contains(ratatui::style::Modifier::BOLD))
+        );
         assert!(
             styles
                 .last()

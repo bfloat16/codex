@@ -6,7 +6,6 @@ use std::sync::atomic::AtomicBool;
 
 use crate::attestation::app_server_attestation_provider;
 use crate::config_manager::ConfigManager;
-use crate::config_watcher::ConfigWatcher;
 use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::current_time::app_server_time_provider;
 use crate::error_code::internal_error;
@@ -141,7 +140,6 @@ pub(crate) struct MessageProcessor {
     models_refresh_worker: ModelsRefreshWorker,
     turn_cost_worker: Option<TurnCostWorker>,
     skills_watcher: Arc<SkillsWatcher>,
-    config_watcher: Arc<ConfigWatcher>,
     account_processor: AccountRequestProcessor,
     apps_processor: AppsRequestProcessor,
     catalog_processor: CatalogRequestProcessor,
@@ -396,7 +394,6 @@ impl MessageProcessor {
             thread_manager.clone(),
             analytics_events_client.clone(),
         );
-        let config_watcher = ConfigWatcher::new(config.as_ref(), config_processor.clone());
         let on_effective_plugins_changed =
             crate::effective_plugin_change::effective_plugins_changed_callback(
                 auth_manager.clone(),
@@ -578,7 +575,6 @@ impl MessageProcessor {
             models_refresh_worker,
             turn_cost_worker,
             skills_watcher,
-            config_watcher,
             account_processor,
             apps_processor,
             catalog_processor,
@@ -611,7 +607,6 @@ impl MessageProcessor {
         self.apps_processor.shutdown();
         self.models_refresh_worker.shutdown();
         self.skills_watcher.shutdown();
-        self.config_watcher.shutdown();
     }
 
     pub(crate) async fn process_request(
