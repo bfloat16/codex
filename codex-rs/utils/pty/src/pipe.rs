@@ -129,8 +129,8 @@ enum PipeStdinMode {
     Null,
 }
 
-/// On Windows, process-tree containment is best-effort because Tokio returns
-/// only after the root process starts, so job assignment cannot be atomic.
+/// On Windows, assign the suspended root before it can create descendants.
+/// Fall back to root-only termination when the host rejects Job Object containment.
 async fn spawn_process_with_stdin_mode(
     program: &OsStr,
     args: &[String],
@@ -188,24 +188,26 @@ async fn spawn_process_with_stdin_mode(
     command.stderr(Stdio::piped());
 
     #[cfg(windows)]
-    let job = crate::win::JobObject::create().map(Arc::new);
+    let job = crate::win::JobObject::create_without_breakaway().map(Arc::new);
+    #[cfg(windows)]
+    if let Ok(job) = &job {
+        // In particular, MSYS shells must not let children escape the job on exec.
+        job.prepare_suspended_spawn(&mut command);
+    }
     let mut child = command.spawn()?;
     #[cfg(windows)]
     let windows_terminator = {
-        // Accept the small race: a descendant created between spawn and
-        // assignment is not guaranteed to join the job and can escape termination.
         let pid = child
             .id()
             .ok_or_else(|| io::Error::other("missing child pid"))?;
-        let assigned_job = job.and_then(|job| {
-            let process_handle = child
-                .raw_handle()
-                .ok_or_else(|| io::Error::other("missing child process handle"))?;
-            job.assign_process(process_handle)?;
-            Ok(job)
-        });
-        match assigned_job {
-            Ok(job) => WindowsChildTerminator::Job(job),
+        match job {
+            Ok(job) => {
+                if job.assign_and_resume_process(pid)? {
+                    WindowsChildTerminator::Job(job)
+                } else {
+                    WindowsChildTerminator::Process(pid)
+                }
+            }
             Err(err) => {
                 log::warn!(
                     "Windows pipe process tree containment unavailable for pid {pid}: {err}"

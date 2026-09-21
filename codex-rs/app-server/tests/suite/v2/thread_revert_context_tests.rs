@@ -6,6 +6,9 @@ use codex_app_server_protocol::ThreadCompactStartParams;
 use codex_app_server_protocol::ThreadCompactStartResponse;
 use pretty_assertions::assert_eq;
 
+#[path = "thread_revert_shell_tests.rs"]
+mod shell_tests;
+
 #[derive(Clone, Copy)]
 enum Stop {
     Interrupt,
