@@ -55,6 +55,9 @@ use tokio::time::timeout;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+#[path = "thread_revert_context_tests.rs"]
+mod context_tests;
+
 #[test_case::test_case("model", "openai")]
 #[test_case::test_case("collaboration_mode", "openai")]
 #[test_case::test_case("both", "openai")]
