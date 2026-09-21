@@ -1,0 +1,5 @@
+---
+source: tui/src/status_indicator_wait_tests.rs
+expression: terminal.backend()
+---
+"Waiting for terminal (1m 00s / 2m 00s)                                          "

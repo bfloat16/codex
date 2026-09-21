@@ -72,6 +72,9 @@ use tokio::time::Duration;
 
 const UNIFIED_EXEC_LAGGED_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[path = "unified_exec_wait_interrupt_tests.rs"]
+mod wait_interrupt;
+
 fn current_shell_command<'a>(powershell: &'a str, posix: &'a str) -> &'a str {
     match default_user_shell().name() {
         "powershell" => powershell,
@@ -3050,7 +3053,7 @@ async fn unified_exec_keeps_long_running_session_after_turn_end() -> Result<()> 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unified_exec_interrupt_preserves_long_running_session() -> Result<()> {
+async fn unified_exec_interrupt_terminates_long_running_session() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
     skip_if_host_windows!(Ok(()));
@@ -3127,12 +3130,6 @@ async fn unified_exec_interrupt_preserves_long_running_session() -> Result<()> {
     codex.submit(Op::Interrupt).await?;
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnAborted(_))).await;
 
-    assert!(
-        process_is_alive(&pid)?,
-        "expected unified exec process to remain alive after interrupt"
-    );
-
-    codex.submit(Op::CleanBackgroundTerminals).await?;
     wait_for_process_exit(&pid).await?;
 
     Ok(())

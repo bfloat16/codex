@@ -5,6 +5,10 @@ use crate::bottom_pane::BottomPaneView;
 use crate::clipboard_copy::CopyFormat;
 
 impl ChatWidget {
+    pub(crate) fn has_running_terminals(&self) -> bool {
+        !self.unified_exec_processes.is_empty()
+    }
+
     pub(crate) fn set_agents_navigation_enabled(&mut self, enabled: bool) {
         self.bottom_pane.set_agents_navigation_enabled(enabled);
     }
@@ -161,6 +165,17 @@ impl ChatWidget {
         }
 
         if self.handle_plugins_popup_key_event(key_event) {
+            return;
+        }
+
+        if self.chat_keymap.interrupt_turn.is_pressed(key_event)
+            && !self.bottom_pane.is_task_running()
+            && self.has_running_terminals()
+            && self.bottom_pane.no_modal_or_popup_active()
+            && !self.should_handle_vim_insert_escape(key_event)
+        {
+            self.clean_background_terminals();
+            self.request_redraw();
             return;
         }
 

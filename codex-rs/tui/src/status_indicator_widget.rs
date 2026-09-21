@@ -219,6 +219,10 @@ struct StatusIndicator<'a> {
     timer: &'a StatusTimer,
 }
 
+#[cfg(test)]
+#[path = "status_indicator_wait_tests.rs"]
+mod terminal_wait_tests;
+
 impl StatusIndicator<'_> {
     // Share width decisions between height measurement and rendering, including
     // wide Unicode characters and elapsed-time text.
@@ -229,7 +233,18 @@ impl StatusIndicator<'_> {
             || self.timer.elapsed_at(now),
             |started_at| now.saturating_duration_since(started_at),
         );
-        let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
+        let pretty_elapsed = if row.header == "Waiting for terminal"
+            && let Some(started_at) = row.waiting_animation_started_at
+            && now.saturating_duration_since(started_at) < row.waiting_animation_duration
+        {
+            format!(
+                "{} / {}",
+                fmt_elapsed_compact(now.saturating_duration_since(started_at).as_secs()),
+                fmt_elapsed_compact(row.waiting_animation_duration.as_secs())
+            )
+        } else {
+            fmt_elapsed_compact(elapsed_duration.as_secs())
+        };
         let motion_mode = MotionMode::from_animations_enabled(row.animations_enabled);
         let waiting = row.header == "Waiting" || row.header.starts_with("Waiting ");
         let attention_animation_active = (waiting || row.api_error)

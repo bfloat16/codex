@@ -438,7 +438,9 @@ impl App {
             // with the composer focused and empty. In any other state, forward
             // Esc so the active UI (e.g. status indicator, modals, popups)
             // handles it.
-            if self.should_handle_backtrack_esc(key_event) {
+            if self.chat_widget.has_running_terminals() {
+                self.chat_widget.handle_key_event(key_event);
+            } else if self.should_handle_backtrack_esc(key_event) {
                 self.handle_backtrack_esc_key(tui);
             } else if self.should_reject_side_backtrack_esc(key_event) {
                 self.reject_side_backtrack_esc();

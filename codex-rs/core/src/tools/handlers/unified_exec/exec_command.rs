@@ -419,6 +419,11 @@ impl ExecCommandHandler {
         }
 
         emit_unified_exec_tty_metric(&turn.session_telemetry, tty);
+        let yield_time_ms = yield_time_ms.unwrap_or(if tty {
+            10_000
+        } else {
+            crate::unified_exec::BACKGROUND_TERMINAL_WAIT_TIME_MS
+        });
         let request = ExecCommandRequest {
             command,
             shell_type,

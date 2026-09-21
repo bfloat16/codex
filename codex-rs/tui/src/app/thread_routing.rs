@@ -622,6 +622,7 @@ impl App {
                 }
                 let request_handle = app_server.request_handle();
                 let request_ids = [app_server.next_request_id(), app_server.next_request_id()];
+                let cleanup_request_id = app_server.next_request_id();
                 tokio::spawn(async move {
                     for (attempt, request_id) in request_ids.into_iter().enumerate() {
                         let result = request_handle
@@ -645,6 +646,39 @@ impl App {
                                         Some(actual_turn_id.clone());
                                     turn_id = actual_turn_id;
                                     continue;
+                                }
+                                // Completion can win the race with Esc while its notification
+                                // is still queued. Let that notification finish the UI normally.
+                                if matches!(&error, TypedRequestError::Server { method, source }
+                                    if method == "turn/interrupt"
+                                        && source.code == -32600
+                                        && source.message == "no active turn to interrupt")
+                                {
+                                    if let Err(error) = request_handle.request_typed::<codex_app_server_protocol::ThreadBackgroundTerminalsCleanResponse>(
+                                        ClientRequest::ThreadBackgroundTerminalsClean {
+                                            request_id: cleanup_request_id,
+                                            params: codex_app_server_protocol::ThreadBackgroundTerminalsCleanParams {
+                                                thread_id: thread_id.to_string(),
+                                            },
+                                        },
+                                    ).await {
+                                        tracing::warn!(%error, "failed to stop terminals after turn completion");
+                                    }
+                                    let mut store = thread_event_store.lock().await;
+                                    if store.pending_interrupt_turn_id.as_deref()
+                                        == Some(turn_id.as_str())
+                                    {
+                                        store.pending_interrupt_turn_id = None;
+                                    }
+                                    break;
+                                }
+                                {
+                                    let mut store = thread_event_store.lock().await;
+                                    if store.pending_interrupt_turn_id.as_deref()
+                                        == Some(turn_id.as_str())
+                                    {
+                                        store.pending_interrupt_turn_id = None;
+                                    }
                                 }
                                 tracing::warn!(error = %error, "turn/interrupt failed in TUI");
                                 let notification =

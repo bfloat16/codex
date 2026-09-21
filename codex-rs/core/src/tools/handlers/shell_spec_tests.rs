@@ -30,9 +30,9 @@ fn exec_command_tool_matches_expected_spec() {
             .to_string()
     };
     let yield_time_ms_description = if cfg!(windows) {
-        "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms."
+        "Wait before returning a session ID for a still-running command. Ordinary commands default to 120000 ms; commands that finish sooner return immediately. Interactive sessions (tty: true) default to 10000 ms and cap at 30000 ms. The minimum on Windows is 10000 ms. Omit for ordinary commands; use a shorter wait only when ongoing interaction is required."
     } else {
-        "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+        "Wait before returning a session ID for a still-running command. Ordinary commands default to 120000 ms; commands that finish sooner return immediately. Interactive sessions (tty: true) default to 10000 ms and cap at 30000 ms. Minimum 250 ms. Omit for ordinary commands; use a shorter wait only when ongoing interaction is required."
     };
 
     let mut properties = BTreeMap::from([
@@ -164,7 +164,7 @@ fn write_stdin_tool_matches_expected_spec() {
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.".to_string(),
+                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait up to 120000 ms, returning early when the process exits.".to_string(),
             )),
         ),
         (

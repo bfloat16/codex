@@ -38,27 +38,27 @@ fn unified_exec_env_overrides_existing_values() {
 }
 
 #[test]
-fn background_terminal_poll_timeout_is_fixed_at_three_minutes() {
+fn background_terminal_poll_timeout_is_fixed_at_two_minutes() {
     assert_eq!(
         background_poll_yield_time_ms(
             /*consecutive_polls*/ 1,
             DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
         ),
-        180_000
+        120_000
     );
     assert_eq!(
         background_poll_yield_time_ms(
             /*consecutive_polls*/ 2,
             DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
         ),
-        180_000
+        120_000
     );
     assert_eq!(
         background_poll_yield_time_ms(
             /*consecutive_polls*/ 20,
             DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
         ),
-        180_000
+        120_000
     );
 }
 

@@ -526,6 +526,9 @@ impl Session {
             }
         }
 
+        if reason == TurnAbortReason::Interrupted && !aborted_turn {
+            self.close_unified_exec_processes().await;
+        }
         if let Some(turn_context) = turn_context.as_deref() {
             self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
                 .await;
@@ -943,6 +946,12 @@ impl Session {
         session_task
             .abort(Arc::clone(self), Arc::clone(&task.turn_context))
             .await;
+
+        // Stop both foreground and detached shells before publishing TurnAborted or admitting
+        // queued work. Their tool calls may already have returned session ids in earlier turns.
+        if reason == TurnAbortReason::Interrupted {
+            self.close_unified_exec_processes().await;
+        }
 
         if reason == TurnAbortReason::Interrupted
             && let Some(marker) = interrupted_turn_history_marker(

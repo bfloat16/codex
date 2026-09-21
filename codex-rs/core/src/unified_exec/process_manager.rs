@@ -569,8 +569,7 @@ impl UnifiedExecProcessManager {
 
         start_streaming_output(&process, context, Arc::clone(&transcript));
         let start = Instant::now();
-        // Persist live sessions before the initial yield wait so interrupting the
-        // turn cannot drop the last Arc and terminate the background process.
+        // Register before waiting so turn interruption can terminate every live process.
         let process_started_alive = !process.has_exited() && process.exit_code().is_none();
         let mut initial_exec_command_guard = if process_started_alive {
             let initial_exec_command_active = Arc::new(AtomicBool::new(true));
@@ -604,7 +603,26 @@ impl UnifiedExecProcessManager {
             }
         };
 
-        let yield_time_ms = clamp_yield_time(request.yield_time_ms);
+        if context.cancellation_token.is_cancelled() {
+            // Cancellation can race process registration and the session-wide cleanup sweep.
+            process.terminate_confirmed().await?;
+            self.release_process_id(request.process_id).await;
+            return Err(UnifiedExecError::process_failed(
+                "Command interrupted".into(),
+            ));
+        }
+        let yield_time_ms = if request.tty {
+            clamp_yield_time(request.yield_time_ms)
+        } else {
+            request.yield_time_ms.clamp(
+                if cfg!(windows) {
+                    super::WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS
+                } else {
+                    MIN_YIELD_TIME_MS
+                },
+                BACKGROUND_TERMINAL_WAIT_TIME_MS,
+            )
+        };
         // For the initial exec_command call, we both stream output to events
         // (via start_streaming_output above) and collect a snapshot here for
         // the tool response body.
@@ -615,6 +633,23 @@ impl UnifiedExecProcessManager {
         let deadline = start
             .checked_add(wait)
             .ok_or_else(|| UnifiedExecError::process_failed("timeout_ms is too large".into()))?;
+        if completion.is_none()
+            && !request.tty
+            && process_started_alive
+            && yield_time_ms == BACKGROUND_TERMINAL_WAIT_TIME_MS
+        {
+            context
+                .session
+                .send_event(
+                    context.step_context.turn.as_ref(),
+                    EventMsg::TerminalInteraction(TerminalInteractionEvent {
+                        call_id: context.call_id.clone(),
+                        process_id: request.process_id.to_string(),
+                        stdin: String::new(),
+                    }),
+                )
+                .await;
+        }
         let collected_output = Self::collect_output_until_deadline(
             process.output_handles(),
             Some(context.session.subscribe_elicitation_pause_state()),
@@ -1751,10 +1786,17 @@ impl UnifiedExecProcessManager {
             entries
         };
 
-        for entry in entries {
+        self.background_poll_counts.lock().await.clear();
+        futures::future::join_all(entries.into_iter().map(|entry| async move {
             unregister_network_approval_for_entry(&entry).await;
-            entry.process.terminate();
-        }
+            if !entry.process.has_exited()
+                && let Err(error) = entry.process.terminate_confirmed().await
+            {
+                tracing::warn!(%error, "failed to confirm terminal termination");
+                entry.process.terminate();
+            }
+        }))
+        .await;
     }
 
     pub(crate) async fn list_processes(&self) -> Vec<BackgroundTerminalInfo> {
