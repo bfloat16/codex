@@ -5,6 +5,7 @@ use super::session::Session;
 use super::session::SessionSettingsUpdate;
 use super::step_settings::StepSettingsUpdate;
 use crate::config::ConstraintResult;
+use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::Event;
@@ -60,7 +61,12 @@ pub(super) async fn prepare_update_for_session(
     let mut updates = prepare_update(overrides);
     updates.model_provider = session
         .resolve_model_provider_update_for_model(
-            updates.step_settings.model.as_deref(),
+            updates
+                .step_settings
+                .collaboration_mode
+                .as_ref()
+                .map(CollaborationMode::model)
+                .or(updates.step_settings.model.as_deref()),
             model_provider_id,
         )
         .await?;

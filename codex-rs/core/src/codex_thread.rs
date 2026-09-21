@@ -662,7 +662,13 @@ impl CodexThread {
         } = overrides;
         let model_provider = self
             .session
-            .resolve_model_provider_update_for_model(model.as_deref(), model_provider)
+            .resolve_model_provider_update_for_model(
+                collaboration_mode
+                    .as_ref()
+                    .map(CollaborationMode::model)
+                    .or(model.as_deref()),
+                model_provider,
+            )
             .await?;
         Ok(SessionSettingsUpdate {
             step_settings: StepSettingsUpdate {

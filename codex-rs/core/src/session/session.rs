@@ -23,6 +23,7 @@ use codex_login::auth::AgentIdentityAuthPolicy;
 use codex_model_provider::SharedModelProvider;
 use codex_protocol::SessionId;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
+use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::permissions::FileSystemPath;
@@ -409,8 +410,10 @@ impl SessionConfiguration {
     ) -> ConstraintResult<Self> {
         let next_model = updates
             .step_settings
-            .model
-            .as_deref()
+            .collaboration_mode
+            .as_ref()
+            .map(CollaborationMode::model)
+            .or(updates.step_settings.model.as_deref())
             .unwrap_or_else(|| self.step_settings.collaboration_mode.model());
         let next_provider_id = updates.model_provider.as_ref().map_or_else(
             || self.original_config_do_not_use.model_provider_id.as_str(),

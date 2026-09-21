@@ -1960,18 +1960,27 @@ impl Session {
                             config
                                 .get("model_provider")
                                 .and_then(toml::Value::as_str)
+                                .filter(|provider_id| *provider_id != DEEPSEEK_PROVIDER_ID)
                                 .map(str::to_string)
+                                .or_else(|| {
+                                    config
+                                        .get("model_providers")
+                                        .and_then(toml::Value::as_table)
+                                        .and_then(|providers| {
+                                            providers
+                                                .keys()
+                                                .filter(|id| *id != DEEPSEEK_PROVIDER_ID)
+                                                .min()
+                                                .cloned()
+                                        })
+                                })
                         })
                         .unwrap_or_else(|| "openai".to_string());
-                    if configured_provider_id == DEEPSEEK_PROVIDER_ID {
-                        None
-                    } else {
-                        config
-                            .model_providers
-                            .get(&configured_provider_id)
-                            .cloned()
-                            .map(|provider_info| (configured_provider_id, provider_info))
-                    }
+                    config
+                        .model_providers
+                        .get(&configured_provider_id)
+                        .cloned()
+                        .map(|provider_info| (configured_provider_id, provider_info))
                 } else {
                     None
                 }

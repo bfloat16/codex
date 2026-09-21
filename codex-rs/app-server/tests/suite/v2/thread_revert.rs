@@ -24,6 +24,9 @@ use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadRevertParams;
 use codex_app_server_protocol::ThreadRevertResponse;
 use codex_app_server_protocol::ThreadRevertedNotification;
+use codex_app_server_protocol::ThreadSettingsUpdateParams;
+use codex_app_server_protocol::ThreadSettingsUpdateResponse;
+use codex_app_server_protocol::ThreadSettingsUpdatedNotification;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadTurnsListParams;
@@ -51,6 +54,172 @@ use tempfile::TempDir;
 use tokio::time::timeout;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[test_case::test_case("model", "openai")]
+#[test_case::test_case("collaboration_mode", "openai")]
+#[test_case::test_case("both", "openai")]
+#[test_case::test_case("model", "custom")]
+#[test_case::test_case("collaboration_mode", "custom")]
+#[test_case::test_case("both", "custom")]
+#[tokio::test]
+async fn thread_revert_preserves_model_selected_before_first_prompt(
+    settings_field: &str,
+    gpt_provider: &str,
+) -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    let server_uri = server.uri();
+    let mut config = MockResponsesConfig::new(&server_uri)
+        .with_model("deepseek-flash")
+        .with_model_provider("deepseek")
+        .with_root_config(&format!("openai_base_url = \"{server_uri}/v1\""));
+    if gpt_provider == "custom" {
+        config = config.with_extra_config(&format!(
+            r#"
+[model_providers.custom]
+name = "Custom test provider"
+base_url = "{server_uri}/v1"
+wire_api = "responses"
+"#
+        ));
+    }
+    config.write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .with_env_overrides(&[("OPENAI_API_KEY", Some("test-api-key"))])
+        .build()
+        .await?;
+    initialize_experimental(&mut mcp).await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            history_mode: Some(ThreadHistoryMode::Paginated),
+            ..Default::default()
+        })
+        .await?;
+
+    // Settings alone must not lock the model family, even across repeated switches.
+    for (model, provider) in [
+        ("gpt-5.6-sol", gpt_provider),
+        ("deepseek-flash", "deepseek"),
+        ("gpt-5.6-sol", gpt_provider),
+    ] {
+        let _: ThreadSettingsUpdateResponse = mcp
+            .request(|request_id| ClientRequest::ThreadSettingsUpdate {
+                request_id,
+                params: ThreadSettingsUpdateParams {
+                    thread_id: thread.id.clone(),
+                    model: (settings_field != "collaboration_mode").then(|| model.to_string()),
+                    collaboration_mode: (settings_field != "model").then(|| CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: model.to_string(),
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        let updated: ThreadSettingsUpdatedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("thread/settings/updated"),
+        )
+        .await??;
+        assert_eq!(
+            (
+                updated.thread_settings.model.as_str(),
+                updated.thread_settings.model_provider.as_str()
+            ),
+            (model, provider)
+        );
+    }
+    assert!(
+        server
+            .received_requests()
+            .await
+            .expect("recorded model requests")
+            .is_empty()
+    );
+
+    let mut turn_ids = Vec::new();
+    for text in ["retained prompt", "removed prompt"] {
+        let completed = mcp
+            .start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: text.to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        turn_ids.push(completed.turn.id);
+    }
+
+    let ThreadRevertResponse {
+        thread: reverted, ..
+    } = mcp
+        .request(|request_id| ClientRequest::ThreadRevert {
+            request_id,
+            params: ThreadRevertParams {
+                thread_id: thread.id.clone(),
+                before_turn_id: turn_ids[1].clone(),
+            },
+        })
+        .await?;
+    assert_eq!(reverted.id, thread.id);
+
+    // The retained first prompt still locks the family after the internal reload.
+    let rejected_id = mcp
+        .send_thread_settings_update_request(ThreadSettingsUpdateParams {
+            thread_id: thread.id.clone(),
+            collaboration_mode: Some(CollaborationMode {
+                mode: ModeKind::Default,
+                settings: Settings {
+                    model: "deepseek-flash".to_string(),
+                    reasoning_effort: None,
+                    developer_instructions: None,
+                },
+            }),
+            ..Default::default()
+        })
+        .await?;
+    let rejected = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(rejected_id)),
+    )
+    .await??;
+    assert!(
+        rejected
+            .error
+            .message
+            .contains("same model family as `gpt-5.6-sol`")
+    );
+
+    mcp.start_turn_and_wait_for_completion(TurnStartParams {
+        thread_id: thread.id,
+        input: vec![UserInput::Text {
+            text: "replacement prompt".to_string(),
+            text_elements: Vec::new(),
+        }],
+        ..Default::default()
+    })
+    .await?;
+    let requests = server.received_requests().await.expect("model requests");
+    let body = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("replacement model request")
+        .body_json::<Value>()?;
+    assert_eq!(body["model"], "gpt-5.6-sol");
+    let input = serde_json::to_string(&body["input"])?;
+    assert!(input.contains("retained prompt"));
+    assert!(!input.contains("removed prompt"));
+    assert!(input.contains("replacement prompt"));
+    Ok(())
+}
 
 #[tokio::test]
 async fn thread_revert_does_not_emit_resume_model_warning() -> Result<()> {

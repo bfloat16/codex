@@ -2121,8 +2121,13 @@ impl ThreadRequestProcessor {
                 "thread/revert only supports paginated threads",
             ));
         }
+        // Startup validates the model family before mutable settings can be restored.
+        // The original config can still name the model selected before the first prompt.
+        let mut config = thread.config().await.as_ref().clone();
+        config.model = Some(config_snapshot.model.clone());
+        config.model_reasoning_effort = config_snapshot.reasoning_effort;
         let runtime_snapshot = ThreadRevertRuntimeSnapshot {
-            config: thread.config().await.as_ref().clone(),
+            config,
             settings: thread.restorable_thread_settings().await,
             client_mcp_extensions: thread.client_mcp_extensions(),
         };
