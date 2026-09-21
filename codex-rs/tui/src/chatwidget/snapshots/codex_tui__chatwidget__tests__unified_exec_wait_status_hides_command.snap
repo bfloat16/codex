@@ -2,10 +2,10 @@
 source: tui/src/chatwidget/tests/exec_flow.rs
 expression: normalize_snapshot_paths(rendered)
 ---
-● Running cargo test -p codex-core -- --exact
+● Ran cargo test -p codex-core -- --exact
   │ some::very::long::test::name
 
-● Waiting for terminal (0s)
+● Waiting for terminal (0s / 2m 00s)
 
 
 › Ask Codex to do anything

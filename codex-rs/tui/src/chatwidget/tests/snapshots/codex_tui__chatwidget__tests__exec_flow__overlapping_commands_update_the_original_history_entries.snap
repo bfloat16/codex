@@ -1,0 +1,8 @@
+---
+source: tui/src/chatwidget/tests/exec_flow.rs
+expression: "history.iter().flat_map(|cell|\ncell.display_lines(80)).map(|line|\nline.to_string()).collect::<Vec<_>>().join(\"\\n\")"
+---
+● Ran sleep 5
+  └ first output
+● Ran echo second
+  └ second output

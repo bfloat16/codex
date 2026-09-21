@@ -1,11 +1,12 @@
 //! Data model for grouped exec-call history cells in the TUI transcript.
 //!
-//! An `ExecCell` can represent a single command, overlapping commands, or an "exploring" group of
-//! related read/list/search commands. The chat widget relies on stable `call_id` matching to route
-//! progress and end events into the right cell, and it treats "call id not found" as a real signal
-//! (for example, an orphan end that should render as a separate history entry).
+//! An `ExecCell` can represent either a single command or an "exploring" group of related read/
+//! list/search commands. The chat widget relies on stable `call_id` matching to route progress and
+//! end events into the right cell, and it treats "call id not found" as a real signal (for
+//! example, an orphan end that should render as a separate history entry).
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -74,6 +75,7 @@ pub(crate) struct ExecCall {
 #[derive(Debug)]
 pub(crate) struct ExecCell {
     pub(crate) calls: Vec<ExecCall>,
+    pub(super) completed_at: HashMap<String, Instant>,
     animations_enabled: bool,
 }
 
@@ -81,6 +83,7 @@ impl ExecCell {
     pub(crate) fn new(call: ExecCall, animations_enabled: bool) -> Self {
         Self {
             calls: vec![call],
+            completed_at: HashMap::new(),
             animations_enabled,
         }
     }
@@ -101,7 +104,7 @@ impl ExecCell {
             start_time: Some(Instant::now()),
             duration: None,
         };
-        if self.is_active() || self.is_exploring_cell() && Self::is_exploring_call(&call) {
+        if self.is_exploring_cell() && Self::is_exploring_call(&call) {
             self.calls.push(call);
             true
         } else {
@@ -126,6 +129,8 @@ impl ExecCell {
         call.output = Some(output);
         call.duration = Some(duration);
         call.start_time = None;
+        self.completed_at
+            .insert(call_id.to_string(), Instant::now());
         true
     }
 
@@ -150,6 +155,8 @@ impl ExecCell {
                     .unwrap_or_else(|| Duration::from_millis(0));
                 call.start_time = None;
                 call.duration = Some(elapsed);
+                self.completed_at
+                    .insert(call.call_id.clone(), Instant::now());
                 call.output
                     .get_or_insert_with(CommandOutput::default)
                     .exit_code = 1;

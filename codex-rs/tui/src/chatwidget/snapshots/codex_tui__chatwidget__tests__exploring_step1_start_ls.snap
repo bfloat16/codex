@@ -2,5 +2,5 @@
 source: tui/src/chatwidget/tests.rs
 expression: active_blob(&chat)
 ---
-● Exploring
+● Explored
   └ List ls -la

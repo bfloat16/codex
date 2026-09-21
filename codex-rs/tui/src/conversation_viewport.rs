@@ -20,6 +20,7 @@ use crate::chatwidget::ActiveCellRenderKey;
 use crate::chatwidget::ActiveToolGroupState;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
+use crate::history_cell::ToolRenderState;
 use crate::keymap::PagerKeymap;
 use crate::pager_overlay::PagerContent;
 use crate::render::Insets;
@@ -31,6 +32,9 @@ use crate::tui::MouseScrollDirection;
 
 mod file_changes;
 mod tool_groups;
+#[cfg(test)]
+#[path = "conversation_viewport/tool_previews_tests.rs"]
+mod tool_previews_tests;
 
 pub(crate) use tool_groups::summary_text_style;
 
@@ -46,6 +50,8 @@ pub(crate) struct ConversationViewport {
     expanded_tool_group: Option<usize>,
     hovered_file_change: Option<usize>,
     expanded_file_changes: BTreeSet<usize>,
+    tool_render_states: Vec<ToolRenderState>,
+    live_preview_expiry: Option<std::time::Instant>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,6 +80,11 @@ impl ConversationViewport {
         );
         Self {
             content: PagerContent::new(renderables, keymap),
+            tool_render_states: cells
+                .iter()
+                .map(|cell| cell.tool_render_state(std::time::Instant::now()))
+                .collect(),
+            live_preview_expiry: None,
             cells,
             render_mode,
             live_tail_key: None,
@@ -88,6 +99,11 @@ impl ConversationViewport {
     }
 
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        let follow_bottom = self.content.is_following_bottom();
+        self.refresh_running_tool_groups(area.width);
+        if follow_bottom {
+            self.content.scroll_to_bottom();
+        }
         self.content.render(area, buf);
     }
 
@@ -169,6 +185,8 @@ impl ConversationViewport {
         if inserted_before_synthetic {
             self.shift_tool_group_state(self.cells.len(), /*inserted_count*/ 1);
         }
+        self.tool_render_states
+            .push(cell.tool_render_state(std::time::Instant::now()));
         self.cells.push(cell);
         let mut rebuild_start = self.cells.len().saturating_sub(1);
         if self.render_mode == HistoryRenderMode::Rich
@@ -202,6 +220,11 @@ impl ConversationViewport {
         self.hovered_file_change = None;
         self.expanded_file_changes.clear();
         self.cells = cells;
+        self.tool_render_states = self
+            .cells
+            .iter()
+            .map(|cell| cell.tool_render_state(std::time::Instant::now()))
+            .collect();
         self.content.replace(Self::render_cells(
             &self.cells,
             self.render_mode,
@@ -243,6 +266,12 @@ impl ConversationViewport {
         }
         self.shift_tool_group_state(index, inserted_count);
         self.shift_file_change_state(index, inserted_count);
+        self.tool_render_states.splice(
+            index..index,
+            cells
+                .iter()
+                .map(|cell| cell.tool_render_state(std::time::Instant::now())),
+        );
         self.cells.splice(index..index, cells);
         self.validate_tool_group_state();
         self.validate_file_change_state();

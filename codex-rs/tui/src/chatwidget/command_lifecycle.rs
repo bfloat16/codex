@@ -53,10 +53,13 @@ impl ChatWidget {
 
     pub(super) fn on_exec_command_output_delta(&mut self, call_id: &str, delta: &str) {
         self.track_unified_exec_output_chunk(call_id, delta.as_bytes());
-        if !self.bottom_pane.is_task_running() {
+        if let Some(shared) = self.transcript.running_tool_cells.get(call_id) {
+            if let Some(exec) = shared.lock().as_any_mut().downcast_mut::<ExecCell>() {
+                exec.append_output(call_id, delta);
+            }
+            self.request_redraw();
             return;
         }
-
         let Some(cell) = self
             .transcript
             .active_cell
@@ -109,7 +112,7 @@ impl ChatWidget {
             // the transcript. Keep the header short so the elapsed time remains visible.
             self.bottom_pane.ensure_status_indicator();
             self.bottom_pane
-                .reset_waiting_animation(Duration::from_secs(180));
+                .reset_waiting_animation(Duration::from_secs(/*secs*/ 120));
             self.status_state.terminal_title_status_kind =
                 TerminalTitleStatusKind::WaitingForTerminal;
             self.set_status(
@@ -147,12 +150,6 @@ impl ChatWidget {
         }
         if is_unified_exec_source(*source) {
             let render_after_interrupt = self.interrupted_unified_exec_calls.remove(id);
-            let active_cell_tracks_call = self
-                .transcript
-                .active_cell
-                .as_ref()
-                .and_then(|cell| cell.as_any().downcast_ref::<ExecCell>())
-                .is_some_and(|cell| cell.iter_calls().any(|call| call.call_id == *id));
             if let Some(process_id) = process_id.as_deref()
                 && self
                     .unified_exec_wait_streak
@@ -164,7 +161,13 @@ impl ChatWidget {
             self.track_unified_exec_process_end(id, process_id.as_deref());
             if !self.bottom_pane.is_task_running()
                 && !render_after_interrupt
-                && !active_cell_tracks_call
+                && !self.transcript.running_tool_cells.contains_key(id)
+                && !self
+                    .transcript
+                    .active_cell
+                    .as_ref()
+                    .and_then(|cell| cell.as_any().downcast_ref::<ExecCell>())
+                    .is_some_and(|cell| cell.iter_calls().any(|call| &call.call_id == id))
             {
                 return;
             }
@@ -365,6 +368,18 @@ impl ChatWidget {
         };
 
         let output = CommandOutput::new(exit_code, aggregated_output);
+
+        if let Some(shared) = self.transcript.running_tool_cells.remove(&id) {
+            if let Some(exec) = shared.lock().as_any_mut().downcast_mut::<ExecCell>() {
+                exec.complete_call(&id, output, duration);
+            }
+            self.transcript.had_work_activity = true;
+            self.request_redraw();
+            if is_user_shell {
+                self.maybe_send_next_queued_input();
+            }
+            return;
+        }
 
         match end_target {
             ExecEndTarget::ActiveTracked => {

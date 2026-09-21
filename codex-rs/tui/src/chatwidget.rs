@@ -433,6 +433,7 @@ mod thread_usage;
 pub(crate) use self::thread_usage::ThreadUsageOutcome;
 mod tokens;
 pub(crate) use self::tokens::TokenActivityView;
+mod tool_history;
 mod tool_lifecycle;
 mod tool_requests;
 mod transcript;
@@ -835,8 +836,7 @@ pub(crate) struct ActiveCellRenderKey {
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveToolDisplay {
     pub(crate) activity: ToolActivity,
-    pub(crate) preview_lines: Vec<Line<'static>>,
-    pub(crate) preview_active: bool,
+    pub(crate) previews: Vec<history_cell::ToolPreview>,
     pub(crate) detail_lines: Vec<HyperlinkLine>,
     pub(crate) is_stream_continuation: bool,
 }
@@ -1224,12 +1224,6 @@ impl ChatWidget {
         self.update_due_hook_visibility();
         self.schedule_hook_timer_if_needed();
         self.bottom_pane.pre_draw_tick();
-        if self.running_interrupted_unified_exec_started_at().is_some()
-            && self.local_settings.tui.animations
-        {
-            self.frame_requester
-                .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
-        }
         if let Some(pet) = self.ambient_pet.as_ref() {
             pet.schedule_next_frame();
         }
@@ -1248,6 +1242,7 @@ impl ChatWidget {
 
     fn flush_active_cell(&mut self) {
         if let Some(active) = self.transcript.take_active_cell() {
+            let active = self.retain_running_tool(active);
             self.transcript.needs_final_message_separator = true;
             self.app_event_tx.send(AppEvent::InsertHistoryCell(active));
             self.request_pending_usage_output_insertion();
@@ -1446,6 +1441,7 @@ impl ChatWidget {
             } else if let Some(tool) = cell.as_any_mut().downcast_mut::<McpToolCallCell>() {
                 tool.mark_failed();
             }
+            let cell = self.retain_running_tool(cell);
             self.add_boxed_history(cell);
             self.request_pending_usage_output_insertion();
         }
@@ -2031,8 +2027,7 @@ impl ChatWidget {
         let tool = self.transcript.active_cell.as_deref().and_then(|cell| {
             cell.tool_activity().map(|activity| ActiveToolDisplay {
                 activity,
-                preview_lines: cell.tool_group_preview_lines(),
-                preview_active: cell.tool_group_preview_is_active(),
+                previews: cell.tool_group_previews(),
                 detail_lines: cell.tool_group_detail_lines(width),
                 is_stream_continuation: cell.is_stream_continuation(),
             })
@@ -2074,19 +2069,13 @@ impl ChatWidget {
                 .active_cell
                 .as_ref()
                 .is_none_or(|cell| cell.tool_activity().is_some());
-        let interrupted_exec_started_at = self.running_interrupted_unified_exec_started_at();
-        let started_at = self
-            .turn_lifecycle
-            .goal_status_active_turn_started_at
-            .or(interrupted_exec_started_at);
+        let started_at = self.turn_lifecycle.goal_status_active_turn_started_at;
         let animations_enabled = self.local_settings.tui.animations;
-        let animation_tick = ((accepting_content || interrupted_exec_started_at.is_some())
-            && animations_enabled)
-            .then(|| {
-                started_at
-                    .map(|started_at| (started_at.elapsed().as_millis() / 50) as u64)
-                    .unwrap_or_default()
-            });
+        let animation_tick = (accepting_content && animations_enabled).then(|| {
+            started_at
+                .map(|started_at| (started_at.elapsed().as_millis() / 50) as u64)
+                .unwrap_or_default()
+        });
         ActiveToolGroupState {
             accepting_content,
             started_at,

@@ -3,8 +3,8 @@ source: tui/src/chatwidget/tests/exec_flow.rs
 expression: snapshot
 ---
 cells=2
-■ Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to report the issue.
-
-
 ● Ran just fix
   └ late completion output
+
+
+■ Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to report the issue.

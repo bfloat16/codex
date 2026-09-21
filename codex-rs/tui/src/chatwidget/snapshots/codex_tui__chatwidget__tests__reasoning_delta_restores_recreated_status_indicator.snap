@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/status_and_layout.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
-"● Running sleep 2                                                               "
+"● Ran sleep 2                                                                   "
 "                                                                                "
 "● Checking files (0s)                                                           "
 "                                                                                "

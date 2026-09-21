@@ -106,6 +106,7 @@ struct PreviewToolTestCell {
     detail: &'static str,
     preview: &'static str,
     activity: ToolActivity,
+    completed_at: std::time::Instant,
 }
 
 #[derive(Debug)]
@@ -132,6 +133,14 @@ impl HistoryCell for ToolTestCell {
 }
 
 impl HistoryCell for PreviewToolTestCell {
+    fn tool_render_state(&self, now: std::time::Instant) -> ToolRenderState {
+        ToolRenderState {
+            next_expiry: Some(self.completed_at + crate::history_cell::TOOL_COMPLETION_RETENTION)
+                .filter(|at| *at > now),
+            ..ToolRenderState::default()
+        }
+    }
+
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         vec![self.detail.into()]
     }
@@ -146,6 +155,14 @@ impl HistoryCell for PreviewToolTestCell {
 
     fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
         vec![self.preview.cyan().into()]
+    }
+
+    fn tool_group_previews(&self) -> Vec<crate::history_cell::ToolPreview> {
+        vec![crate::history_cell::ToolPreview {
+            line: self.preview.cyan().into(),
+            running: false,
+            completed_at: Some(self.completed_at),
+        }]
     }
 }
 
@@ -227,6 +244,7 @@ fn preview_tool_cell(
         detail,
         preview,
         activity,
+        completed_at: std::time::Instant::now(),
     })
 }
 
@@ -482,8 +500,11 @@ fn active_tool_group_merges_live_activity_and_keeps_latest_completed_preview() {
                 auxiliary_lines: Vec::new(),
                 tool: Some(ActiveToolDisplay {
                     activity: live_activity,
-                    preview_lines: vec![live_preview.cyan().into()],
-                    preview_active: true,
+                    previews: vec![crate::history_cell::ToolPreview {
+                        line: live_preview.cyan().into(),
+                        running: true,
+                        completed_at: None,
+                    }],
                     detail_lines: vec![HyperlinkLine::from("live MCP detail")],
                     is_stream_continuation: false,
                 }),
@@ -504,12 +525,11 @@ fn active_tool_group_merges_live_activity_and_keeps_latest_completed_preview() {
     };
 
     let active_collapsed = render(&mut viewport);
-    assert!(!active_collapsed.contains("Read src/lib.rs"));
-    assert!(!active_collapsed.contains("Run cargo check"));
-    assert!(!active_collapsed.contains("Search hook discovery"));
+    assert!(active_collapsed.contains("Read src/lib.rs"));
+    assert!(active_collapsed.contains("Run cargo check"));
+    assert!(active_collapsed.contains("Search hook discovery"));
     assert!(active_collapsed.contains("Call repo.inspect"));
-    assert!(!active_collapsed.contains('…'));
-    assert!(active_collapsed.contains("collapsed block"));
+    assert!(active_collapsed.contains('…'));
 
     assert!(viewport.handle_mouse_move(area, Position::new(/*x*/ 8, /*y*/ 4)));
     assert!(viewport.handle_left_click(area, Position::new(/*x*/ 8, /*y*/ 4)));
@@ -531,7 +551,7 @@ fn active_tool_group_merges_live_activity_and_keeps_latest_completed_preview() {
     );
     let active_between_tools = render(&mut viewport);
     assert!(active_between_tools.contains("Call repo.inspect"));
-    assert!(!active_between_tools.contains('…'));
+    assert!(active_between_tools.contains('…'));
 
     viewport.sync_live_tail(
         /*width*/ 64,
@@ -545,105 +565,52 @@ fn active_tool_group_merges_live_activity_and_keeps_latest_completed_preview() {
 
     assert_snapshot!(format!(
         "active collapsed:\n{active_collapsed}\nactive expanded:\n{active_expanded}\nactive between tools:\n{active_between_tools}\ninactive:\n{inactive}",
-    ), @r###"
-active collapsed:
-before
+    ), @"
+    active collapsed:
+    before
 
-● Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
-  shell command
-  └ Call repo.inspect with a deliberately long argument list
-    that would otherwise occupy more than ten preview rows in
-    the collapsed block
-
-
-
-
-
-active expanded:
-before
-
-read detail
-
-shell detail
-
-search detail
-
-live MCP detail
-
-
-
-active between tools:
-before
-
-● Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
-  shell command
-  └ Call repo.inspect with a deliberately long argument list
-    that would otherwise occupy more than ten preview rows in
-    the collapsed block
+    ● Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
+      shell command
+      └ Read src/lib.rs
+      └ Run cargo check
+      └ Search hook discovery
+      └ Call repo.inspect with a deliberately long argument list th…
 
 
 
 
+    active expanded:
+    before
 
-inactive:
-before
+    read detail
 
-  Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
-  shell command
+    shell detail
+
+    search detail
+
+    live MCP detail
+
+
+
+    active between tools:
+    before
+
+    ● Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
+      shell command
+      └ Read src/lib.rs
+      └ Run cargo check
+      └ Search hook discovery
+      └ Call repo.inspect with a deliberately long argument list th…
 
 
 
 
+    inactive:
+    before
 
-"###);
-}
-
-#[test]
-fn running_shell_preview_is_visible_without_an_accepting_model_turn() {
-    let mut viewport = viewport(Vec::new());
-    viewport.sync_live_tail(
-        /*width*/ 48,
-        Some(ActiveCellRenderKey {
-            revision: 1,
-            is_stream_continuation: false,
-            animation_tick: None,
-        }),
-        ActiveToolGroupState::default(),
-        |_| {
-            Some(ActiveCellDisplay {
-                lines: vec![HyperlinkLine::from("running shell detail")],
-                auxiliary_lines: Vec::new(),
-                tool: Some(ActiveToolDisplay {
-                    activity: ToolActivity {
-                        call_count: 1,
-                        shell_commands: 1,
-                        ..ToolActivity::default()
-                    },
-                    preview_lines: vec!["Ran cargo test -p codex-tui".cyan().into()],
-                    preview_active: true,
-                    detail_lines: vec![HyperlinkLine::from("running shell detail")],
-                    is_stream_continuation: false,
-                }),
-            })
-        },
-    );
-    let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 48, /*height*/ 3,
-    );
-    let mut buffer = Buffer::empty(area);
-    viewport.render(area, &mut buffer);
-    let rendered = buffer_text(&buffer, area)
-        .lines()
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    assert!(rendered.contains("Ran cargo test -p codex-tui"));
-    assert_snapshot!(rendered, @r###"
-● Ran 1 shell command
-  └ Ran cargo test -p codex-tui
-
-"###);
+      Searched for 1 pattern, read 1 file, called 1 MCP tool, ran 1
+      shell command
+    ");
 }
 
 #[test]
@@ -674,8 +641,11 @@ fn latest_tool_preview_turns_gray_when_work_completes() {
                 auxiliary_lines: Vec::new(),
                 tool: Some(ActiveToolDisplay {
                     activity,
-                    preview_lines: vec!["Call repo.inspect".cyan().into()],
-                    preview_active: true,
+                    previews: vec![crate::history_cell::ToolPreview {
+                        line: "Call repo.inspect".cyan().into(),
+                        running: true,
+                        completed_at: None,
+                    }],
                     detail_lines: vec![HyperlinkLine::from("live MCP detail")],
                     is_stream_continuation: false,
                 }),
@@ -738,7 +708,7 @@ completed:
 }
 
 #[test]
-fn active_tool_preview_is_limited_to_ten_rows() {
+fn active_tool_preview_is_limited_to_one_row_per_command() {
     let mut viewport = viewport(Vec::new());
     viewport.sync_live_tail(
         /*width*/ 40,
@@ -763,8 +733,11 @@ fn active_tool_preview_is_limited_to_ten_rows() {
                         shell_commands: 1,
                         ..ToolActivity::default()
                     },
-                    preview_lines: vec!["preview ".repeat(100).into()],
-                    preview_active: true,
+                    previews: vec![crate::history_cell::ToolPreview {
+                        line: "preview ".repeat(100).into(),
+                        running: true,
+                        completed_at: None,
+                    }],
                     detail_lines: vec![HyperlinkLine::from("live detail")],
                     is_stream_continuation: false,
                 }),
@@ -782,7 +755,7 @@ fn active_tool_preview_is_limited_to_ten_rows() {
         .filter(|line| !line.trim().is_empty())
         .count();
 
-    assert_eq!(visible_rows, 11);
+    assert_eq!(visible_rows, 2);
     assert!(rendered.contains('…'));
 }
 
@@ -812,8 +785,11 @@ fn first_live_tool_uses_the_clickable_collapsed_group() {
                         shell_commands: 1,
                         ..ToolActivity::default()
                     },
-                    preview_lines: vec!["Run just test".into()],
-                    preview_active: true,
+                    previews: vec![crate::history_cell::ToolPreview {
+                        line: "Run just test".into(),
+                        running: true,
+                        completed_at: None,
+                    }],
                     detail_lines: vec![HyperlinkLine::from("live detail")],
                     is_stream_continuation: false,
                 }),

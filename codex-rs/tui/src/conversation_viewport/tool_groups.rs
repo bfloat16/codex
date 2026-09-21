@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -36,7 +38,6 @@ use crate::wrapping::word_wrap_line;
 const MIN_GROUPED_TOOL_CALLS: usize = 1;
 const SUMMARY_TEXT_ALPHA: f32 = 0.68;
 const HOVERED_SUMMARY_TEXT_ALPHA: f32 = 0.86;
-const ACTIVE_PREVIEW_MAX_ROWS: usize = 10;
 
 #[derive(Clone, Copy, Default)]
 struct ToolGroupTail<'a> {
@@ -54,6 +55,78 @@ struct CellRangeRenderState<'a> {
 }
 
 impl ConversationViewport {
+    pub(super) fn refresh_running_tool_groups(&mut self, width: u16) {
+        let now = Instant::now();
+        let mut groups = BTreeSet::new();
+        let mut group_end = 0;
+        for (index, cell) in self.cells.iter().enumerate() {
+            let state = cell.tool_render_state(now);
+            let changed = self.tool_render_states.get(index) != Some(&state);
+            if index < self.tool_render_states.len() {
+                self.tool_render_states[index] = state;
+            } else {
+                self.tool_render_states.push(state);
+            }
+            // Visit each affected group once, even if it has hundreds of shared entries.
+            if index >= group_end && (changed || state.running) {
+                if let Some(range) = self.tool_group_at(index) {
+                    group_end = range.end;
+                    groups.insert(range.start);
+                } else {
+                    self.content.replace_range(
+                        index,
+                        /*remove_count*/ 1,
+                        vec![Self::cell_renderable(
+                            cell.clone(),
+                            self.render_mode,
+                            /*has_prior_cells*/ index > 0,
+                            /*hovered_file_change*/ false,
+                            /*expanded_file_change*/ false,
+                        )],
+                        width,
+                    );
+                }
+            }
+        }
+        let live_expiry = self
+            .live_display
+            .iter()
+            .filter_map(|display| display.tool.as_ref())
+            .flat_map(|tool| &tool.previews)
+            .filter_map(|preview| preview.completed_at)
+            .map(|at| at + crate::history_cell::TOOL_COMPLETION_RETENTION)
+            .filter(|at| *at > now)
+            .min();
+        if self.live_preview_expiry != live_expiry {
+            self.live_preview_expiry = live_expiry;
+            if let Some(index) = self.synthetic_live_tool_group_index() {
+                groups.insert(index);
+            } else if self.trailing_cells_form_tool_group() {
+                groups.insert(self.cells.len() - 1);
+            }
+        }
+        self.refresh_tool_groups(groups, width);
+    }
+
+    pub(crate) fn tool_refresh_delay(&self) -> Option<Duration> {
+        let now = Instant::now();
+        let running = self.tool_render_states.iter().any(|state| state.running)
+            || self
+                .live_display
+                .iter()
+                .filter_map(|display| display.tool.as_ref())
+                .any(|tool| tool.previews.iter().any(|preview| preview.running));
+        if running {
+            return Some(Duration::from_millis(/*millis*/ 50));
+        }
+        self.tool_render_states
+            .iter()
+            .filter_map(|state| state.next_expiry)
+            .chain(self.live_preview_expiry)
+            .min()
+            .map(|at| at.saturating_duration_since(now))
+    }
+
     pub(super) fn render_cell_range(&self, range: Range<usize>) -> Vec<Box<dyn Renderable>> {
         let tail = (range.end == self.cells.len()).then_some(ToolGroupTail {
             tool: self
@@ -125,13 +198,17 @@ impl ConversationViewport {
                     merged.merge(live_tool.activity);
                 }
                 if merged.call_count >= MIN_GROUPED_TOOL_CALLS {
-                    let live_tool_active = live_tool.is_some_and(|tool| tool.preview_active);
                     renderables.push(Box::new(ToolActivityGroupRenderable {
                         cells: cells[start..index].to_vec(),
                         live_tool: live_tool.cloned(),
                         activity: merged,
-                        active: index == cells.len()
-                            && (state.tail.state.accepting_content || live_tool_active),
+                        active: (index == cells.len() && state.tail.state.accepting_content)
+                            || cells[start..index]
+                                .iter()
+                                .any(|cell| cell.tool_group_preview_is_active())
+                            || live_tool.is_some_and(|tool| {
+                                tool.previews.iter().any(|preview| preview.running)
+                            }),
                         active_started_at: state.tail.state.started_at,
                         animations_enabled: state.tail.state.animations_enabled,
                         hovered: state.hovered_tool_group == Some(start),
@@ -230,8 +307,9 @@ impl ConversationViewport {
         Some(Box::new(ToolActivityGroupRenderable {
             cells: Vec::new(),
             activity: tool.activity,
-            active: self.live_tool_group_state.accepting_content || tool.preview_active,
-            live_tool: Some(tool),
+            live_tool: Some(tool.clone()),
+            active: self.live_tool_group_state.accepting_content
+                || tool.previews.iter().any(|preview| preview.running),
             active_started_at: self.live_tool_group_state.started_at,
             animations_enabled: self.live_tool_group_state.animations_enabled,
             hovered: self.hovered_tool_group == Some(start),
@@ -412,45 +490,39 @@ impl ToolActivityGroupRenderable {
         if !self.active {
             return Vec::new();
         }
-        let mut lines = self
+        let previews = self
             .cells
             .iter()
-            .flat_map(|cell| cell.tool_group_preview_lines())
-            .collect::<Vec<_>>();
-        let mut preview_active = false;
-        if let Some(live_tool) = &self.live_tool {
-            lines.extend(live_tool.preview_lines.clone());
-            preview_active = live_tool.preview_active && !live_tool.preview_lines.is_empty();
-        }
-        let Some(mut latest) = lines.pop() else {
-            return Vec::new();
-        };
-        if !preview_active {
-            for span in &mut latest.spans {
-                span.style = Style::default().dim();
-            }
-        }
-        let width = usize::from(width.max(1));
-        let mut wrapped = adaptive_wrap_lines(
-            [latest],
-            RtOptions::new(width)
-                .initial_indent("  └ ".dim().into())
-                .subsequent_indent("    ".into()),
-        );
-        if wrapped.len() > ACTIVE_PREVIEW_MAX_ROWS {
-            wrapped.truncate(ACTIVE_PREVIEW_MAX_ROWS);
-            if let Some(last) = wrapped.last_mut() {
-                let truncated = truncate_line_to_width(last.clone(), width.saturating_sub(1));
-                let ellipsis_style = truncated
-                    .spans
-                    .last()
-                    .map(|span| span.style)
-                    .unwrap_or_default();
-                *last = truncated;
-                last.push_span(ratatui::text::Span::styled("…", ellipsis_style));
-            }
-        }
-        wrapped
+            .filter(|cell| {
+                let state = cell.tool_render_state(Instant::now());
+                state.running || state.next_expiry.is_some()
+            })
+            .flat_map(|cell| cell.tool_group_previews())
+            .chain(self.live_tool.iter().flat_map(|tool| tool.previews.clone()));
+        let now = Instant::now();
+        previews
+            .filter(|preview| preview.visible_at(now))
+            .map(|preview| {
+                let mut line = preview.line;
+                for span in &mut line.spans {
+                    span.content = span.content.replace(['\n', '\r'], " ").into();
+                    if !preview.running {
+                        span.style = Style::default().dim();
+                    }
+                }
+                line.spans.insert(0, "  └ ".dim());
+                let budget = usize::from(width.max(1));
+                if line.width() > budget {
+                    line = truncate_line_to_width(line, budget.saturating_sub(1));
+                    line.push_span(if preview.running {
+                        "…".into()
+                    } else {
+                        "…".dim()
+                    });
+                }
+                line
+            })
+            .collect()
     }
 
     fn unwrapped_content_lines(&self, width: u16) -> Vec<HyperlinkLine> {

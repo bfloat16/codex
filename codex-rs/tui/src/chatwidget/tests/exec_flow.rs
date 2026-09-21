@@ -1,6 +1,115 @@
 use super::*;
 use pretty_assertions::assert_eq;
-use ratatui::style::Color;
+
+#[tokio::test]
+async fn overlapping_commands_update_the_original_history_entries() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+    let first = begin_exec(&mut chat, "first", "sleep 5");
+    let second = begin_exec(&mut chat, "second", "echo second");
+    chat.flush_active_cell();
+    let mut history = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            history.push(cell);
+        }
+    }
+    assert_eq!(history.len(), 2);
+    for cell in &history {
+        assert_eq!(
+            crate::terminal_hyperlinks::visible_lines(cell.tool_group_detail_lines(/*width*/ 80)),
+            cell.display_lines(/*width*/ 80),
+        );
+    }
+    chat.on_exec_command_output_delta("first", "first output\n");
+    end_exec(
+        &mut chat,
+        second,
+        "second output\n",
+        "",
+        /*exit_code*/ 0,
+    );
+    assert!(history[0].tool_group_preview_is_active());
+    assert!(!history[1].tool_group_preview_is_active());
+    end_exec(&mut chat, first, "first output\n", "", /*exit_code*/ 0);
+    assert!(drain_insert_history(&mut rx).is_empty());
+    assert_eq!(
+        history
+            .iter()
+            .map(|cell| cell.tool_activity().expect("tool").call_count)
+            .sum::<usize>(),
+        2
+    );
+    insta::assert_snapshot!(
+        history
+            .iter()
+            .flat_map(|cell| cell.display_lines(/*width*/ 80))
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[tokio::test]
+async fn mcp_completion_updates_its_entry_while_a_command_is_running() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+    let mut item = AppServerThreadItem::McpToolCall {
+        id: "mcp-1".to_string(),
+        server: "docs".to_string(),
+        tool: "search".to_string(),
+        status: codex_app_server_protocol::McpToolCallStatus::InProgress,
+        arguments: json!({"query": "test"}),
+        app_context: None,
+        mcp_app_resource_uri: None,
+        plugin_id: None,
+        read_only_hint: None,
+        result: None,
+        error: None,
+        duration_ms: None,
+    };
+    chat.on_mcp_tool_call_started(item.clone());
+    begin_exec(&mut chat, "exec-1", "sleep 5");
+    let mut history = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            history.push(cell);
+        }
+    }
+    assert_eq!(history.len(), 1);
+    if let AppServerThreadItem::McpToolCall {
+        status,
+        result,
+        duration_ms,
+        ..
+    } = &mut item
+    {
+        *status = codex_app_server_protocol::McpToolCallStatus::Completed;
+        *duration_ms = Some(10);
+        *result = Some(Box::new(codex_app_server_protocol::McpToolCallResult {
+            content: vec![json!({"type": "text", "text": "found"})],
+            structured_content: None,
+            meta: None,
+        }));
+    }
+    chat.on_mcp_tool_call_completed(item);
+    assert!(drain_insert_history(&mut rx).is_empty());
+    assert!(!history[0].tool_group_preview_is_active());
+    assert!(
+        history[0]
+            .raw_lines()
+            .iter()
+            .any(|line| line.to_string().contains("found"))
+    );
+    assert!(
+        chat.transcript
+            .active_cell
+            .as_ref()
+            .expect("running command")
+            .tool_group_preview_is_active()
+    );
+    assert!(chat.transcript.running_tool_cells.is_empty());
+}
 
 #[tokio::test]
 async fn external_writer_snapshot_freezes_active_command_and_mcp_rows() {
@@ -111,11 +220,7 @@ async fn replayed_completion_preserves_unrelated_running_command() {
         chat.replay_thread_item(completed, "turn-1".to_string(), ReplayKind::ThreadSnapshot);
 
         assert_eq!(drain_insert_history(&mut rx).len(), 1);
-        assert!(active_blob(&chat).contains(if active_mcp {
-            "Calling"
-        } else {
-            "Running sleep 5"
-        }));
+        assert!(active_blob(&chat).contains(if active_mcp { "Called" } else { "Ran sleep 5" }));
     }
 }
 
@@ -688,7 +793,7 @@ async fn exec_end_without_begin_does_not_flush_unrelated_running_exploring_cell(
     );
     let active = active_blob(&chat);
     assert!(
-        active.contains("● Exploring"),
+        active.contains("● Explored"),
         "expected unrelated exploring call to remain active: {active:?}"
     );
     assert!(
@@ -765,63 +870,11 @@ async fn overlapping_exploring_exec_end_is_not_misclassified_as_orphan() {
         "expected second running command to stay in the same active cell: {active:?}"
     );
     assert!(
-        active.contains("● Exploring"),
+        active.contains("● Explored"),
         "expected grouped exploring header to remain active: {active:?}"
     );
 
     end_exec(&mut chat, begin_cat, "hello\n", "", /*exit_code*/ 0);
-}
-
-#[tokio::test]
-async fn overlapping_shell_commands_update_one_cell_in_place() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.on_task_started();
-
-    let first = begin_exec(&mut chat, "call-first", "sleep 5");
-    let second = begin_exec(&mut chat, "call-second", "echo failed");
-    assert!(drain_insert_history(&mut rx).is_empty());
-
-    end_exec(&mut chat, second, "", "failed\n", /*exit_code*/ 1);
-    assert!(drain_insert_history(&mut rx).is_empty());
-    let active_tool = chat
-        .active_cell_display(/*width*/ 80)
-        .and_then(|display| display.tool)
-        .expect("active collapsed tool group");
-    assert!(active_tool.preview_active);
-    assert_eq!(
-        active_tool
-            .preview_lines
-            .iter()
-            .map(|line| lines_to_single_string(std::slice::from_ref(line)))
-            .collect::<Vec<_>>(),
-        vec!["Ran sleep 5\n".to_string(), "Ran echo failed\n".to_string()]
-    );
-    let active_cell = chat
-        .transcript
-        .active_cell
-        .as_ref()
-        .expect("overlapping exec cell");
-    let active_lines = active_cell.display_lines(/*width*/ 80);
-    assert_eq!(active_lines[2].spans[0].style.fg, Some(Color::Red));
-    insta::assert_snapshot!(lines_to_single_string(&active_lines), @r"
-    ● Running sleep 5
-
-    ● Ran echo failed
-      └ failed
-    ");
-
-    end_exec(&mut chat, first, "done\n", "", /*exit_code*/ 0);
-    let cells = drain_insert_history(&mut rx);
-    assert_eq!(cells.len(), 1);
-    assert_eq!(cells[0][0].spans[0].style.fg, Some(Color::Green));
-    assert_eq!(cells[0][3].spans[0].style.fg, Some(Color::Red));
-    insta::assert_snapshot!(lines_to_single_string(&cells[0]), @r"
-    ● Ran sleep 5
-      └ done
-
-    ● Ran echo failed
-      └ failed
-    ");
 }
 
 #[tokio::test]
@@ -875,7 +928,7 @@ async fn exec_history_shows_unified_exec_tool_calls() {
 }
 
 #[tokio::test]
-async fn overlapping_unified_exec_updates_active_cell_snapshot() {
+async fn unified_exec_unknown_end_with_active_exploring_cell_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
 
@@ -902,50 +955,34 @@ async fn overlapping_unified_exec_updates_active_cell_snapshot() {
         .map(|cell| lines_to_single_string(&cell.display_lines(/*width*/ 80)))
         .unwrap_or_else(|| "<none>".to_string());
     let snapshot = format!("History:\n{history}\nActive:\n{active}");
-    insta::assert_snapshot!(snapshot, @r"
-    History:
-
-    Active:
-    ● Running cat /dev/null
-
-    ● Ran echo repro-marker
-      └ repro-marker
-    ");
+    assert_chatwidget_snapshot!(
+        "unified_exec_unknown_end_with_active_exploring_cell",
+        snapshot
+    );
 }
 
 #[tokio::test]
-async fn unified_exec_end_after_task_complete_finalizes_active_command() {
-    let mut rendered = Vec::new();
-    for (exit_code, expected_color) in [(0, Color::Green), (1, Color::Red)] {
-        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-        chat.on_task_started();
+async fn unified_exec_end_after_task_complete_finishes_the_existing_command() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
 
-        let begin = begin_exec_with_source(
-            &mut chat,
-            "call-startup",
-            "echo unified exec startup",
-            ExecCommandSource::UnifiedExecStartup,
-        );
-        drain_insert_history(&mut rx);
+    let begin = begin_exec_with_source(
+        &mut chat,
+        "call-startup",
+        "echo unified exec startup",
+        ExecCommandSource::UnifiedExecStartup,
+    );
+    drain_insert_history(&mut rx);
 
-        chat.on_task_complete(
-            /*last_agent_message*/ None, /*duration_ms*/ None, /*from_replay*/ false,
-        );
-        end_exec(&mut chat, begin, "", "", exit_code);
+    chat.on_task_complete(
+        /*last_agent_message*/ None, /*duration_ms*/ None, /*from_replay*/ false,
+    );
+    end_exec(&mut chat, begin, "", "", /*exit_code*/ 0);
 
-        let cells = drain_insert_history(&mut rx);
-        assert_eq!(cells.len(), 1);
-        assert_eq!(cells[0][0].spans[0].style.fg, Some(expected_color));
-        assert!(chat.transcript.active_cell.is_none());
-        rendered.push(lines_to_single_string(&cells[0]));
-    }
-    insta::assert_snapshot!(rendered.join("\n"), @r"
-    ● Ran echo unified exec startup
-      └ (no output)
-
-    ● Ran echo unified exec startup
-      └ (no output)
-    ");
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1);
+    assert!(lines_to_single_string(&cells[0]).contains("Ran echo unified exec startup"));
+    assert!(chat.transcript.active_cell.is_none());
 }
 
 #[tokio::test]
@@ -1073,6 +1110,38 @@ async fn unified_exec_wait_status_hides_command_display() {
         .expect("status indicator should be visible");
     assert_eq!(status.header(), "Waiting for terminal");
     assert_eq!(status.details(), None);
+}
+
+#[tokio::test]
+async fn interruption_clears_all_terminal_status_and_allows_late_completion() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+    let first = begin_unified_exec_startup(&mut chat, "first", "proc-1", "sleep 300");
+    begin_unified_exec_startup(&mut chat, "second", "proc-2", "sleep 300");
+    terminal_interaction(&mut chat, "first", "proc-1", "");
+    chat.on_interrupted_turn(TurnAbortReason::Interrupted);
+    assert!(chat.unified_exec_processes.is_empty());
+    assert!(chat.unified_exec_wait_streak.is_none());
+    assert!(!chat.is_task_running_for_test());
+    while rx.try_recv().is_ok() {}
+    end_exec(&mut chat, first, "partial output", "", /*exit_code*/ 1);
+    assert!(drain_insert_history(&mut rx).is_empty());
+    assert!(!chat.is_task_running_for_test());
+}
+
+#[tokio::test]
+async fn escape_after_turn_completion_stops_remaining_terminals() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    handle_turn_started(&mut chat, "turn-1");
+    begin_unified_exec_startup(&mut chat, "background", "proc-1", "sleep 300");
+    handle_turn_completed(&mut chat, "turn-1", /*duration_ms*/ None);
+    assert!(chat.has_running_terminals());
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(!chat.has_running_terminals());
+    assert_eq!(
+        op_rx.try_recv().expect("terminal cleanup"),
+        AppCommand::clean_background_terminals()
+    );
 }
 
 #[tokio::test]
@@ -1614,16 +1683,16 @@ async fn approval_modal_patch_snapshot() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn interrupt_preserves_unified_exec_processes() {
+async fn interrupt_clears_unified_exec_processes() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
+    handle_turn_started(&mut chat, "turn-1");
     begin_unified_exec_startup(&mut chat, "call-1", "process-1", "sleep 5");
     begin_unified_exec_startup(&mut chat, "call-2", "process-2", "sleep 6");
     assert_eq!(chat.unified_exec_processes.len(), 2);
 
     handle_turn_interrupted(&mut chat, "turn-1");
 
-    assert_eq!(chat.unified_exec_processes.len(), 2);
+    assert!(chat.unified_exec_processes.is_empty());
 
     chat.add_ps_output();
     let cells = drain_insert_history(&mut rx);
@@ -1632,20 +1701,13 @@ async fn interrupt_preserves_unified_exec_processes() {
         .map(|lines| lines_to_single_string(lines))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(
-        combined.contains("Running terminals"),
-        "expected /ps to remain available after interrupt; got {combined:?}"
-    );
-    assert!(
-        combined.contains("sleep 5") && combined.contains("sleep 6"),
-        "expected /ps to list running unified exec processes; got {combined:?}"
-    );
+    assert!(combined.contains("No terminals running."), "{combined}");
 
     let _ = drain_insert_history(&mut rx);
 }
 
 #[tokio::test]
-async fn interrupt_keeps_unified_exec_running_and_clears_wait_status() {
+async fn interrupt_preserves_unified_exec_wait_streak_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     handle_turn_started(&mut chat, "turn-1");
@@ -1654,27 +1716,6 @@ async fn interrupt_keeps_unified_exec_running_and_clears_wait_status() {
     terminal_interaction(&mut chat, "call-1a", "process-1", "");
 
     handle_turn_interrupted(&mut chat, "turn-1");
-    let tool_group_state = chat.active_tool_group_state();
-    assert!(!tool_group_state.accepting_content);
-    assert!(tool_group_state.started_at.is_some());
-    assert!(tool_group_state.animation_tick.is_some());
-    assert!(chat.unified_exec_wait_streak.is_none());
-    assert_eq!(chat.status_state.current_status.header, "Working");
-    assert!(chat.running_interrupted_unified_exec_started_at().is_some());
-    assert!(
-        chat.active_cell_render_key()
-            .is_some_and(|key| key.animation_tick.is_some())
-    );
-    let active_display = chat
-        .active_cell_display(/*width*/ 80)
-        .expect("interrupted background shell should remain visible");
-    let active_tool = active_display
-        .tool
-        .expect("interrupted background shell should remain an active tool");
-    assert!(active_tool.preview_active);
-    let active = active_blob(&chat);
-    assert_eq!(active, "● Running just fix\n");
-    assert_chatwidget_snapshot!("interrupt_keeps_unified_exec_running", active);
 
     end_exec(
         &mut chat,

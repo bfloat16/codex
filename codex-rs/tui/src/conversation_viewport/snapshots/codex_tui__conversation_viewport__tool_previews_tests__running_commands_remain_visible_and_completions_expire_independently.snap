@@ -1,0 +1,24 @@
+---
+source: tui/src/conversation_viewport/tool_previews_tests.rs
+expression: "snapshots.join(\"\\n\\n\")"
+---
+running:
+● Ran 2 shell commands
+  └ Ran first very long comma…
+  └ Ran second
+
+second completed:
+● Ran 2 shell commands
+  └ Ran first very long comma…
+  └ Ran second
+
+second expired:
+● Ran 2 shell commands
+  └ Ran first very long comma…
+
+appendable:
+● Ran 2 shell commands
+  └ Ran first very long comma…
+
+closed:
+  Ran 2 shell commands

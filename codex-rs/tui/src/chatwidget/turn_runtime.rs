@@ -326,7 +326,7 @@ impl ChatWidget {
         ) && self.enqueue_rejected_steer()
     }
 
-    /// Finalize turn-scoped activity and stop/clear agent-turn UI state.
+    /// Finalize any active exec as failed and stop/clear agent-turn UI state.
     ///
     /// This does not clear MCP startup tracking, because MCP startup can overlap with turn cleanup
     /// and should continue to drive the bottom-pane running indicator while it is in progress.
@@ -337,10 +337,9 @@ impl ChatWidget {
         // Drop preview-only stream tail content on any termination path before
         // failed-cell finalization, so transient tail cells are never persisted.
         self.clear_active_stream_tail();
-        if !self.has_running_interrupted_unified_exec() {
-            // Turn-scoped work has ended; replace its spinner with a failed terminal state.
-            self.finalize_active_cell_as_failed();
-        }
+        // Ensure any spinner is replaced by a red ✗ and flushed into history.
+        self.finalize_active_cell_as_failed();
+        self.finalize_retained_tools();
         // Turn-scoped hook rows are transient live state; once the turn is over,
         // do not leave an orphaned running row behind if no matching completion
         // event arrived before cancellation.
@@ -353,7 +352,7 @@ impl ChatWidget {
         self.finish_compaction_status();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
-        self.flush_unified_exec_wait_streak();
+        self.unified_exec_wait_streak = None;
         self.adaptive_chunking.reset();
         self.stream_controller = None;
         self.plan_stream_controller = None;
@@ -364,34 +363,6 @@ impl ChatWidget {
         self.request_status_line_git_summary_refresh();
         self.refresh_thread_usage_after_turn();
         self.maybe_show_pending_rate_limit_prompt();
-    }
-
-    pub(super) fn has_running_interrupted_unified_exec(&self) -> bool {
-        self.transcript
-            .active_cell
-            .as_ref()
-            .and_then(|cell| cell.as_any().downcast_ref::<ExecCell>())
-            .is_some_and(|cell| {
-                cell.iter_calls().any(|call| {
-                    call.duration.is_none()
-                        && self.interrupted_unified_exec_calls.contains(&call.call_id)
-                })
-            })
-    }
-
-    pub(super) fn running_interrupted_unified_exec_started_at(&self) -> Option<Instant> {
-        self.transcript
-            .active_cell
-            .as_ref()
-            .and_then(|cell| cell.as_any().downcast_ref::<ExecCell>())
-            .and_then(|cell| {
-                cell.iter_calls().find_map(|call| {
-                    (call.duration.is_none()
-                        && self.interrupted_unified_exec_calls.contains(&call.call_id))
-                    .then_some(call.start_time)
-                    .flatten()
-                })
-            })
     }
 
     pub(super) fn on_server_overloaded_error(&mut self, message: String) {

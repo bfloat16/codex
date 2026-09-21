@@ -1312,7 +1312,7 @@ async fn replayed_in_progress_mcp_tool_call_stays_active() {
 
     assert!(drain_insert_history(&mut rx).is_empty());
     let active = active_blob(&chat);
-    assert!(active.contains("Calling"));
+    assert!(active.contains("Called"));
     assert!(!active.contains("MCP tool call completed without a result"));
 }
 

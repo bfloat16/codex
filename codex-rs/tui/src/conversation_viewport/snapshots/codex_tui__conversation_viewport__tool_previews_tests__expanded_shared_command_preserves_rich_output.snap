@@ -1,0 +1,10 @@
+---
+source: tui/src/conversation_viewport/tool_previews_tests.rs
+expression: "lines.join(\"\\n\").trim()"
+---
+● Ran 'echo output'
+  └ output 0
+    output 1
+    … +6 lines (ctrl + t to view transcript)
+    output 8
+    output 9

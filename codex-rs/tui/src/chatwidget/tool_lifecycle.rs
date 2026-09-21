@@ -93,6 +93,15 @@ impl ChatWidget {
     ) {
         self.flush_answer_stream_with_separator();
         let mut handled = false;
+        if let Some(shared) = self.transcript.running_tool_cells.remove(&call_id) {
+            if let Some(search) = shared.lock().as_any_mut().downcast_mut::<WebSearchCell>() {
+                search.update(action, query);
+                search.complete();
+            }
+            self.transcript.had_work_activity = true;
+            self.request_redraw();
+            return;
+        }
         if let Some(cell) = self
             .transcript
             .active_cell
@@ -245,6 +254,20 @@ impl ChatWidget {
             }
             (None, None) => Err("MCP tool call completed without a result".to_string()),
         };
+
+        if let Some(shared) = self.transcript.running_tool_cells.remove(&id) {
+            let extra = shared
+                .lock()
+                .as_any_mut()
+                .downcast_mut::<McpToolCallCell>()
+                .and_then(|cell| cell.complete(duration, result));
+            if let Some(extra) = extra {
+                self.add_boxed_history(extra);
+            }
+            self.transcript.had_work_activity = true;
+            self.request_redraw();
+            return;
+        }
 
         let extra_cell = match self
             .transcript

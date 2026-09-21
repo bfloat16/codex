@@ -619,6 +619,9 @@ impl App {
         if let Some(delay) = screen.copy_notice_delay() {
             tui.frame_requester().schedule_frame_in(delay);
         }
+        if let Some(delay) = screen.viewport.tool_refresh_delay() {
+            tui.frame_requester().schedule_frame_in(delay);
+        }
         Ok(Some(rendered_area))
     }
 }

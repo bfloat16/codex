@@ -45,6 +45,7 @@ pub(crate) struct McpToolCallCell {
     invocation: McpInvocation,
     start_time: Instant,
     duration: Option<Duration>,
+    completed_at: Option<Instant>,
     result: Option<Result<McpToolResult, String>>,
     animations_enabled: bool,
 }
@@ -81,6 +82,7 @@ impl McpToolCallCell {
             invocation,
             start_time: Instant::now(),
             duration: None,
+            completed_at: None,
             result: None,
             animations_enabled,
         }
@@ -102,6 +104,7 @@ impl McpToolCallCell {
             .filter(|result| result.has_image)
             .map(|_| Box::new(McpImageOutputCell) as Box<dyn HistoryCell>);
         self.duration = Some(duration);
+        self.completed_at = Some(Instant::now());
         self.result = Some(result);
         image_cell
     }
@@ -117,6 +120,7 @@ impl McpToolCallCell {
     pub(crate) fn mark_failed(&mut self) {
         let elapsed = self.start_time.elapsed();
         self.duration = Some(elapsed);
+        self.completed_at = Some(Instant::now());
         self.result = Some(Err("interrupted".to_string()));
     }
 
@@ -147,11 +151,7 @@ impl McpToolCallCell {
             )
             .unwrap_or_else(|| "●".dim()),
         };
-        let header_text = if status.is_some() {
-            "Called"
-        } else {
-            "Calling"
-        };
+        let header_text = "Called";
 
         let invocation_line = if compact {
             let title = self
@@ -287,11 +287,7 @@ impl HistoryCell for McpToolCallCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        let header_text = if self.success().is_some() {
-            "Called"
-        } else {
-            "Calling"
-        };
+        let header_text = "Called";
         let mut lines = vec![Line::from(format!(
             "{header_text} {}",
             format_mcp_invocation(&self.invocation)
@@ -321,13 +317,35 @@ impl HistoryCell for McpToolCallCell {
     }
 
     fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
-        let mut line: Line<'static> = vec!["Call".cyan(), " ".into()].into();
+        let mut line: Line<'static> = vec!["Called".cyan(), " ".into()].into();
         line.extend(line_to_static(&format_mcp_invocation(&self.invocation)).spans);
         vec![line]
     }
 
     fn tool_group_preview_is_active(&self) -> bool {
         self.result.is_none()
+    }
+
+    fn tool_group_previews(&self) -> Vec<ToolPreview> {
+        self.tool_group_preview_lines()
+            .into_iter()
+            .map(|line| ToolPreview {
+                line,
+                running: self.result.is_none(),
+                completed_at: self.completed_at,
+            })
+            .collect()
+    }
+
+    fn tool_render_state(&self, now: Instant) -> ToolRenderState {
+        ToolRenderState {
+            running: self.tool_group_preview_is_active(),
+            next_expiry: self
+                .completed_at
+                .map(|at| at + TOOL_COMPLETION_RETENTION)
+                .filter(|at| *at > now),
+            ..ToolRenderState::default()
+        }
     }
 
     fn transcript_animation_tick(&self) -> Option<u64> {

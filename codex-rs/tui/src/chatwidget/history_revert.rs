@@ -17,6 +17,8 @@ impl ChatWidget {
                     .iter()
                     .map(|process| process.call_id.clone()),
             )
+            .chain(self.interrupted_unified_exec_calls.iter().cloned())
+            .chain(self.transcript.running_tool_cells.keys().cloned())
             .collect::<Vec<_>>();
         // These cells and streams belong to removed history. Finalization must not flush them
         // back into the transcript, and delayed terminal completions must not recreate them.
@@ -27,6 +29,7 @@ impl ChatWidget {
         self.unified_exec_wait_streak = None;
         self.unified_exec_processes.clear();
         self.interrupted_unified_exec_calls.clear();
+        self.transcript.running_tool_cells.clear();
         self.output_free_interrupt_turn_id = None;
         self.finalize_turn();
         self.suppressed_exec_calls.extend(discarded_calls);

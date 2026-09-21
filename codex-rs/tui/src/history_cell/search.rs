@@ -2,14 +2,6 @@
 
 use super::*;
 
-fn web_search_header(completed: bool) -> &'static str {
-    if completed {
-        "Searched the web"
-    } else {
-        "Searching the web"
-    }
-}
-
 fn web_search_action_detail(action: &WebSearchAction) -> String {
     match action {
         WebSearchAction::Search { query, queries } => {
@@ -53,6 +45,7 @@ pub(crate) struct WebSearchCell {
     action: Option<WebSearchAction>,
     start_time: Instant,
     completed: bool,
+    completed_at: Option<Instant>,
     animations_enabled: bool,
 }
 
@@ -69,6 +62,7 @@ impl WebSearchCell {
             action,
             start_time: Instant::now(),
             completed: false,
+            completed_at: None,
             animations_enabled,
         }
     }
@@ -84,6 +78,7 @@ impl WebSearchCell {
 
     pub(crate) fn complete(&mut self) {
         self.completed = true;
+        self.completed_at = Some(Instant::now());
     }
 }
 
@@ -99,24 +94,24 @@ impl HistoryCell for WebSearchCell {
             )
             .unwrap_or_else(|| "●".dim())
         };
-        let header = web_search_header(self.completed);
+        let header = "Searched the web";
         let detail = web_search_detail(self.action.as_ref(), &self.query);
         let text: Text<'static> = if detail.is_empty() {
             Line::from(vec![header.bold()]).into()
         } else {
-            let separator = if self.completed { " for " } else { " " };
+            let separator = " for ";
             Line::from(vec![header.bold(), separator.into(), detail.into()]).into()
         };
         PrefixedWrappedHistoryCell::new(text, vec![bullet, " ".into()], "  ").display_lines(width)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        let header = web_search_header(self.completed);
+        let header = "Searched the web";
         let detail = web_search_detail(self.action.as_ref(), &self.query);
         if detail.is_empty() {
             vec![Line::from(header)]
         } else {
-            let separator = if self.completed { " for " } else { " " };
+            let separator = " for ";
             vec![Line::from(format!("{header}{separator}{detail}"))]
         }
     }
@@ -131,7 +126,7 @@ impl HistoryCell for WebSearchCell {
 
     fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
         let detail = web_search_detail(self.action.as_ref(), &self.query);
-        let mut spans = vec!["Search".cyan(), " the web".into()];
+        let mut spans = vec!["Searched".cyan(), " the web".into()];
         if !detail.is_empty() {
             spans.extend([" for ".into(), detail.into()]);
         }
@@ -140,6 +135,28 @@ impl HistoryCell for WebSearchCell {
 
     fn tool_group_preview_is_active(&self) -> bool {
         !self.completed
+    }
+
+    fn tool_group_previews(&self) -> Vec<ToolPreview> {
+        self.tool_group_preview_lines()
+            .into_iter()
+            .map(|line| ToolPreview {
+                line,
+                running: !self.completed,
+                completed_at: self.completed_at,
+            })
+            .collect()
+    }
+
+    fn tool_render_state(&self, now: Instant) -> ToolRenderState {
+        ToolRenderState {
+            running: self.tool_group_preview_is_active(),
+            next_expiry: self
+                .completed_at
+                .map(|at| at + TOOL_COMPLETION_RETENTION)
+                .filter(|at| *at > now),
+            ..ToolRenderState::default()
+        }
     }
 }
 

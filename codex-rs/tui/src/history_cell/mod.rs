@@ -105,6 +105,7 @@ mod approvals;
 mod base;
 mod exec;
 mod hook_cell;
+mod live_tool;
 mod markdown_render_cache;
 mod mcp;
 mod messages;
@@ -123,6 +124,10 @@ pub(crate) use exec::*;
 pub(crate) use hook_cell::HookCell;
 pub(crate) use hook_cell::new_active_hook_cell;
 pub(crate) use hook_cell::new_completed_hook_cell;
+pub(crate) use live_tool::LiveToolCell;
+pub(crate) use live_tool::TOOL_COMPLETION_RETENTION;
+pub(crate) use live_tool::ToolPreview;
+pub(crate) use live_tool::ToolRenderState;
 pub(crate) use mcp::*;
 pub(crate) use messages::*;
 pub(crate) use notices::*;
@@ -233,15 +238,35 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
 
     /// Returns concise activity rows for an active collapsed tool group.
     ///
-    /// These rows describe the action itself rather than its output. The viewport keeps only the
-    /// newest bounded subset while the group can still accept adjacent tool cells.
+    /// These rows describe actions rather than output; `tool_group_previews` attaches the
+    /// per-command state used to select live and recently completed rows.
     fn tool_group_preview_lines(&self) -> Vec<Line<'static>> {
         self.raw_lines().into_iter().take(1).collect()
     }
 
-    /// Returns whether the collapsed tool group still contains running work.
+    /// Per-command state for collapsed previews; historical completions have no live deadline.
+    fn tool_group_previews(&self) -> Vec<ToolPreview> {
+        self.tool_group_preview_lines()
+            .into_iter()
+            .map(|line| ToolPreview {
+                line,
+                running: self.tool_group_preview_is_active(),
+                completed_at: None,
+            })
+            .collect()
+    }
+
+    /// Returns whether this entry contains any running work.
     fn tool_group_preview_is_active(&self) -> bool {
         false
+    }
+
+    /// Returns invalidation metadata without constructing any rendered tool output.
+    fn tool_render_state(&self, _now: Instant) -> ToolRenderState {
+        ToolRenderState {
+            running: self.tool_group_preview_is_active(),
+            ..ToolRenderState::default()
+        }
     }
 
     /// Returns cached, physically wrapped rows for an interactive file-change cell.

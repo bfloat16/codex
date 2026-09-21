@@ -34,6 +34,8 @@ pub(super) struct StatusCopySource {
 #[derive(Default)]
 pub(super) struct TranscriptState {
     pub(super) active_cell: Option<Box<dyn HistoryCell>>,
+    pub(super) running_tool_cells:
+        std::collections::HashMap<String, crate::history_cell::LiveToolCell>,
     /// Monotonic-ish counter used to invalidate transcript overlay caching.
     pub(super) active_cell_revision: u64,
     /// One bounded entry shared by layout and paint across unchanged active-cell frames.

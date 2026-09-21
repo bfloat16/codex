@@ -113,7 +113,7 @@ fn paginated_commands_keep_tool_activity_and_native_exec_rendering() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(rendered, @"
-    Read 1 file, ran 1 shell command
+  Read 1 file, ran 1 shell command
     ");
 }
 
