@@ -58,6 +58,7 @@ impl ConversationViewport {
     pub(super) fn refresh_running_tool_groups(&mut self, width: u16) {
         let now = Instant::now();
         let mut groups = BTreeSet::new();
+        let mut group_start = 0;
         let mut group_end = 0;
         for (index, cell) in self.cells.iter().enumerate() {
             let state = cell.tool_render_state(now);
@@ -68,10 +69,21 @@ impl ConversationViewport {
                 self.tool_render_states.push(state);
             }
             // Visit each affected group once, even if it has hundreds of shared entries.
-            if index >= group_end && (changed || state.running) {
+            if index < group_end {
+                if changed {
+                    groups.insert(group_start);
+                }
+                continue;
+            }
+            if changed || state.running {
                 if let Some(range) = self.tool_group_at(index) {
+                    group_start = range.start;
                     group_end = range.end;
-                    groups.insert(range.start);
+                    // Collapsed previews and the activity indicator need periodic refreshes.
+                    // Expanded details only need rebuilding when a cell changes.
+                    if self.expanded_tool_group != Some(range.start) || changed {
+                        groups.insert(range.start);
+                    }
                 } else {
                     self.content.replace_range(
                         index,

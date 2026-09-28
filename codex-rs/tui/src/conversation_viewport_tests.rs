@@ -178,9 +178,13 @@ impl HistoryCell for DetailCountingToolCell {
     fn tool_activity(&self) -> Option<ToolActivity> {
         Some(ToolActivity {
             call_count: 1,
-            shell_commands: 1,
+            mcp_calls: 1,
             ..ToolActivity::default()
         })
+    }
+
+    fn tool_group_preview_is_active(&self) -> bool {
+        true
     }
 
     fn tool_group_detail_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
@@ -1138,7 +1142,7 @@ fn appending_and_backfilling_tools_rebuild_only_the_adjacent_group() {
 #[test]
 fn expanded_tool_group_reuses_detail_layout_while_scrolling() {
     let detail_calls = Arc::new(AtomicUsize::new(0));
-    let tools = (0..2)
+    let tools = (0..300)
         .map(|_| {
             Arc::new(DetailCountingToolCell {
                 detail_calls: Arc::clone(&detail_calls),
@@ -1158,13 +1162,13 @@ fn expanded_tool_group_reuses_detail_layout_while_scrolling() {
         viewport.scroll_rows(MouseScrollDirection::Down, /*rows*/ 3);
         viewport.render(area, &mut Buffer::empty(area));
     }
-    assert_eq!(detail_calls.load(Ordering::Relaxed), 2);
+    assert_eq!(detail_calls.load(Ordering::Relaxed), 300);
 
     let narrow = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 20, /*height*/ 5,
     );
     viewport.render(narrow, &mut Buffer::empty(narrow));
-    assert_eq!(detail_calls.load(Ordering::Relaxed), 4);
+    assert_eq!(detail_calls.load(Ordering::Relaxed), 600);
 }
 
 #[test]
