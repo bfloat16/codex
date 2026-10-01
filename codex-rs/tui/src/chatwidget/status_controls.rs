@@ -136,25 +136,8 @@ impl ChatWidget {
         if !self.bottom_pane.is_task_running() {
             return;
         }
-        // Modal views hide the status row. Keep waiting bookkeeping intact, but show the cached
-        // pre-wait status after the modal closes so the live banner can resume scrolling.
-        let has_non_request_waiting_item = self
-            .waiting_items
-            .iter()
-            .any(|item_id| !item_id.starts_with("request:"));
-        if has_non_request_waiting_item {
-            if self.bottom_pane.status_widget().is_none() {
-                self.bottom_pane.ensure_status_indicator();
-                let status = self.status_state.current_status.clone();
-                self.set_status(
-                    status.header,
-                    status.details,
-                    StatusDetailsCapitalization::Preserve,
-                    status.details_max_lines,
-                );
-            }
-            return;
-        }
+        // Modal views hide the status row. Restore the cached status when the modal closes
+        // so the live banner resumes scrolling.
         if !self.waiting_items.is_empty() {
             let Some(status) = self.status_state.waiting_status.clone() else {
                 return;

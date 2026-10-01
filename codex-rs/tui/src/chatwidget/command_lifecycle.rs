@@ -32,8 +32,7 @@ impl ChatWidget {
         };
         self.flush_answer_stream_with_separator();
         if *source == ExecCommandSource::Agent && self.bottom_pane.is_task_running() {
-            self.bottom_pane.ensure_status_indicator();
-            self.begin_waiting(format!("command:{id}"));
+            self.restore_status_indicator_after_modal();
         }
         if is_unified_exec_source(*source) {
             if *source == ExecCommandSource::UnifiedExecStartup {
@@ -143,7 +142,6 @@ impl ChatWidget {
         else {
             return;
         };
-        self.finish_waiting(&format!("command:{id}"));
         if *source == ExecCommandSource::UnifiedExecInteraction {
             self.suppressed_exec_calls.remove(id);
             return;

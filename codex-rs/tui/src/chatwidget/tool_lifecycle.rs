@@ -63,9 +63,6 @@ impl ChatWidget {
     }
 
     pub(super) fn on_mcp_tool_call_completed(&mut self, item: ThreadItem) {
-        if let ThreadItem::McpToolCall { id, .. } = &item {
-            self.finish_waiting(&format!("mcp:{id}"));
-        }
         self.defer_or_handle(
             item,
             InterruptManager::push_item_completed,
@@ -157,15 +154,11 @@ impl ChatWidget {
         ) {
             self.on_collab_event(cell);
         }
-        if *tool == CollabAgentTool::Wait {
-            if *status == CollabAgentToolCallStatus::InProgress
-                && self.bottom_pane.is_task_running()
-            {
-                self.bottom_pane.ensure_status_indicator();
-                self.begin_waiting(format!("collab:{id}"));
-            } else {
-                self.finish_waiting(&format!("collab:{id}"));
-            }
+        if *tool == CollabAgentTool::Wait
+            && *status == CollabAgentToolCallStatus::InProgress
+            && self.bottom_pane.is_task_running()
+        {
+            self.restore_status_indicator_after_modal();
         }
     }
 
@@ -201,8 +194,7 @@ impl ChatWidget {
         };
         self.flush_answer_stream_with_separator();
         if self.bottom_pane.is_task_running() {
-            self.bottom_pane.ensure_status_indicator();
-            self.begin_waiting(format!("mcp:{id}"));
+            self.restore_status_indicator_after_modal();
         }
         self.flush_active_cell();
         self.transcript.active_cell = Some(Box::new(history_cell::new_active_mcp_tool_call(

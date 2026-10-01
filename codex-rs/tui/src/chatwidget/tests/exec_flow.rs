@@ -2,6 +2,42 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn running_builtin_and_mcp_tools_keep_scrolling_status_banner() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+    chat.set_status_header("Analyzing".to_string());
+    begin_exec(&mut chat, "exec-1", "sleep 5");
+    assert_eq!(chat.status_state.current_status.header, "Analyzing");
+    insta::assert_snapshot!(
+        "builtin_tool_scrolling_status_banner",
+        normalize_snapshot_paths(render_bottom_popup(&chat, /*width*/ 80))
+    );
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+    chat.set_status_header("Analyzing".to_string());
+    chat.on_mcp_tool_call_started(AppServerThreadItem::McpToolCall {
+        id: "mcp-1".to_string(),
+        server: "docs".to_string(),
+        tool: "search".to_string(),
+        status: codex_app_server_protocol::McpToolCallStatus::InProgress,
+        arguments: json!({"query": "test"}),
+        app_context: None,
+        mcp_app_resource_uri: None,
+        plugin_id: None,
+        read_only_hint: None,
+        result: None,
+        error: None,
+        duration_ms: None,
+    });
+    assert_eq!(chat.status_state.current_status.header, "Analyzing");
+    insta::assert_snapshot!(
+        "mcp_tool_scrolling_status_banner",
+        normalize_snapshot_paths(render_bottom_popup(&chat, /*width*/ 80))
+    );
+}
+
+#[tokio::test]
 async fn overlapping_commands_update_the_original_history_entries() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();

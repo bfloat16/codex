@@ -435,11 +435,10 @@ impl ChatWidget {
                 self.on_context_compaction_started(id, elapsed);
             }
             item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_started(item),
-            ThreadItem::FileChange { id, changes, .. } => {
+            ThreadItem::FileChange { changes, .. } => {
                 self.on_patch_apply_begin(file_update_changes_to_display(changes));
                 if replay_kind.is_none() && self.bottom_pane.is_task_running() {
-                    self.bottom_pane.ensure_status_indicator();
-                    self.begin_waiting(format!("patch:{id}"));
+                    self.restore_status_indicator_after_modal();
                 }
             }
             item @ ThreadItem::McpToolCall { .. } => self.on_mcp_tool_call_started(item),
@@ -449,11 +448,8 @@ impl ChatWidget {
             ThreadItem::ImageGeneration(_) => {
                 self.on_image_generation_begin();
             }
-            ThreadItem::Sleep(item)
-                if replay_kind.is_none() && self.bottom_pane.is_task_running() =>
-            {
-                self.bottom_pane.ensure_status_indicator();
-                self.begin_waiting(format!("sleep:{}", item.id));
+            ThreadItem::Sleep(_) if replay_kind.is_none() && self.bottom_pane.is_task_running() => {
+                self.restore_status_indicator_after_modal();
             }
             ThreadItem::CollabAgentToolCall {
                 id,

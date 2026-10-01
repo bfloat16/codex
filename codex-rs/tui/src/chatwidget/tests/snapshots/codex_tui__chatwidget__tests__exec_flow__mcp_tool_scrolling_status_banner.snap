@@ -1,0 +1,13 @@
+---
+source: tui/src/chatwidget/tests/exec_flow.rs
+assertion_line: 34
+expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80))"
+---
+● Called docs.search({"query":"test"})
+
+● Analyzing (0s)
+
+
+› Ask Codex to do anything
+
+  Read Only        · gpt-5.6-sol default · /tmp/project
