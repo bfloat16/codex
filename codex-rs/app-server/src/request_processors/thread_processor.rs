@@ -235,6 +235,7 @@ fn merge_persisted_resume_metadata(
     typesafe_overrides.model = persisted_metadata.model.clone();
     typesafe_overrides.model_provider = (!persisted_metadata.model_provider.is_empty())
         .then(|| persisted_metadata.model_provider.clone());
+    typesafe_overrides.persisted_model_provider_id = typesafe_overrides.model_provider.clone();
 
     if let Some(reasoning_effort) = persisted_metadata.reasoning_effort.as_ref() {
         request_overrides.get_or_insert_with(HashMap::new).insert(

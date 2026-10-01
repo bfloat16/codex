@@ -1,7 +1,5 @@
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
-use crate::config::model_provider_repair::correction as model_provider_correction;
-use crate::config::model_provider_repair::user_config_correction;
 use crate::context::world_state::validate_managed_developer_instructions;
 use crate::guardian::BUNDLED_GUARDIAN_POLICY;
 use crate::path_utils::normalize_for_native_workdir;
@@ -116,12 +114,9 @@ use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::models::PermissionProfile;
 pub use codex_protocol::models::PermissionProfileSnapshot;
 use codex_protocol::models::SandboxEnforcement;
-use codex_protocol::openai_models::DEEPSEEK_PROVIDER_ID;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::openai_models::model_provider_matches_family;
-use codex_protocol::openai_models::required_provider_id;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::NetworkSandboxPolicy;
@@ -168,7 +163,6 @@ use toml_edit::DocumentMut;
 mod auth_keyring;
 pub mod edit;
 mod managed_features;
-mod model_provider_repair;
 mod network_proxy_spec;
 mod otel;
 mod permission_profile_catalog;
@@ -1464,7 +1458,7 @@ impl ConfigBuilder {
         let thread_config_loader = thread_config_loader
             .as_deref()
             .unwrap_or(&codex_config::NoopThreadConfigLoader);
-        let mut config_layer_stack = load_config_layers_state(
+        let config_layer_stack = load_config_layers_state(
             LOCAL_FS.as_ref(),
             &codex_home,
             Some(cwd.clone()),
@@ -1473,41 +1467,6 @@ impl ConfigBuilder {
             thread_config_loader,
         )
         .await?;
-        if let Some(correction) = user_config_correction(&config_layer_stack)
-            .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?
-        {
-            let config_path = config_layer_stack
-                .get_user_config_file()
-                .map(AbsolutePathBuf::to_path_buf)
-                .unwrap_or_else(|| codex_home.join(CONFIG_TOML_FILE).to_path_buf());
-            ConfigEditsBuilder::for_config_path(&config_path)
-                .with_edits([
-                    ConfigEdit::SetPath {
-                        segments: vec!["model".to_string()],
-                        value: toml_edit::value(correction.model),
-                    },
-                    ConfigEdit::SetPath {
-                        segments: vec!["model_provider".to_string()],
-                        value: toml_edit::value(correction.model_provider),
-                    },
-                ])
-                .apply()
-                .await
-                .map_err(|err| {
-                    std::io::Error::other(format!(
-                        "failed to automatically repair model settings in config.toml: {err}"
-                    ))
-                })?;
-            config_layer_stack = load_config_layers_state(
-                LOCAL_FS.as_ref(),
-                &codex_home,
-                Some(cwd),
-                &cli_overrides,
-                config_load_options,
-                thread_config_loader,
-            )
-            .await?;
-        }
         let merged_toml = config_layer_stack.effective_config();
 
         // Note that each layer in ConfigLayerStack should have resolved
@@ -1664,24 +1623,6 @@ impl Config {
             personality: self.personality,
             model_catalog: self.model_catalog.clone(),
         }
-    }
-
-    pub(crate) fn apply_required_model_provider(&mut self, model: &str) -> Result<(), String> {
-        let Some(required_provider_id) = required_provider_id(model) else {
-            return Ok(());
-        };
-        let provider = self
-            .model_providers
-            .get(required_provider_id)
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "Model provider `{required_provider_id}` required by model `{model}` was not found"
-                )
-            })?;
-        self.model_provider_id = required_provider_id.to_string();
-        self.model_provider = provider;
-        Ok(())
     }
 
     /// Returns auth routing resolved from the effective feature configuration.
@@ -2642,6 +2583,9 @@ pub struct ConfigOverrides {
     /// to the configured default.
     pub persisted_permission_profile_id: Option<String>,
     pub model_provider: Option<String>,
+    /// Provider ID recovered from persisted resume metadata. Only a stale
+    /// persisted provider is eligible for automatic fallback.
+    pub persisted_model_provider_id: Option<String>,
     pub service_tier: Option<Option<String>>,
     pub codex_self_exe: Option<PathBuf>,
     pub codex_linux_sandbox_exe: Option<PathBuf>,
@@ -3301,6 +3245,7 @@ impl Config {
             default_permissions: default_permissions_override,
             persisted_permission_profile_id,
             model_provider,
+            persisted_model_provider_id,
             service_tier: service_tier_override,
             codex_self_exe,
             codex_linux_sandbox_exe,
@@ -3799,23 +3744,27 @@ impl Config {
                     .flatten()
             })
             .unwrap_or_else(|| "openai".to_string());
-        let mut model = model.or_else(|| cfg.model.clone());
-        let mut model_provider_id = model_provider.unwrap_or(configured_model_provider_id);
-        if let Some(correction) = model_provider_correction(
-            model.as_deref(),
-            &model_provider_id,
-            cfg.model_providers.keys().cloned().collect(),
-        )
-        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?
-        {
-            model = Some(correction.model);
-            model_provider_id = correction.model_provider;
-        }
+        let model = model.or_else(|| cfg.model.clone());
+        let mut model_provider_id = model_provider.unwrap_or_else(|| configured_model_provider_id.clone());
         let model_providers =
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
-        let mut model_provider = model_providers
+        if !model_providers.contains_key(&model_provider_id)
+            && persisted_model_provider_id.as_deref() == Some(model_provider_id.as_str())
+        {
+            let fallback = model_providers
+                .contains_key(&configured_model_provider_id)
+                .then(|| configured_model_provider_id.clone());
+            if let Some(fallback) = fallback {
+                startup_warnings.push(format!(
+                    "Saved model provider `{model_provider_id}` is no longer configured; using `{fallback}` for this resumed session"
+                ));
+                model_provider_id = fallback;
+            }
+        }
+
+        let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
                 let message = if model_provider_id == LEGACY_OLLAMA_CHAT_PROVIDER_ID {
@@ -3958,33 +3907,6 @@ impl Config {
 
         let forced_login_method = cfg.forced_login_method;
 
-        if let Some(required_provider_id) = model.as_deref().and_then(required_provider_id) {
-            model_provider_id = required_provider_id.to_string();
-            model_provider = model_providers
-                .get(required_provider_id)
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("Model provider `{required_provider_id}` required by model `{}` was not found", model.as_deref().unwrap_or_default()),
-                    )
-                })?
-                .clone();
-        }
-        if let Some(model) = model.as_deref() {
-            if !model_provider_matches_family(model, &model_provider_id) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "Model `{model}` is incompatible with model provider `{model_provider_id}`"
-                    ),
-                ));
-            }
-        } else if model_provider_id == DEEPSEEK_PROVIDER_ID {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Model provider `deepseek` requires a DeepSeek model",
-            ));
-        }
         let notices = cfg.notice.unwrap_or_default();
         let service_tier = match service_tier_override {
             Some(Some(service_tier)) => Some(service_tier),

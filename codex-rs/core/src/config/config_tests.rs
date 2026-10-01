@@ -1248,93 +1248,53 @@ compact = "remotev2"
 }
 
 #[tokio::test]
-async fn load_config_corrects_deepseek_models_to_the_deepseek_provider() {
+async fn load_config_replaces_stale_resume_provider() {
     let cfg = toml::from_str::<ConfigToml>(
         r#"
 model = "deepseek-flash"
-model_provider = "openai"
-
-[model_providers.deepseek]
-name = "DeepSeek"
-base_url = "https://api.deepseek.com/"
-"#,
-    )
-    .expect("model config should deserialize");
-
-    let config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
-        tempdir().expect("tempdir").abs(),
-    )
-    .await
-    .expect("DeepSeek model should select its required provider");
-
-    assert_eq!(
-        (config.model.as_deref(), config.model_provider_id.as_str()),
-        (Some("deepseek-flash"), "deepseek")
-    );
-}
-
-#[tokio::test]
-async fn load_config_corrects_gpt_model_to_first_non_deepseek_provider() {
-    let cfg = toml::from_str::<ConfigToml>(
-        r#"
-model = "gpt-5.5"
 model_provider = "deepseek"
 
 [model_providers.deepseek]
 name = "DeepSeek"
 base_url = "https://api.deepseek.com/"
-
-[model_providers.zeta]
-name = "Zeta"
-base_url = "https://zeta.example.com/"
 
 [model_providers.anyrouter]
 name = "AnyRouter"
 base_url = "https://anyrouter.example.com/"
 "#,
     )
-    .expect("model config should deserialize");
-
-    let config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
-        tempdir().expect("tempdir").abs(),
-    )
-    .await
-    .expect("GPT model should select the first non-DeepSeek provider");
-
-    assert_eq!(
-        (config.model.as_deref(), config.model_provider_id.as_str()),
-        (Some("gpt-5.5"), "anyrouter")
-    );
-}
-
-#[tokio::test]
-async fn load_config_selects_default_model_for_deepseek_provider() {
-    let cfg = toml::from_str::<ConfigToml>(
-        r#"
-model_provider = "deepseek"
-
-[model_providers.deepseek]
-name = "DeepSeek"
-base_url = "https://api.deepseek.com/"
-"#,
-    )
     .expect("provider config should deserialize");
-
+    let overrides = ConfigOverrides {
+        model: Some("gpt-6-sol".to_string()),
+        model_provider: Some("oneapi".to_string()),
+        persisted_model_provider_id: Some("oneapi".to_string()),
+        ..Default::default()
+    };
     let config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
+        cfg.clone(),
+        overrides.clone(),
         tempdir().expect("tempdir").abs(),
     )
     .await
-    .expect("DeepSeek provider should select its default model");
+    .expect("stale resumed provider should fall back to the configured provider");
+    assert_eq!(config.model_provider_id, "deepseek");
+    assert_eq!(config.model.as_deref(), Some("gpt-6-sol"));
 
-    assert_eq!(
-        (config.model.as_deref(), config.model_provider_id.as_str()),
-        (Some("deepseek-flash"), "deepseek")
+    let explicit_override = ConfigOverrides {
+        persisted_model_provider_id: None,
+        ..overrides
+    };
+    let error = Config::load_from_base_config_with_overrides(
+        cfg,
+        explicit_override,
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect_err("an explicitly unknown provider should still fail");
+    assert!(
+        error
+            .to_string()
+            .contains("Model provider `oneapi` not found")
     );
 }
 
