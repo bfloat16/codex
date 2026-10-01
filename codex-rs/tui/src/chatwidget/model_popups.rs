@@ -5,9 +5,7 @@
 
 use super::*;
 use crate::model_catalog::LUNA_RESERVE_MODEL;
-use codex_models_manager::bundled_models_response;
-use codex_protocol::openai_models::is_deepseek_model;
-use codex_protocol::openai_models::required_provider_id;
+use codex_protocol::openai_models::model_family;
 
 const ULTRA_REASONING_CONCURRENCY_WARNING_THRESHOLD: usize = 8;
 pub(super) const MODEL_SELECTION_VIEW_ID: &str = "model-selection";
@@ -82,7 +80,6 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_model_popup_with_presets(&mut self, presets: Vec<ModelPreset>) {
-        let presets = self.model_picker_presets(presets);
         if self.restrict_model_picker_to_luna_reserve() {
             self.open_luna_reserve_model_popup(presets, MODEL_SELECTION_VIEW_ID);
             return;
@@ -210,40 +207,20 @@ impl ChatWidget {
             return;
         }
         let presets = self
-            .model_picker_presets(self.model_catalog.try_list_models().unwrap_or_default())
+            .model_catalog
+            .try_list_models()
+            .unwrap_or_default()
             .into_iter()
             .filter(|preset| preset.show_in_picker && !Self::is_auto_model(&preset.model))
             .collect();
         self.open_all_models_popup_with_view_id(presets, ALL_MODELS_SELECTION_VIEW_ID);
     }
 
-    fn model_picker_presets(&self, mut presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
-        presets.retain(|preset| {
-            required_provider_id(&preset.model)
-                .is_none_or(|provider_id| self.config.model_providers.contains_key(provider_id))
-        });
-
-        if let Ok(catalog) = bundled_models_response() {
-            for model in catalog.models {
-                let Some(provider_id) = required_provider_id(&model.slug) else {
-                    continue;
-                };
-                if self.config.model_providers.contains_key(provider_id)
-                    && !presets.iter().any(|preset| preset.model == model.slug)
-                {
-                    presets.push(model.into());
-                }
-            }
-        }
-
-        presets
-    }
-
     fn model_family_disabled_reason(&self, model: &str) -> Option<String> {
         self.initial_thread_model
             .as_deref()
             .and_then(|initial_model| {
-                (is_deepseek_model(model) != is_deepseek_model(initial_model)).then(|| {
+                (model_family(model) != model_family(initial_model)).then(|| {
                     format!("Unavailable because this thread started with `{initial_model}`.")
                 })
             })

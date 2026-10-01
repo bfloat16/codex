@@ -4,6 +4,7 @@
 //! live-only side effects.
 
 use super::*;
+use codex_app_server_protocol::UserInput as AppServerUserInput;
 
 impl ChatWidget {
     /// Flush prior activity and preserve its separator before live or replayed assistant text.
@@ -126,7 +127,13 @@ impl ChatWidget {
             ThreadItem::UserMessage {
                 content, client_id, ..
             } => {
-                if self.initial_thread_model.is_none() {
+                let is_compact_command = client_id.is_none()
+                    && matches!(
+                        content.as_slice(),
+                        [AppServerUserInput::Text { text, .. }]
+                            if matches!(text.as_str(), "/compact" | "/compact local" | "/compact remotev1" | "/compact remotev2")
+                    );
+                if self.initial_thread_model.is_none() && !is_compact_command {
                     self.initial_thread_model = Some(self.current_model().to_string());
                 }
                 self.on_committed_user_message(&content, client_id.as_deref(), from_replay);

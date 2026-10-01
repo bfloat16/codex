@@ -5,6 +5,7 @@ expression: popup
   Select Model and Effort
   Choose a model. Its family locks after this thread's first turn.
 
-› 1. deepseek-flash  Latest frontier agentic coding model with image input.
+› 1. deepseek-flash  Open-weight model served by a DeepSeek-compatible
+                     endpoint.
 
   Press enter to confirm or esc to go back

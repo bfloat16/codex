@@ -409,6 +409,8 @@ impl ChatWidget {
         if !self.submit_op(op.clone()) {
             return (false, None);
         }
+        self.initial_thread_model
+            .get_or_insert_with(|| effective_mode.model().to_string());
         self.dismiss_backend_banner_for_new_turn();
         if render_in_history {
             self.input_queue.user_turn_pending_start = true;

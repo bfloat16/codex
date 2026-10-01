@@ -210,24 +210,11 @@ async fn gpt_thread_rejects_switching_to_deepseek() -> Result<()> {
         test.codex.config_snapshot().await.model_provider_id,
         "openai"
     );
-    let provider_error = test
-        .codex
-        .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
-            model_provider: Some("deepseek".to_string()),
-            ..Default::default()
-        })
-        .await
-        .expect_err("GPT thread must reject the DeepSeek provider");
-    assert!(
-        provider_error
-            .to_string()
-            .contains("allowed set any provider except `deepseek`")
-    );
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn deepseek_thread_rejects_gpt_models_and_other_providers() -> Result<()> {
+async fn deepseek_thread_rejects_gpt_models() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let openai_server = MockServer::start().await;
@@ -277,16 +264,6 @@ async fn deepseek_thread_rejects_gpt_models_and_other_providers() -> Result<()> 
             .to_string()
             .contains("same model family as `deepseek-flash`")
     );
-
-    let provider_error = test
-        .codex
-        .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
-            model_provider: Some("alpha".to_string()),
-            ..Default::default()
-        })
-        .await
-        .expect_err("DeepSeek thread must reject non-DeepSeek providers");
-    assert!(provider_error.to_string().contains("allowed set deepseek"));
     Ok(())
 }
 

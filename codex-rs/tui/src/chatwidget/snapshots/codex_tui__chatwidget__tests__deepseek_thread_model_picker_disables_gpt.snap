@@ -5,11 +5,7 @@ expression: popup
   Select Model and Effort
   Choose a model in the same family as this thread's initial model.
 
-     gpt-5.5 (disabled)        Frontier model for complex coding, research,
-                               and real-world work. (disabled: Unavailable
-                               because this thread started with `deepseek-
-                               flash`.)
-› 1. deepseek-flash (current)  Latest frontier agentic coding model with image
-                               input.
+›    gpt-5.5 (disabled)  Legacy coding model. (disabled: Unavailable because
+                         this thread started with `deepseek-flash`.)
 
   Press enter to confirm or esc to go back

@@ -346,36 +346,21 @@ impl SessionConfiguration {
         &self,
         environments: &[TurnEnvironmentSelection],
     ) -> ConstraintResult<()> {
-        self.validate_model_family(
-            self.step_settings.collaboration_mode.model(),
-            &self.original_config_do_not_use.model_provider_id,
-        )?;
+        self.validate_model_family(self.step_settings.collaboration_mode.model())?;
         self.step_settings
             .validate(&self.step_settings_constraints(environments))?;
         super::environment::validate_environment_selections(environments)
     }
 
-    fn validate_model_family(&self, model: &str, provider_id: &str) -> ConstraintResult<()> {
+    fn validate_model_family(&self, model: &str) -> ConstraintResult<()> {
         if let Some(initial_model) = self.initial_model.as_deref()
-            && codex_protocol::openai_models::is_deepseek_model(model)
-                != codex_protocol::openai_models::is_deepseek_model(initial_model)
+            && codex_protocol::openai_models::model_family(model)
+                != codex_protocol::openai_models::model_family(initial_model)
         {
             return Err(ConstraintError::InvalidValue {
                 field_name: "model",
                 candidate: model.to_string(),
                 allowed: format!("same model family as `{initial_model}`"),
-                requirement_source: codex_config::RequirementSource::Unknown,
-            });
-        }
-        if !codex_protocol::openai_models::model_provider_matches_family(model, provider_id) {
-            return Err(ConstraintError::InvalidValue {
-                field_name: "model_provider",
-                candidate: provider_id.to_string(),
-                allowed: if codex_protocol::openai_models::is_deepseek_model(model) {
-                    codex_protocol::openai_models::DEEPSEEK_PROVIDER_ID.to_string()
-                } else {
-                    "any provider except `deepseek`".to_string()
-                },
                 requirement_source: codex_config::RequirementSource::Unknown,
             });
         }
@@ -415,11 +400,7 @@ impl SessionConfiguration {
             .map(CollaborationMode::model)
             .or(updates.step_settings.model.as_deref())
             .unwrap_or_else(|| self.step_settings.collaboration_mode.model());
-        let next_provider_id = updates.model_provider.as_ref().map_or_else(
-            || self.original_config_do_not_use.model_provider_id.as_str(),
-            |model_provider| model_provider.id.as_str(),
-        );
-        self.validate_model_family(next_model, next_provider_id)?;
+        self.validate_model_family(next_model)?;
         let mut next_configuration = self.clone();
         let current_file_system_sandbox_policy =
             self.file_system_sandbox_policy(current_environments);

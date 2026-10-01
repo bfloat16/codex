@@ -119,11 +119,9 @@ use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
-use codex_protocol::openai_models::DEEPSEEK_PROVIDER_ID;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
-use codex_protocol::openai_models::is_deepseek_model;
-use codex_protocol::openai_models::required_provider_id;
+use codex_protocol::openai_models::model_family;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::FileSystemSandboxPolicyContext;
 use codex_protocol::permissions::NetworkSandboxPolicy;
@@ -1934,7 +1932,7 @@ impl Session {
                 state.session_configuration.initial_model.clone()
             };
             if let Some(initial_model) = initial_model
-                && is_deepseek_model(model) != is_deepseek_model(&initial_model)
+                && model_family(model) != model_family(&initial_model)
             {
                 return Err(codex_config::ConstraintError::InvalidValue {
                     field_name: "model",
@@ -1944,63 +1942,23 @@ impl Session {
                 });
             }
         }
-        let model_provider_id = model
-            .and_then(required_provider_id)
-            .map(str::to_string)
-            .or(requested_model_provider_id);
-        if model_provider_id.is_none() && model.is_some() {
-            let provider_update = {
-                let state = self.state.lock().await;
-                let config = &state.session_configuration.original_config_do_not_use;
-                if config.model_provider_id == DEEPSEEK_PROVIDER_ID {
-                    let configured_provider_id = config
-                        .config_layer_stack
-                        .effective_user_config()
-                        .and_then(|config| {
-                            config
-                                .get("model_provider")
-                                .and_then(toml::Value::as_str)
-                                .filter(|provider_id| *provider_id != DEEPSEEK_PROVIDER_ID)
-                                .map(str::to_string)
-                                .or_else(|| {
-                                    config
-                                        .get("model_providers")
-                                        .and_then(toml::Value::as_table)
-                                        .and_then(|providers| {
-                                            providers
-                                                .keys()
-                                                .filter(|id| *id != DEEPSEEK_PROVIDER_ID)
-                                                .min()
-                                                .cloned()
-                                        })
-                                })
-                        })
-                        .unwrap_or_else(|| "openai".to_string());
-                    config
-                        .model_providers
-                        .get(&configured_provider_id)
-                        .cloned()
-                        .map(|provider_info| (configured_provider_id, provider_info))
-                } else {
-                    None
-                }
-            };
-            if let Some((model_provider_id, provider_info)) = provider_update {
-                return Ok(Some(session::SessionModelProviderUpdate {
-                    id: model_provider_id,
-                    provider: create_model_provider(
-                        provider_info,
-                        Some(Arc::clone(&self.services.auth_manager)),
-                    ),
-                }));
-            }
-        }
-        let Some(model_provider_id) = model_provider_id else {
+        let Some(model_provider_id) = requested_model_provider_id else {
             return Ok(None);
         };
         let (provider_info, allowed_provider_ids) = {
             let state = self.state.lock().await;
             let config = &state.session_configuration.original_config_do_not_use;
+            let has_openai_auth = config
+                .model_providers
+                .get("openai")
+                .is_some_and(|provider| {
+                    create_model_provider(
+                        provider.clone(),
+                        Some(Arc::clone(&self.services.auth_manager)),
+                    )
+                    .account_state()
+                    .is_ok_and(|state| state.account.is_some())
+                });
             let mut allowed_provider_ids = config
                 .config_layer_stack
                 .effective_user_config()
@@ -2011,6 +1969,12 @@ impl Session {
                         .map(|providers| providers.keys().cloned().collect::<Vec<_>>())
                 })
                 .unwrap_or_default();
+            allowed_provider_ids.retain(|provider_id| {
+                provider_id != "openai" && config.model_providers.contains_key(provider_id)
+            });
+            if has_openai_auth {
+                allowed_provider_ids.push("openai".to_string());
+            }
             allowed_provider_ids.sort();
             (
                 allowed_provider_ids

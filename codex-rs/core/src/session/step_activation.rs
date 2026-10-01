@@ -16,7 +16,6 @@ use codex_protocol::openai_models::GuardianV2ModelConfig;
 use codex_protocol::openai_models::GuardianV2TranscriptModelConfig;
 use codex_protocol::openai_models::MODEL_SPECIALTY_CYBER;
 use codex_protocol::openai_models::ModelInfo;
-use codex_protocol::openai_models::required_provider_id;
 use codex_protocol::protocol::TurnSettingsUpdate;
 use codex_protocol::protocol::TurnSettingsUpdateOutcome;
 use std::sync::Arc;
@@ -245,33 +244,12 @@ impl Session {
                 state.session_configuration.initial_model.clone()
             };
             if let Some(initial_model) = initial_model
-                && codex_protocol::openai_models::is_deepseek_model(model)
-                    != codex_protocol::openai_models::is_deepseek_model(&initial_model)
+                && codex_protocol::openai_models::model_family(model)
+                    != codex_protocol::openai_models::model_family(&initial_model)
             {
                 return TurnSettingsUpdateOutcome::Rejected {
                     reason: format!(
                         "model `{model}` must use the same model family as the thread's initial model `{initial_model}`"
-                    ),
-                };
-            }
-        }
-        if let Some((model, required_provider_id)) = update
-            .model
-            .as_deref()
-            .and_then(|model| required_provider_id(model).map(|provider_id| (model, provider_id)))
-        {
-            let current_provider_id = {
-                let state = self.state.lock().await;
-                state
-                    .session_configuration
-                    .original_config_do_not_use
-                    .model_provider_id
-                    .clone()
-            };
-            if current_provider_id != required_provider_id {
-                return TurnSettingsUpdateOutcome::Rejected {
-                    reason: format!(
-                        "model `{model}` requires model provider `{required_provider_id}`; update the thread model instead"
                     ),
                 };
             }

@@ -12,6 +12,7 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::InitializeCapabilities;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCMessage;
+use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadForkParams;
@@ -93,6 +94,10 @@ wire_api = "responses"
         .build()
         .await?;
     initialize_experimental(&mut mcp).await?;
+    let login_id = mcp
+        .send_login_account_api_key_request("test-api-key")
+        .await?;
+    let _: LoginAccountResponse = mcp.read_response(login_id).await?;
     let ThreadStartResponse { thread, .. } = mcp
         .start_thread(ThreadStartParams {
             history_mode: Some(ThreadHistoryMode::Paginated),
@@ -101,10 +106,10 @@ wire_api = "responses"
         .await?;
 
     // Settings alone must not lock the model family, even across repeated switches.
-    for (model, provider) in [
-        ("gpt-5.6-sol", gpt_provider),
-        ("deepseek-flash", "deepseek"),
-        ("gpt-5.6-sol", gpt_provider),
+    for (model, provider, explicit_provider) in [
+        ("gpt-5.6-sol", gpt_provider, Some(gpt_provider)),
+        ("deepseek-flash", "deepseek", Some("deepseek")),
+        ("gpt-5.6-sol", gpt_provider, Some(gpt_provider)),
     ] {
         let _: ThreadSettingsUpdateResponse = mcp
             .request(|request_id| ClientRequest::ThreadSettingsUpdate {
@@ -120,6 +125,7 @@ wire_api = "responses"
                             developer_instructions: None,
                         },
                     }),
+                    model_provider: explicit_provider.map(str::to_string),
                     ..Default::default()
                 },
             })
