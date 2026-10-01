@@ -1112,13 +1112,26 @@ impl AccountRequestProcessor {
         self.refresh_token_if_requested(do_refresh).await;
 
         let config = self.load_latest_config().await;
-        let provider =
-            create_model_provider(config.model_provider, Some(self.auth_manager.clone()));
+        let provider = create_model_provider(
+            config.model_provider.clone(),
+            Some(self.auth_manager.clone()),
+        );
         let account_state = match provider.account_state() {
             Ok(account_state) => account_state,
             Err(err) => return Err(invalid_request(err.to_string())),
         };
-        let account = account_state.account.map(Account::from);
+        // Keep the OpenAI login visible while a custom provider is selected so clients can
+        // offer switching back to the built-in provider.
+        let account = account_state
+            .account
+            .or_else(|| {
+                let provider = create_model_provider(
+                    config.model_providers.get("openai")?.clone(),
+                    Some(self.auth_manager.clone()),
+                );
+                provider.account_state().ok()?.account
+            })
+            .map(Account::from);
 
         Ok(GetAccountResponse {
             account,

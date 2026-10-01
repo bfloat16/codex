@@ -2745,8 +2745,10 @@ async fn get_account_with_api_key() -> Result<()> {
     Ok(())
 }
 
+#[test_case(None; "logged out")]
+#[test_case(Some(Account::ApiKey {}); "logged in")]
 #[tokio::test]
-async fn get_account_when_auth_not_required() -> Result<()> {
+async fn get_account_when_auth_not_required(expected_account: Option<Account>) -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
@@ -2758,9 +2760,17 @@ async fn get_account_when_auth_not_required() -> Result<()> {
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
-        .without_auto_env()
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
         .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
         .await?;
+
+    if expected_account.is_some() {
+        let login_id = mcp
+            .send_login_account_api_key_request("sk-test-key")
+            .await?;
+        let _: LoginAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(login_id)).await??;
+    }
 
     let params = GetAccountParams {
         refresh_token: false,
@@ -2771,7 +2781,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = GetAccountResponse {
-        account: None,
+        account: expected_account,
         requires_openai_auth: false,
     };
     assert_eq!(received, expected);

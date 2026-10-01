@@ -78,21 +78,6 @@ pub fn model_family(model: &str) -> ModelFamily {
     }
 }
 
-/// Returns whether the model belongs to the DeepSeek model family.
-pub fn is_deepseek_model(model: &str) -> bool {
-    model.starts_with("deepseek-")
-}
-
-/// Returns the provider that must serve this model, when the model is provider-bound.
-pub fn required_provider_id(model: &str) -> Option<&'static str> {
-    is_deepseek_model(model).then_some(DEEPSEEK_PROVIDER_ID)
-}
-
-/// Returns whether the model and provider belong to the same supported provider family.
-pub fn model_provider_matches_family(model: &str, provider_id: &str) -> bool {
-    is_deepseek_model(model) == (provider_id == DEEPSEEK_PROVIDER_ID)
-}
-
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning
 #[derive(Debug, Default, Clone, PartialEq, Eq, TS, Hash)]
 #[ts(type = "string")]

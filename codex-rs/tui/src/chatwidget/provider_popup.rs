@@ -1,7 +1,6 @@
 //! Provider selection for the active thread.
 
 use super::*;
-use codex_protocol::openai_models::model_provider_matches_family;
 
 impl ChatWidget {
     pub(crate) fn open_provider_popup(&mut self) {
@@ -34,6 +33,12 @@ impl ChatWidget {
                     })
             })
             .unwrap_or_default();
+        provider_ids.retain(|provider_id| provider_id != "openai");
+        if (self.status_account_display.is_some() || self.has_chatgpt_account)
+            && self.config.model_providers.contains_key("openai")
+        {
+            provider_ids.push("openai".to_string());
+        }
         provider_ids.sort();
 
         if provider_ids.is_empty() {
@@ -58,20 +63,10 @@ impl ChatWidget {
                         |base_url| Some(format!("{} - {base_url}", provider.name)),
                     );
                 let selected_provider_id = provider_id.clone();
-                let disabled_reason =
-                    (!model_provider_matches_family(self.current_model(), &provider_id)).then(
-                        || {
-                            format!(
-                                "Unavailable for the current model `{}`.",
-                                self.current_model()
-                            )
-                        },
-                    );
                 Some(SelectionItem {
                     name: provider_id.clone(),
                     description,
                     is_current: provider_id == current_provider_id,
-                    disabled_reason,
                     actions: vec![Box::new(move |tx| {
                         tx.send(AppEvent::UpdateModelProvider(selected_provider_id.clone()));
                     })],
@@ -84,7 +79,7 @@ impl ChatWidget {
         let mut header = ColumnRenderable::new();
         header.push(Line::from("Select Provider".bold()));
         header.push(Line::from(
-            "Choose a provider configured in config.toml for this session.".dim(),
+            "Choose a model provider for this session.".dim(),
         ));
         self.bottom_pane.show_selection_view(SelectionViewParams {
             items,

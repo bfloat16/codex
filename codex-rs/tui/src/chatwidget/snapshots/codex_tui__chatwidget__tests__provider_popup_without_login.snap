@@ -6,7 +6,5 @@ expression: popup
   Choose a model provider for this session.
 
 › 1. alpha (current)  Alpha - https://alpha.example/v1
-  2. openai           OpenAI
-  3. zeta             Zeta - https://zeta.example/v1
 
   Press enter to confirm or esc to go back

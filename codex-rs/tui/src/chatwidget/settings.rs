@@ -484,6 +484,7 @@ impl ChatWidget {
         self.config.model_provider_id = settings.model_provider.clone();
         if let Some(provider) = self.config.model_providers.get(&settings.model_provider) {
             self.config.model_provider = provider.clone();
+            self.requires_openai_auth = provider.requires_openai_auth;
         }
         self.set_service_tier(settings.service_tier.clone());
         self.set_approval_policy(settings.approval_policy);

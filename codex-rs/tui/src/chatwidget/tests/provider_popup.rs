@@ -10,9 +10,11 @@ fn provider(name: &str, base_url: &str) -> ModelProviderInfo {
 }
 
 #[tokio::test]
-async fn provider_popup_lists_only_user_configured_providers_and_selects_one() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn provider_popup_lists_configured_and_authenticated_openai_providers() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("vendor/GLM-5")).await;
     chat.thread_id = Some(ThreadId::new());
+    chat.status_account_display = Some(StatusAccountDisplay::ApiKey);
+    complete_user_message(&mut chat, "user-1", "lock open-weight models");
 
     let alpha = provider("Alpha", "https://alpha.example/v1");
     let zeta = provider("Zeta", "https://zeta.example/v1");
@@ -44,7 +46,7 @@ base_url = "https://alpha.example/v1"
 
     chat.dispatch_command(SlashCommand::Provider);
     let popup = render_bottom_popup(&chat, /*width*/ 100);
-    assert!(!popup.contains("openai"));
+    assert!(popup.contains("openai"));
     assert!(popup.contains("alpha"));
     assert!(popup.contains("zeta"));
     assert_chatwidget_snapshot!("provider_popup", popup);
@@ -59,7 +61,52 @@ base_url = "https://alpha.example/v1"
             Err(err) => panic!("expected provider selection event: {err}"),
         }
     };
-    assert_eq!(selected_provider, "zeta");
+    assert_eq!(selected_provider, "openai");
+}
+
+#[tokio::test]
+async fn provider_popup_without_user_providers_shows_authenticated_openai() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.status_account_display = Some(StatusAccountDisplay::ChatGpt {
+        email: None,
+        plan: None,
+    });
+    chat.open_provider_popup();
+    let popup = render_bottom_popup(&chat, /*width*/ 100);
+    assert_chatwidget_snapshot!("provider_popup_without_user_providers", popup);
+}
+
+#[tokio::test]
+async fn provider_popup_hides_openai_without_login() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.config.model_providers.insert(
+        "alpha".to_string(),
+        provider("Alpha", "https://alpha.example/v1"),
+    );
+    let config_path = tempdir().expect("tempdir").path().join("config.toml").abs();
+    chat.config.config_layer_stack = ConfigLayerStack::default()
+        .with_user_config(
+            &config_path,
+            toml::from_str::<TomlValue>(
+                r#"
+model_provider = "alpha"
+[model_providers.openai]
+disable_tool_search = true
+[model_providers.alpha]
+name = "Alpha"
+base_url = "https://alpha.example/v1"
+"#,
+            )
+            .expect("provider config"),
+        )
+        .expect("user config");
+    chat.config.model_provider_id = "alpha".to_string();
+    chat.open_provider_popup();
+    let popup = render_bottom_popup(&chat, /*width*/ 100);
+    assert!(!popup.contains("openai"));
+    assert_chatwidget_snapshot!("provider_popup_without_login", popup);
 }
 
 #[tokio::test]
@@ -75,45 +122,4 @@ async fn provider_popup_reports_when_config_has_no_user_providers() {
         lines_to_single_string(&cells[0]).contains("No model providers are configured"),
         "expected missing-provider info message"
     );
-}
-
-#[tokio::test]
-async fn provider_popup_disables_providers_outside_the_model_family() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("deepseek-flash")).await;
-    chat.thread_id = Some(ThreadId::new());
-    chat.config.model_providers.insert(
-        "alpha".to_string(),
-        provider("Alpha", "https://alpha.example/v1"),
-    );
-    chat.config.model_providers.insert(
-        "deepseek".to_string(),
-        provider("DeepSeek", "https://api.deepseek.example/v1"),
-    );
-    chat.config.model_provider_id = "deepseek".to_string();
-
-    let config_path = tempdir().expect("tempdir");
-    let config_path = config_path.path().join("config.toml").abs();
-    chat.config.config_layer_stack = ConfigLayerStack::default()
-        .with_user_config(
-            &config_path,
-            toml::from_str::<TomlValue>(
-                r#"
-[model_providers.alpha]
-name = "Alpha"
-base_url = "https://alpha.example/v1"
-
-[model_providers.deepseek]
-name = "DeepSeek"
-base_url = "https://api.deepseek.example/v1"
-"#,
-            )
-            .expect("provider config"),
-        )
-        .expect("user config");
-
-    chat.open_provider_popup();
-    let popup = render_bottom_popup(&chat, /*width*/ 100);
-
-    assert!(popup.contains("alpha"));
-    assert_chatwidget_snapshot!("deepseek_provider_popup_disables_other_providers", popup);
 }
