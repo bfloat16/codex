@@ -1,0 +1,10 @@
+---
+source: tui/src/chatwidget/tests/compaction_tests.rs
+expression: "normalize_compaction_snapshot(render_bottom_popup(&chat,\n80)).replace(model, \"<model>\")"
+---
+● Compacting locally (<elapsed>)
+
+
+› Ask Codex to do anything
+
+  Read Only        · <model> default · /tmp/project

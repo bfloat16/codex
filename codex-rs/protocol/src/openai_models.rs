@@ -53,6 +53,31 @@ pub const MODEL_SPECIALTY_CYBER: &str = "cyber";
 pub const SPEED_TIER_FAST: &str = "fast";
 pub const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 
+/// Name fragments that identify open-weight model families.
+const OPEN_WEIGHT_MODEL_KEYWORDS: &[&str] = &["deepseek", "kimi", "glm"];
+
+/// Model family a thread locks to once its first prompt is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFamily {
+    /// OpenAI GPT-family models.
+    Gpt,
+    /// Open-weight models such as DeepSeek, Kimi, and GLM.
+    OpenWeight,
+}
+
+/// Classifies a model slug by the family used for the per-thread model lock.
+pub fn model_family(model: &str) -> ModelFamily {
+    let model = model.to_ascii_lowercase();
+    if OPEN_WEIGHT_MODEL_KEYWORDS
+        .iter()
+        .any(|keyword| model.contains(keyword))
+    {
+        ModelFamily::OpenWeight
+    } else {
+        ModelFamily::Gpt
+    }
+}
+
 /// Returns whether the model belongs to the DeepSeek model family.
 pub fn is_deepseek_model(model: &str) -> bool {
     model.starts_with("deepseek-")
@@ -970,6 +995,10 @@ impl ModelPreset {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "openai_models_family_tests.rs"]
+mod family_tests;
 
 #[cfg(test)]
 mod tests {

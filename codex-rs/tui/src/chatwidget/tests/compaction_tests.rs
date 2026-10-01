@@ -1,4 +1,5 @@
 use super::*;
+use codex_protocol::protocol::CompactionMode;
 use pretty_assertions::assert_eq;
 
 fn normalize_compaction_snapshot(text: String) -> String {
@@ -24,6 +25,35 @@ fn compaction_completed(id: &str) -> ServerNotification {
         completed_at_ms: 0,
         item: AppServerThreadItem::ContextCompaction { id: id.to_string() },
     })
+}
+
+#[tokio::test]
+async fn open_weight_compaction_banner_stays_local_for_every_requested_mode() {
+    for model in ["vendor/DeepSeek-v4", "moonshot/Kimi-K2", "zai/GLM-5"] {
+        for mode in [
+            None,
+            Some(CompactionMode::RemoteV1),
+            Some(CompactionMode::RemoteV2),
+        ] {
+            let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some(model)).await;
+            chat.thread_id = Some(ThreadId::new());
+            chat.config.model_provider.compact = Some(CompactionMode::RemoteV2);
+            handle_turn_started(&mut chat, "turn-1");
+            match mode {
+                Some(mode) => chat.start_compaction_status_for_mode(mode),
+                None => chat.start_compaction_status(),
+            }
+            assert_eq!(
+                chat.bottom_pane.status_widget().unwrap().header(),
+                "Compacting locally"
+            );
+            assert_chatwidget_snapshot!(
+                "open_weight_local_compaction_banner",
+                normalize_compaction_snapshot(render_bottom_popup(&chat, /*width*/ 80))
+                    .replace(model, "<model>")
+            );
+        }
+    }
 }
 
 #[tokio::test]

@@ -1266,8 +1266,18 @@ async fn run_auto_compact(
 ) -> CodexResult<()> {
     let turn_context = &step_context.turn;
     let _profile_guard = turn_context.turn_timing_state.begin_compaction();
-    let mode = turn_context.provider.info().compact;
-    let support = turn_context.provider.capabilities().remote_compaction;
+    let mode = if codex_protocol::openai_models::model_family(&turn_context.model_info().slug)
+        == codex_protocol::openai_models::ModelFamily::OpenWeight
+    {
+        Some(CompactionMode::Local)
+    } else {
+        turn_context.provider.info().compact
+    };
+    let support = if mode == Some(CompactionMode::Local) {
+        RemoteCompactionSupport::Unsupported
+    } else {
+        turn_context.provider.capabilities().remote_compaction
+    };
     if turn_context.config.features.enabled(Feature::TokenBudget)
         && !matches!(
             mode,

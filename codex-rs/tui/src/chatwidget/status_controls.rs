@@ -194,6 +194,13 @@ impl ChatWidget {
     }
 
     pub(super) fn start_compaction_status_for_mode(&mut self, mode: CompactionMode) {
+        let mode = if codex_protocol::openai_models::model_family(self.current_model())
+            == codex_protocol::openai_models::ModelFamily::OpenWeight
+        {
+            CompactionMode::Local
+        } else {
+            mode
+        };
         let kind = match mode {
             CompactionMode::Local => CompactionStatusKind::Local,
             CompactionMode::RemoteV1 => CompactionStatusKind::RemoteV1,
@@ -220,6 +227,11 @@ impl ChatWidget {
     }
 
     fn compaction_status_kind(&self) -> CompactionStatusKind {
+        if codex_protocol::openai_models::model_family(self.current_model())
+            == codex_protocol::openai_models::ModelFamily::OpenWeight
+        {
+            return CompactionStatusKind::Local;
+        }
         let provider = create_model_provider(self.config.model_provider.clone(), None);
         if let Some(mode) = provider.info().compact {
             return match mode {

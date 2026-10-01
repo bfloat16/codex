@@ -54,7 +54,13 @@ impl SessionTask for CompactTask {
         };
         crate::compact::record_manual_compact_command(&session, &ctx, command).await;
 
-        let mode = self.mode.or(ctx.provider.info().compact);
+        let mode = if codex_protocol::openai_models::model_family(&ctx.model_info().slug)
+            == codex_protocol::openai_models::ModelFamily::OpenWeight
+        {
+            Some(CompactionMode::Local)
+        } else {
+            self.mode.or(ctx.provider.info().compact)
+        };
         let support = match mode {
             Some(CompactionMode::Local) => RemoteCompactionSupport::Unsupported,
             Some(CompactionMode::RemoteV1) => RemoteCompactionSupport::V1,
