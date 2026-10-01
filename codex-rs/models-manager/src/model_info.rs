@@ -23,7 +23,7 @@ const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
-    if let Some(context_window) = config.model_context_window {
+    if let Some(context_window) = config.model_context_window.or(model.max_context_window) {
         model.context_window = Some(
             model
                 .max_context_window

@@ -341,13 +341,35 @@ fn model_context_window_override_clamps_to_max_context_window() {
 }
 
 #[test]
-fn model_context_window_uses_model_value_without_override() {
+fn model_context_window_defaults_to_maximum_without_override() {
     let mut model = model_info_from_slug("unknown-model");
     model.context_window = Some(273_000);
     model.max_context_window = Some(400_000);
     let config = ModelsManagerConfig::default();
 
     let updated = with_config_overrides(model.clone(), &config);
+    model.context_window = Some(400_000);
 
+    assert_eq!(updated, model);
+}
+
+#[test]
+fn model_context_window_preserves_smaller_explicit_override() {
+    let mut model = model_info_from_slug("unknown-model");
+    model.max_context_window = Some(400_000);
+    let config = ModelsManagerConfig {
+        model_context_window: Some(100_000),
+        ..Default::default()
+    };
+    let updated = with_config_overrides(model.clone(), &config);
+    model.context_window = Some(100_000);
+    assert_eq!(updated, model);
+}
+
+#[test]
+fn model_context_window_preserves_default_when_maximum_is_unknown() {
+    let mut model = model_info_from_slug("unknown-model");
+    model.max_context_window = None;
+    let updated = with_config_overrides(model.clone(), &ModelsManagerConfig::default());
     assert_eq!(updated, model);
 }

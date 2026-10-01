@@ -1485,7 +1485,7 @@ async fn static_manager_reads_latest_auth_mode() {
 }
 
 #[test]
-fn bundled_models_json_roundtrips() {
+fn bundled_models_json_roundtrips_and_ignores_unknown_fields() {
     let response = crate::bundled_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
 
@@ -1502,4 +1502,32 @@ fn bundled_models_json_roundtrips() {
         !response.models.is_empty(),
         "bundled models.json should contain at least one model"
     );
+
+    let mut extended: serde_json::Value =
+        serde_json::from_str(include_str!("../models.json")).expect("bundled JSON");
+    extended["future_catalog_field"] = json!({"version": 2});
+    for model in extended["models"].as_array_mut().expect("models array") {
+        model["future_model_field"] = json!(["unknown", {"enabled": true}]);
+        model["truncation_policy"]["future_policy_field"] = json!(true);
+        if model["model_messages"].is_object() {
+            model["model_messages"]["future_message_field"] = json!({"text": "ignored"});
+        }
+    }
+    let parsed: ModelsResponse = serde_json::from_value(extended).expect("ignore unknown fields");
+    assert_eq!(parsed, response);
+
+    for model in response.models {
+        let mut expected = model.clone();
+        expected.context_window = model.max_context_window.or(model.context_window);
+        assert_eq!(
+            crate::model_info::with_config_overrides(
+                model,
+                &ModelsManagerConfig {
+                    personality_enabled: true,
+                    ..Default::default()
+                }
+            ),
+            expected
+        );
+    }
 }

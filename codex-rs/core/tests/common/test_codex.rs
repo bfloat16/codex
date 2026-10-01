@@ -879,9 +879,9 @@ fn ensure_test_model_catalog(config: &mut Config) -> Result<()> {
     let mut model = bundled_models
         .models
         .iter()
-        .find(|candidate| candidate.slug == "gpt-5.2")
+        .find(|candidate| candidate.slug == "gpt-5.5")
         .cloned()
-        .expect("missing bundled model gpt-5.2");
+        .expect("missing bundled model gpt-5.5");
     model.slug = TEST_MODEL_WITH_EXPERIMENTAL_TOOLS.to_string();
     model.display_name = TEST_MODEL_WITH_EXPERIMENTAL_TOOLS.to_string();
     model.experimental_supported_tools = vec!["test_sync_tool".to_string()];
