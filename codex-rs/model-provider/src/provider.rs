@@ -596,6 +596,7 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            disable_tool_search: false,
         }
     }
 

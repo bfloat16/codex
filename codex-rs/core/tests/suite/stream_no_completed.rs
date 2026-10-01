@@ -69,6 +69,7 @@ async fn retries_on_early_close() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        disable_tool_search: false,
     };
 
     let TestCodex { codex, .. } = test_codex()

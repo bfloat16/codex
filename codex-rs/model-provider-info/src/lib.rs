@@ -155,6 +155,10 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the standalone web-search endpoint.
     #[serde(default)]
     pub supports_standalone_web_search: bool,
+    /// Disable the Responses API tool_search tool for this provider. Deferred
+    /// tools are exposed directly when tool search is disabled.
+    #[serde(default)]
+    pub disable_tool_search: bool,
 }
 
 /// AWS SigV4 auth configuration for a model provider.
@@ -425,6 +429,7 @@ impl ModelProviderInfo {
             requires_openai_auth: true,
             supports_websockets: true,
             supports_standalone_web_search: true,
+            disable_tool_search: false,
         }
     }
 
@@ -461,6 +466,7 @@ impl ModelProviderInfo {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            disable_tool_search: false,
         }
     }
 
@@ -554,8 +560,8 @@ pub fn built_in_model_providers(
 /// Merge configured providers into the built-in provider catalog.
 ///
 /// Configured providers extend the built-in set. Built-in providers are not
-/// generally overridable, but built-in Amazon Bedrock providers allow the user
-/// to customize their endpoint, authentication, headers, and AWS settings.
+/// generally overridable, but all built-in providers can disable tool search,
+/// and built-in Amazon Bedrock providers also allow endpoint and auth overrides.
 pub fn merge_configured_model_providers(
     mut model_providers: HashMap<String, ModelProviderInfo>,
     configured_model_providers: HashMap<String, ModelProviderInfo>,
@@ -570,10 +576,12 @@ pub fn merge_configured_model_providers(
             let aws_override = provider.aws.take();
             let http_headers_override = provider.http_headers.take();
             let compact_override = provider.compact.take();
+            let disable_tool_search = provider.disable_tool_search;
+            provider.disable_tool_search = false;
             if provider != ModelProviderInfo::default() {
                 return Err(format!(
                     "model_providers.{key} only supports changing \
-`base_url`, `auth`, `http_headers`, `compact`, `aws.profile`, `aws.region`, and `aws.auth_refresh`; \
+`base_url`, `auth`, `http_headers`, `compact`, `disable_tool_search`, `aws.profile`, `aws.region`, and `aws.auth_refresh`; \
 other non-default provider fields are not supported"
                 ));
             }
@@ -582,6 +590,7 @@ other non-default provider fields are not supported"
                 built_in_provider.base_url = base_url_override;
                 built_in_provider.auth = auth_override;
                 built_in_provider.compact = compact_override;
+                built_in_provider.disable_tool_search = disable_tool_search;
                 if let Some(aws_override) = aws_override {
                     built_in_provider.aws = Some(aws_override);
                 }
@@ -592,8 +601,10 @@ other non-default provider fields are not supported"
                         .extend(http_headers_override);
                 }
             }
+        } else if let Some(built_in_provider) = model_providers.get_mut(&key) {
+            built_in_provider.disable_tool_search = provider.disable_tool_search;
         } else {
-            model_providers.entry(key).or_insert(provider);
+            model_providers.insert(key, provider);
         }
     }
 
@@ -644,6 +655,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        disable_tool_search: false,
     }
 }
 

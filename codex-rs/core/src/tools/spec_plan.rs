@@ -627,7 +627,9 @@ fn hosted_model_tool_specs(
 }
 
 pub(crate) fn search_tool_enabled(turn_context: &TurnContext, model_info: &ModelInfo) -> bool {
-    model_info.supports_search_tool && namespace_tools_enabled(turn_context)
+    model_info.supports_search_tool
+        && namespace_tools_enabled(turn_context)
+        && !turn_context.config.model_provider.disable_tool_search
 }
 
 pub(crate) fn tool_suggest_enabled(turn_context: &TurnContext) -> bool {

@@ -202,6 +202,45 @@ async fn search_tool_enabled_by_default_adds_tool_search() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provider_can_disable_tool_search_without_hiding_tools() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let apps_server = AppsTestServer::mount(&server).await?;
+    let mock = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+
+    let mut builder = configured_builder(apps_server.chatgpt_base_url)
+        .with_config(|config| config.model_provider.disable_tool_search = true);
+    let test = builder.build_with_auto_env(&server).await?;
+    test.submit_turn_with_approval_and_permission_profile(
+        "list tools",
+        AskForApproval::Never,
+        PermissionProfile::Disabled,
+    )
+    .await?;
+
+    let tools = tool_names(&mock.single_request().body_json());
+    assert!(
+        !tools.iter().any(|name| name == TOOL_SEARCH_TOOL_NAME),
+        "disabled provider should not advertise tool_search: {tools:?}"
+    );
+    assert!(
+        tools.iter().any(|name| name.starts_with("mcp__")),
+        "tools should be directly available when search is disabled: {tools:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn small_app_tool_sets_are_deferred_by_default() -> Result<()> {
     skip_if_no_network!(Ok(()));
 

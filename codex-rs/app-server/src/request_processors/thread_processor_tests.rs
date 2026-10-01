@@ -611,6 +611,7 @@ mod thread_processor_behavior_tests {
             requires_openai_auth: false,
             supports_websockets: true,
             supports_standalone_web_search: false,
+            disable_tool_search: false,
         };
         let config_manager = ConfigManager::new(
             temp_dir.path().to_path_buf(),

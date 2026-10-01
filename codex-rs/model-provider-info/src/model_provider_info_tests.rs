@@ -31,6 +31,7 @@ base_url = "http://localhost:11434/v1"
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        disable_tool_search: false,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -67,6 +68,7 @@ query_params = { api-version = "2025-04-01-preview" }
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        disable_tool_search: false,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -107,10 +109,23 @@ supports_standalone_web_search = true
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: true,
+        disable_tool_search: false,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
     assert_eq!(expected_provider, provider);
+}
+
+#[test]
+fn test_disable_tool_search_is_provider_scoped_and_defaults_to_false() {
+    let disabled: ModelProviderInfo = toml::from_str(
+        "name = 'Proxy'\nbase_url = 'http://127.0.0.1:2345/v1'\ndisable_tool_search = true",
+    )
+    .unwrap();
+    let unchanged: ModelProviderInfo = toml::from_str("name = 'OpenAI'").unwrap();
+
+    assert!(disabled.disable_tool_search);
+    assert!(!unchanged.disable_tool_search);
 }
 
 #[test]
@@ -285,6 +300,7 @@ fn test_create_amazon_bedrock_provider() {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            disable_tool_search: false,
         }
     );
 }
@@ -578,10 +594,29 @@ fn test_merge_configured_model_providers_rejects_amazon_bedrock_non_default_fiel
             configured_model_providers,
         ),
         Err(
-            "model_providers.amazon-bedrock only supports changing `base_url`, `auth`, `http_headers`, `compact`, `aws.profile`, `aws.region`, and `aws.auth_refresh`; other non-default provider fields are not supported"
+            "model_providers.amazon-bedrock only supports changing `base_url`, `auth`, `http_headers`, `compact`, `disable_tool_search`, `aws.profile`, `aws.region`, and `aws.auth_refresh`; other non-default provider fields are not supported"
                 .to_string()
         )
     );
+}
+
+#[test]
+fn test_merge_configured_model_providers_disables_search_for_one_builtin() {
+    let configured = std::collections::HashMap::from([(
+        OPENAI_PROVIDER_ID.to_string(),
+        ModelProviderInfo {
+            disable_tool_search: true,
+            ..ModelProviderInfo::default()
+        },
+    )]);
+    let merged = merge_configured_model_providers(
+        built_in_model_providers(/*openai_base_url*/ None),
+        configured,
+    )
+    .unwrap();
+
+    assert!(merged[OPENAI_PROVIDER_ID].disable_tool_search);
+    assert!(!merged[AMAZON_BEDROCK_PROVIDER_ID].disable_tool_search);
 }
 
 #[test]

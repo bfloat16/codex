@@ -91,6 +91,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        disable_tool_search: false,
     };
 
     let codex_home = TempDir::new().expect("failed to create TempDir");
@@ -229,6 +230,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        disable_tool_search: false,
     };
 
     let codex_home = TempDir::new().expect("failed to create TempDir");
@@ -348,6 +350,7 @@ async fn responses_respects_model_info_overrides_from_config() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        disable_tool_search: false,
     };
 
     let codex_home = TempDir::new().expect("failed to create TempDir");

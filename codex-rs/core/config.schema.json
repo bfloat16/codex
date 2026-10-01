@@ -2249,6 +2249,11 @@
           "default": null,
           "description": "Optional compaction strategy override. When omitted, the provider name determines the default strategy."
         },
+        "disable_tool_search": {
+          "default": false,
+          "description": "Disable the Responses API tool_search tool for this provider. Deferred tools are exposed directly when tool search is disabled.",
+          "type": "boolean"
+        },
         "env_http_headers": {
           "additionalProperties": {
             "type": "string"
