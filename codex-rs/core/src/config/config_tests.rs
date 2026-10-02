@@ -11856,7 +11856,8 @@ fn multi_agent_v2_exposes_model_overrides_by_default() {
             .strip_prefix(hint_without_model_overrides.as_str())
             .expect("model-override guidance should extend the base usage hint");
         for required_fragment in [
-            "Full-history forks",
+            "API prices",
+            "explicitly specifies a subagent model",
             "`fork_turns`",
             "`model`",
             "`reasoning_effort`",

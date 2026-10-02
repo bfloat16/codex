@@ -14,10 +14,9 @@ use std::collections::BTreeMap;
 pub const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V1_NAMESPACE_DESCRIPTION: &str = "Tools for spawning and managing sub-agents.";
 
-const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.";
+const SPAWN_AGENT_MODEL_SELECTION_GUIDANCE: &str = "Choose an allowed model using the listed capabilities and API prices. Prefer the least expensive model that can reliably complete the delegated task. If the user explicitly specifies a subagent model, use that model instead of applying capability or price recommendations. Omit `model` to use the configured subagent default or inherit your current model.";
 const SPAWN_AGENT_TYPE_OVERRIDE_DESCRIPTION_V1: &str = "Agent type override for the new agent. Omit to inherit the parent agent type with a full-history fork; otherwise, `default` is used.";
-const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
-    "Model override for the new agent. Omit unless an explicit override is needed.";
+const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str = "Model for the new agent. Choose using the listed capabilities and API prices; an explicit user choice takes precedence over those recommendations. Omit to use the configured subagent default or inherit the parent model.";
 const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 
 #[derive(Debug, Clone)]
@@ -66,8 +65,8 @@ pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
     let available_models_description = (!options.hide_agent_type_model_reasoning).then(|| {
         spawn_agent_models_description(&options.available_models, options.multi_agent_version)
     });
-    let inherited_model_guidance =
-        (!options.hide_agent_type_model_reasoning).then_some(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE);
+    let model_selection_guidance =
+        (!options.hide_agent_type_model_reasoning).then_some(SPAWN_AGENT_MODEL_SELECTION_GUIDANCE);
     let return_value_description =
         "Returns the spawned agent id plus the user-facing nickname when available.";
     let mut properties = spawn_agent_common_properties_v1(&options.agent_type_description);
@@ -85,7 +84,7 @@ pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
             name: "spawn_agent".to_string(),
             description: spawn_agent_tool_description(
                 available_models_description.as_deref(),
-                inherited_model_guidance,
+                model_selection_guidance,
                 return_value_description,
                 options.usage_hint_text,
             ),
@@ -101,9 +100,9 @@ pub fn create_spawn_agent_tool_v2(options: SpawnAgentToolOptions) -> ToolSpec {
     let available_models_description = options.expose_spawn_agent_model_overrides.then(|| {
         spawn_agent_models_description(&options.available_models, options.multi_agent_version)
     });
-    let inherited_model_guidance = (options.expose_spawn_agent_model_overrides
+    let model_selection_guidance = (options.expose_spawn_agent_model_overrides
         && !options.hide_agent_type_model_reasoning)
-        .then_some(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE);
+        .then_some(SPAWN_AGENT_MODEL_SELECTION_GUIDANCE);
     let mut properties = spawn_agent_common_properties_v2(&options.agent_type_description);
     if !options.expose_agent_type {
         properties.remove("agent_type");
@@ -124,7 +123,7 @@ pub fn create_spawn_agent_tool_v2(options: SpawnAgentToolOptions) -> ToolSpec {
         name: "spawn_agent".to_string(),
         description: spawn_agent_tool_description_v2(
             available_models_description.as_deref(),
-            inherited_model_guidance,
+            model_selection_guidance,
             options.usage_hint_text,
         ),
         strict: false,
@@ -663,17 +662,17 @@ fn hide_spawn_agent_metadata_options(properties: &mut BTreeMap<String, JsonSchem
 
 fn spawn_agent_tool_description(
     available_models_description: Option<&str>,
-    inherited_model_guidance: Option<&str>,
+    model_selection_guidance: Option<&str>,
     return_value_description: &str,
     usage_hint_text: Option<String>,
 ) -> String {
     let agent_role_guidance = available_models_description.unwrap_or_default();
-    let inherited_model_guidance = inherited_model_guidance.unwrap_or_default();
+    let model_selection_guidance = model_selection_guidance.unwrap_or_default();
 
     let tool_description = format!(
         r#"
         {agent_role_guidance}
-        Spawn a sub-agent for a well-scoped task. {return_value_description} {inherited_model_guidance}"#
+        Spawn a sub-agent for a well-scoped task. {return_value_description} {model_selection_guidance}"#
     );
 
     if let Some(usage_hint_text) = usage_hint_text {
@@ -691,7 +690,7 @@ fn spawn_agent_tool_description(
     format!(
         r#"
         {tool_description}
-This spawn_agent tool provides you access to sub-agents that inherit your current model by default. Do not set the `model` field unless the user explicitly asks for a different model. You should follow the rules and guidelines below to use this tool.
+You should follow the rules and guidelines below to use this tool.
 
 Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.
 Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn.
@@ -730,11 +729,11 @@ Requests for depth, thoroughness, research, investigation, or detailed codebase 
 
 fn spawn_agent_tool_description_v2(
     available_models_description: Option<&str>,
-    inherited_model_guidance: Option<&str>,
+    model_selection_guidance: Option<&str>,
     usage_hint_text: Option<String>,
 ) -> String {
     let agent_role_guidance = available_models_description.unwrap_or_default();
-    let inherited_model_guidance = inherited_model_guidance.unwrap_or_default();
+    let model_selection_guidance = model_selection_guidance.unwrap_or_default();
 
     let tool_description = format!(
         r#"
@@ -742,12 +741,12 @@ fn spawn_agent_tool_description_v2(
         Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.
 You are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.
 The spawned agent will have the same tools as you and the ability to spawn its own subagents.
-{inherited_model_guidance}
+{model_selection_guidance}
 Only call this tool for a concrete, bounded subtask that can run independently alongside useful local work; otherwise continue locally.
 It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
 The new agent's canonical task name will be provided to it along with the message.
 
-Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context."#
+`fork_turns` defaults to `"none"`, so the child does not receive the parent's conversation history. Provide a self-contained `message` with the necessary context, constraints, and expected result. Use `"all"` or a positive integer string only when inherited history is needed."#
     );
 
     if let Some(usage_hint_text) = usage_hint_text {
@@ -823,7 +822,7 @@ fn spawn_agent_models_description(
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "Available model overrides (optional; inherited parent model is preferred):\n{model_descriptions}"
+        "Available subagent models (capability and API price; explicit user choice takes precedence):\n{model_descriptions}"
     )
 }
 

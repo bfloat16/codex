@@ -105,6 +105,7 @@ async fn handle_spawn_agent(
     if !args.fork_context {
         apply_spawn_agent_role(&session, &mut config, role_name).await?;
     }
+    validate_spawn_agent_model_family(&config, turn.as_ref())?;
     apply_spawn_agent_service_tier(&session, &mut config).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
 

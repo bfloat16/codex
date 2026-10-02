@@ -226,18 +226,18 @@ async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() ->
     );
     assert!(
         description
-            .contains("Available model overrides (optional; inherited parent model is preferred):"),
-        "expected model choices to be framed as overrides in spawn_agent description: {description:?}"
+            .contains("Available subagent models (capability and API price; explicit user choice takes precedence):"),
+        "expected capability and price guidance in spawn_agent description: {description:?}"
     );
     assert!(
         description.contains(
-            "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed."
+            "Prefer the least expensive model that can reliably complete the delegated task."
         ),
-        "expected inherited-model guidance in spawn_agent description: {description:?}"
+        "expected task-appropriate model selection guidance: {description:?}"
     );
     assert!(
         description.contains(
-            "Do not set the `model` field unless the user explicitly asks for a different model."
+            "If the user explicitly specifies a subagent model, use that model instead of applying capability or price recommendations."
         ),
         "expected model override usage guidance in spawn_agent description: {description:?}"
     );

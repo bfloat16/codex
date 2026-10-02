@@ -79,10 +79,10 @@ fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
     assert!(description.contains("Spawns an agent to work on the specified task."));
     assert!(description.contains("The spawned agent will have the same tools as you"));
     assert!(!description.contains("max_concurrent_threads_per_session"));
-    assert!(description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
+    assert!(description.contains(SPAWN_AGENT_MODEL_SELECTION_GUIDANCE));
     assert!(
         description
-            .contains("Available model overrides (optional; inherited parent model is preferred):")
+            .contains("Available subagent models (capability and API price; explicit user choice takes precedence):")
     );
     assert!(description.contains(
         "- `visible-model`: visible description Reasoning efforts: medium (default). Service tiers: priority."
@@ -189,6 +189,9 @@ fn spawn_agent_tool_caps_visible_model_summaries() {
             model_preset("fourth", /*show_in_picker*/ true),
             model_preset("fifth", /*show_in_picker*/ true),
             model_preset("sixth", /*show_in_picker*/ true),
+            model_preset("seventh", /*show_in_picker*/ true),
+            model_preset("eighth", /*show_in_picker*/ true),
+            model_preset("ninth", /*show_in_picker*/ true),
         ],
         agent_type_description: "role help".to_string(),
         expose_agent_type: true,
@@ -202,13 +205,15 @@ fn spawn_agent_tool_caps_visible_model_summaries() {
         panic!("spawn_agent should be a function tool");
     };
 
-    for model in ["first", "second", "third", "fourth", "fifth"] {
+    for model in [
+        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
+    ] {
         assert!(
             description.contains(&format!("`{model}-model`")),
             "expected {model} model summary in spawn_agent description: {description:?}"
         );
     }
-    assert!(!description.contains("`sixth-model`"));
+    assert!(!description.contains("`ninth-model`"));
 }
 
 #[test]
@@ -226,7 +231,7 @@ fn spawn_agent_tool_caps_reasoning_effort_value_length() {
     assert_eq!(
         spawn_agent_models_description(&[model], MultiAgentVersion::V2),
         format!(
-            "Available model overrides (optional; inherited parent model is preferred):\n- `visible-model`: visible description Reasoning efforts: {} (default). Service tiers: priority.",
+            "Available subagent models (capability and API price; explicit user choice takes precedence):\n- `visible-model`: visible description Reasoning efforts: {} (default). Service tiers: priority.",
             "é".repeat(MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION)
         )
     );
@@ -261,8 +266,8 @@ fn spawn_agent_tool_keeps_model_controls_when_spawn_metadata_is_hidden() {
     assert!(properties.contains_key("model"));
     assert!(properties.contains_key("reasoning_effort"));
     assert!(!properties.contains_key("service_tier"));
-    assert!(!description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
-    assert!(description.contains("Available model overrides"));
+    assert!(!description.contains(SPAWN_AGENT_MODEL_SELECTION_GUIDANCE));
+    assert!(description.contains("Available subagent models"));
 }
 
 #[test]
@@ -293,8 +298,8 @@ fn spawn_agent_tool_hides_model_controls_without_override_exposure() {
     for property in ["agent_type", "model", "reasoning_effort", "service_tier"] {
         assert!(!properties.contains_key(property));
     }
-    assert!(!description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
-    assert!(!description.contains("Available model overrides"));
+    assert!(!description.contains(SPAWN_AGENT_MODEL_SELECTION_GUIDANCE));
+    assert!(!description.contains("Available subagent models"));
 }
 
 #[test]

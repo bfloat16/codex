@@ -19,6 +19,7 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
+use codex_protocol::openai_models::model_family;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
@@ -30,7 +31,40 @@ use serde_json::Value as JsonValue;
 pub(crate) const MIN_WAIT_TIMEOUT_MS: i64 = DEFAULT_MULTI_AGENT_V2_MIN_WAIT_TIMEOUT_MS;
 pub(crate) const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
 pub(crate) const MAX_WAIT_TIMEOUT_MS: i64 = HARD_MAX_MULTI_AGENT_V2_TIMEOUT_MS;
-pub(crate) const MAX_SPAWN_AGENT_MODEL_OVERRIDES: usize = 5;
+pub(crate) const MAX_SPAWN_AGENT_MODEL_OVERRIDES: usize = 8;
+
+pub(crate) fn available_spawn_agent_models(
+    models: &[ModelPreset],
+    parent_model: &str,
+) -> Vec<ModelPreset> {
+    let parent_family = model_family(parent_model);
+    models
+        .iter()
+        .filter(|model| model.model != "codex-auto-review")
+        .filter(|model| model_family(&model.model) == parent_family)
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn validate_spawn_agent_model_family(
+    config: &Config,
+    turn: &TurnContext,
+) -> Result<(), FunctionCallError> {
+    let parent_model = &turn.model_info().slug;
+    if config.model.as_deref() == Some("codex-auto-review") {
+        return Err(FunctionCallError::RespondToModel(
+            "Model `codex-auto-review` is reserved for automatic approval reviews and cannot be used for spawn_agent".to_string(),
+        ));
+    }
+    if let Some(model) = config.model.as_deref()
+        && model_family(model) != model_family(parent_model)
+    {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "Model `{model}` must use the same model family as the parent model `{parent_model}`"
+        )));
+    }
+    Ok(())
+}
 
 pub(crate) fn model_supports_multi_agent_backend(
     model: &ModelPreset,
@@ -284,6 +318,8 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
             .models_manager
             .list_models(RefreshStrategy::Offline, config.http_client_factory())
             .await;
+        let available_models =
+            available_spawn_agent_models(&available_models, &turn.model_info().slug);
         let selected_model_name = find_spawn_agent_model_name(
             &available_models,
             requested_model,

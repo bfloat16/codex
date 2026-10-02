@@ -141,6 +141,7 @@ async fn handle_spawn_agent(
                 .clone_from(&turn.developer_instructions);
         }
     }
+    validate_spawn_agent_model_family(&config, turn.as_ref())?;
     apply_spawn_agent_service_tier(&session, &mut config).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
 
