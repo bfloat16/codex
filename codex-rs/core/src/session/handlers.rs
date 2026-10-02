@@ -85,15 +85,10 @@ pub async fn inter_agent_communication(
     communication: InterAgentCommunication,
     start_options: codex_protocol::turn_input::TurnStartOptions,
 ) {
-    let trigger_turn = communication.trigger_turn;
-    sess.input_queue
-        .enqueue_mailbox_communication(communication, start_options)
+    sess.services
+        .agent_control
+        .receive_inter_agent_communication(sess, sub_id, communication, start_options)
         .await;
-    crate::agent_communication::emit_agent_communication_receive(&sub_id);
-    if trigger_turn || sess.has_outstanding_durable_sleep() {
-        sess.maybe_start_turn_for_pending_work_with_sub_id(sub_id)
-            .await;
-    }
 }
 
 pub async fn run_user_shell_command(

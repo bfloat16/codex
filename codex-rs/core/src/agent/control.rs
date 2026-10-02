@@ -67,10 +67,12 @@ use tokio::sync::watch;
 use tracing::warn;
 use uuid::Uuid;
 
+use self::completion::PendingV2Task;
 pub(crate) use self::execution::AgentExecutionGuard;
 use self::execution::AgentExecutionLimiter;
 use self::residency::V2Residency;
 
+mod completion;
 mod execution;
 mod legacy;
 mod residency;
@@ -131,6 +133,8 @@ pub(crate) struct AgentControl {
     state: Arc<AgentRegistry>,
     v2_residency: Arc<V2Residency>,
     agent_execution_limiter: Arc<AgentExecutionLimiter>,
+    /// Child work remains pending until its final result is queued for the parent.
+    v2_pending_tasks: Arc<tokio::sync::Mutex<HashMap<ThreadId, PendingV2Task>>>,
     /// Session-scoped state shared by the root thread and every cloned sub-agent control handle.
     rollout_budget: Arc<RolloutBudget>,
     /// The user-selected root routing tier, shared by the entire agent tree.
@@ -161,6 +165,7 @@ impl AgentControl {
             state: Arc::default(),
             v2_residency: Arc::default(),
             agent_execution_limiter: Arc::default(),
+            v2_pending_tasks: Arc::default(),
             rollout_budget: Arc::default(),
             root_service_tier: Arc::new(ArcSwapOption::from(None)),
         };
@@ -288,24 +293,6 @@ impl AgentControl {
                 .await;
         }
         Ok(())
-    }
-
-    async fn send_inter_agent_communication_after_capacity_check(
-        &self,
-        agent_id: ThreadId,
-        state: &Arc<ThreadManagerState>,
-        communication: InterAgentCommunication,
-        context: AgentCommunicationContext,
-        start_options: TurnStartOptions,
-    ) -> CodexResult<String> {
-        self.submit_inter_agent_communication(
-            agent_id,
-            state,
-            communication,
-            context,
-            start_options,
-        )
-        .await
     }
 
     async fn submit_inter_agent_communication(

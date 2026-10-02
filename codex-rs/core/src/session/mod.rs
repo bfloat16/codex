@@ -14,8 +14,6 @@ use crate::agent::AgentControl;
 use crate::agent::AgentStatus;
 use crate::agent::agent_status_from_event;
 use crate::agent::status::is_final;
-use crate::agent_communication::AgentCommunicationContext;
-use crate::agent_communication::AgentCommunicationKind;
 use crate::attestation::AttestationProvider;
 use crate::compact;
 use crate::compact::CompactedHistoryMetadata;
@@ -256,7 +254,6 @@ use self::code_mode_warning::unsupported_code_mode_warning;
 #[cfg(test)]
 use self::handlers::submission_dispatch_span;
 use self::handlers::submission_loop;
-pub(crate) use self::input_queue::InputQueueActivity;
 pub(crate) use self::input_queue::TurnInput;
 pub(crate) use self::input_queue::TurnInputQueue;
 use self::review::spawn_review_thread;
@@ -2248,8 +2245,6 @@ impl Session {
                 .track_guardian_session_event(self.thread_id, &event);
         }
         self.send_event_raw(event).await;
-        self.maybe_notify_parent_of_terminal_turn(turn_context, &legacy_source)
-            .await;
         self.maybe_mirror_event_text_to_realtime(&legacy_source)
             .await;
         self.maybe_clear_realtime_handoff_for_event(&legacy_source)
@@ -2269,7 +2264,7 @@ impl Session {
     }
 
     /// Forwards terminal turn events from spawned MultiAgentV2 children to their direct parent.
-    async fn maybe_notify_parent_of_terminal_turn(
+    pub(crate) async fn maybe_notify_parent_of_terminal_turn(
         &self,
         turn_context: &TurnContext,
         msg: &EventMsg,
@@ -2304,7 +2299,7 @@ impl Session {
                 status
             }
         };
-        if !is_final(&status) {
+        if !is_final(&status) && status != AgentStatus::Interrupted {
             return;
         }
 
@@ -2400,16 +2395,19 @@ impl Session {
             message,
             /*trigger_turn*/ false,
         );
-        let context =
-            AgentCommunicationContext::new(AgentCommunicationKind::Result, self.thread_id);
         if let Err(err) = self
             .services
             .agent_control
-            .send_inter_agent_communication(
+            .deliver_v2_completion(
+                self.thread_id,
                 parent_thread_id,
+                &status,
                 communication,
-                context,
-                TurnStartOptions::default(),
+                (*turn_context.config).clone(),
+                TurnStartOptions {
+                    root_turn_id: turn_context.turn_metadata_state.root_turn_id(),
+                    ..Default::default()
+                },
             )
             .await
         {

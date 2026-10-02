@@ -276,18 +276,6 @@ pub fn create_wait_agent_tool_v1(options: WaitAgentTimeoutOptions) -> ToolSpec {
     })
 }
 
-pub fn create_wait_agent_tool_v2(options: WaitAgentTimeoutOptions) -> ToolSpec {
-    ToolSpec::Function(ResponsesApiTool {
-        name: "wait_agent".to_string(),
-        description: "Wait for a mailbox update from any live agent, including queued messages and final-status notifications. The wait also ends early when new user input is steered into the active turn. Does not return the content; returns either a summary of which agents have updates (if any), an interruption summary for steered input, or a timeout summary if no activity arrives before the deadline."
-            .to_string(),
-        strict: false,
-        defer_loading: None,
-        parameters: wait_agent_tool_parameters_v2(options),
-        output_schema: Some(wait_output_schema_v2()),
-    })
-}
-
 pub fn create_list_agents_tool() -> ToolSpec {
     let properties = BTreeMap::from([(
         "path_prefix".to_string(),
@@ -501,24 +489,6 @@ fn wait_output_schema_v1() -> Value {
             }
         },
         "required": ["status", "timed_out"],
-        "additionalProperties": false
-    })
-}
-
-fn wait_output_schema_v2() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "message": {
-                "type": "string",
-                "description": "Brief wait summary without the agent's final content, including any timeout adjustment."
-            },
-            "timed_out": {
-                "type": "boolean",
-                "description": "Whether the wait call returned because no mailbox update arrived before the timeout."
-            }
-        },
-        "required": ["message", "timed_out"],
         "additionalProperties": false
     })
 }
@@ -742,7 +712,7 @@ fn spawn_agent_tool_description_v2(
 You are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.
 The spawned agent will have the same tools as you and the ability to spawn its own subagents.
 {model_selection_guidance}
-Only call this tool for a concrete, bounded subtask that can run independently alongside useful local work; otherwise continue locally.
+Only call this tool for a concrete, bounded, self-contained subtask. After dispatching your batch of subagent tasks, you are strongly encouraged to end your current turn immediately. Continue once all outstanding child tasks have ended and the runtime automatically starts a new turn with their results.
 It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
 The new agent's canonical task name will be provided to it along with the message.
 
@@ -852,18 +822,6 @@ fn wait_agent_tool_parameters_v1(options: WaitAgentTimeoutOptions) -> JsonSchema
         Some(vec!["targets".to_string()]),
         Some(false.into()),
     )
-}
-
-fn wait_agent_tool_parameters_v2(options: WaitAgentTimeoutOptions) -> JsonSchema {
-    let properties = BTreeMap::from([(
-        "timeout_ms".to_string(),
-        JsonSchema::number(Some(format!(
-            "Timeout in milliseconds. Defaults to {}, min {}, max {}.",
-            options.default_timeout_ms, options.min_timeout_ms, options.max_timeout_ms,
-        ))),
-    )]);
-
-    JsonSchema::object(properties, /*required*/ None, Some(false.into()))
 }
 
 #[cfg(test)]

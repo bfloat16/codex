@@ -1282,6 +1282,7 @@ pub struct MultiAgentV2Config {
     pub tool_namespace: Option<String>,
     pub hide_spawn_agent_metadata: bool,
     pub expose_spawn_agent_model_overrides: bool,
+    /// Legacy setting retained for config compatibility; v2 resumes automatically.
     pub wait_agent_enabled: bool,
     pub non_code_mode_only: bool,
 }

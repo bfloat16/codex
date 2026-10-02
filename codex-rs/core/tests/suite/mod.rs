@@ -171,6 +171,8 @@ mod stream_error_allows_next_turn;
 mod stream_no_completed;
 mod subagent_notifications;
 mod subagent_service_tier;
+#[path = "subagent_wakeup_tests.rs"]
+mod subagent_wakeup;
 mod token_budget;
 mod token_usage_rollout;
 mod tool_harness;

@@ -48,9 +48,11 @@ Payload:
 You may also see them addressed as to=/root/..., which indicates your identity is /root/...
 "#;
 const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "Choose an allowed `model` for each subagent using its described capabilities and API prices, preferring the least expensive model that can reliably complete the delegated task. If the user explicitly specifies a subagent model, follow that choice instead of capability or price recommendations. Omit `model` to use the configured subagent default or inherit the parent model; omit `reasoning_effort` to use the default or inherited effort. Selection must stay within the parent's model family. `fork_turns` defaults to `\"none\"`; supply a self-contained `message` with the necessary context and constraints. Explicit history forks (`\"all\"` or a positive integer string) also allow model overrides.";
-const DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT: &str =
-    "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.";
-const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = r#"Note that collaboration tools cannot be called from inside `functions.exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, such as `to=functions.collaboration.spawn_agent`, since they are intentionally absent from the `functions.exec` `tools.*` namespace. Available tools in `functions.exec` are explicitly described with a `tools` namespace in the developer message.
+const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = r#"After dispatching a batch of subagent tasks, you are strongly encouraged to end your current turn immediately with a brief final response and wait for all of those subagents to finish before continuing. This yields the current turn; it does not mean the overall user task is complete. Their results are queued automatically, and once all outstanding child tasks have ended, the runtime starts a new turn for you with their results. Failed and interrupted child tasks also count as ended. Do not poll or use a waiting tool to await subagents.
+
+Reuse an existing agent with `followup_task` for additional work; it starts a turn when the agent is idle. `send_message` does not start a turn. Use `interrupt_agent` to stop unwanted running work; the agent remains available for follow-up tasks.
+
+Note that collaboration tools cannot be called from inside `functions.exec`. Call `spawn_agent`, `send_message`, `followup_task`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, such as `to=functions.collaboration.spawn_agent`, since they are intentionally absent from the `functions.exec` `tools.*` namespace. Available tools in `functions.exec` are explicitly described with a `tools` namespace in the developer message.
 
 All agents share the same directory. In detail:
 - All agents have access to the same container and filesystem as you.
@@ -118,13 +120,8 @@ pub(crate) fn resolve_usage_hints(
         };
 
         let max_concurrency = config.max_concurrent_threads_per_session;
-        let wait_agent_guidance = if config.wait_agent_enabled {
-            format!("{DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT}\n\n")
-        } else {
-            String::new()
-        };
         let mut text = format!(
-            "{base}\n{DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT}\n{wait_agent_guidance}There are {max_concurrency} available concurrency slots, meaning that up to {max_concurrency} agents can be active at once, including you."
+            "{base}\n{DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT}\nThere are {max_concurrency} available concurrency slots, meaning that up to {max_concurrency} agents can be active at once, including you."
         );
         if config.expose_spawn_agent_model_overrides {
             text.push_str("\n\n");

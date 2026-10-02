@@ -2771,7 +2771,6 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         "spawn_agent",
         "send_message",
         "followup_task",
-        "wait_agent",
         "interrupt_agent",
         "list_agents",
         "send_input",
@@ -2783,7 +2782,6 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         "spawn_agent",
         "send_message",
         "followup_task",
-        "wait_agent",
         "interrupt_agent",
         "list_agents",
     ] {
@@ -2880,31 +2878,6 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
 }
 
 #[tokio::test]
-async fn multi_agent_v2_can_disable_wait_agent() {
-    let plan = probe(|turn| {
-        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
-        update_config(turn, |config| {
-            config.multi_agent_v2.wait_agent_enabled = false;
-        });
-    })
-    .await;
-
-    assert_eq!(
-        plan.namespace_function_names(MULTI_AGENT_V2_NAMESPACE),
-        &[
-            "followup_task".to_string(),
-            "interrupt_agent".to_string(),
-            "list_agents".to_string(),
-            "send_message".to_string(),
-            "spawn_agent".to_string(),
-        ]
-    );
-    plan.assert_visible_lacks(&["clock"]);
-    plan.assert_registered_lacks(&["collaboration.wait_agent", "clock.sleep"]);
-    assert!(plan.can_manage_children);
-}
-
-#[tokio::test]
 async fn tool_mode_selector_overrides_feature_flags() {
     let direct = probe(|turn| {
         set_features(turn, &[Feature::CodeMode, Feature::CodeModeOnly]);
@@ -2995,7 +2968,6 @@ async fn multi_agent_v2_can_use_configured_tool_namespace() {
         "spawn_agent",
         "send_message",
         "followup_task",
-        "wait_agent",
         "interrupt_agent",
         "list_agents",
     ] {
@@ -3135,7 +3107,6 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
         "spawn_agent",
         "send_message",
         "followup_task",
-        "wait_agent",
         "interrupt_agent",
         "list_agents",
     ] {

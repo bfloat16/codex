@@ -446,6 +446,11 @@ impl Session {
         sub_id: String,
     ) {
         if !self.input_queue.has_pending_mailbox_items().await
+            || self
+                .services
+                .agent_control
+                .has_pending_v2_children(self.thread_id)
+                .await
             || (!self.input_queue.has_trigger_turn_mailbox_items().await
                 && !self.has_outstanding_durable_sleep())
         {
@@ -839,7 +844,7 @@ impl Session {
                 time_to_first_token_ms,
             })
         };
-        self.send_event(turn_context.as_ref(), event).await;
+        self.send_event(turn_context.as_ref(), event.clone()).await;
         self.services
             .guardian_rejection_circuit_breaker
             .lock()
@@ -867,6 +872,8 @@ impl Session {
             warn!("failed to flush rollout after emitting terminal turn event: {err}");
         }
         if cleared_active_turn {
+            self.maybe_notify_parent_of_terminal_turn(turn_context.as_ref(), &event)
+                .await;
             self.maybe_start_turn_for_pending_work().await;
         }
     }
@@ -1000,7 +1007,8 @@ impl Session {
             completed_at,
             duration_ms,
         });
-        self.send_event(task.turn_context.as_ref(), event).await;
+        self.send_event(task.turn_context.as_ref(), event.clone())
+            .await;
         self.services
             .guardian_rejection_circuit_breaker
             .lock()
@@ -1011,6 +1019,8 @@ impl Session {
         if let Err(err) = self.flush_rollout().await {
             warn!("failed to flush rollout after emitting terminal turn event: {err}");
         }
+        self.maybe_notify_parent_of_terminal_turn(task.turn_context.as_ref(), &event)
+            .await;
     }
 }
 

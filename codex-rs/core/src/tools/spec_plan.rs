@@ -50,7 +50,6 @@ use crate::tools::handlers::multi_agents_v2::InterruptAgentHandler;
 use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHandlerV2;
 use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
-use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::tool_search_spec::ToolSearchSourceListing;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
@@ -688,15 +687,10 @@ fn required_child_management_tool_names(
             ],
         ),
     };
-    let mut tools = names
+    names
         .iter()
         .map(|name| ToolName::new(namespace.map(str::to_owned), (*name).to_owned()))
-        .collect::<Vec<_>>();
-    if multi_agent_v2_enabled(turn_context) && turn_context.config.multi_agent_v2.wait_agent_enabled
-    {
-        tools.push(ToolName::new(namespace.map(str::to_owned), "wait_agent"));
-    }
-    tools
+        .collect()
 }
 
 fn image_generation_available(turn_context: &TurnContext, model_info: &ModelInfo) -> bool {
@@ -1348,15 +1342,6 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 multi_agent_v2_handler(FollowupTaskHandlerV2, tool_namespace),
                 exposure,
             );
-            if turn_context.config.multi_agent_v2.wait_agent_enabled {
-                registry.register_trusted_with_exposure(
-                    multi_agent_v2_handler(
-                        WaitAgentHandlerV2::new(context.wait_agent_timeouts),
-                        tool_namespace,
-                    ),
-                    exposure,
-                );
-            }
             registry.register_trusted_with_exposure(
                 multi_agent_v2_handler(InterruptAgentHandler, tool_namespace),
                 exposure,
