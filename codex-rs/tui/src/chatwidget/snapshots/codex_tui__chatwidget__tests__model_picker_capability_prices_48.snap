@@ -1,0 +1,48 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: popup
+---
+  Select Model and Effort
+  Choose a model. Its family locks after this
+
+› 1. gpt-6.1-sol (current)  Capability rank
+                            2/7: the true Sol-
+                            tier GPT-6 model;
+                            strong coding and
+                            review, above GPT-
+                            5.6 Sol and GPT-6
+                            Sol. API prices
+                            (USD/1M tokens):
+                            input $2; cached
+                            input $0.10; cache
+                            write $2.50;
+                            output $10.
+  2. gpt-6-sol              Capability rank
+                            4/7: Terra-tier in
+                            perceived scale
+                            and capability
+                            despite the Sol
+                            name; below GPT-
+                            5.6 Sol, above
+                            GPT-5.6 Terra. API
+                            prices (USD/1M
+                            tokens): input $2;
+                            cached input
+                            $0.20; cache write
+                            $2.50; output $10.
+  3. gpt-6-luna             Capability rank
+                            7/7: least capable
+                            in this ranking,
+                            lowest cost;
+                            suitable for
+                            simple, tightly
+                            bounded coding and
+                            extraction. API
+                            prices (USD/1M
+                            tokens): input
+                            $0.10; cached
+                            input $0.01; cache
+                            write $0.125;
+                            output $0.50.
+
+  Press enter to confirm or esc to go back

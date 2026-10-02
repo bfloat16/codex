@@ -5,7 +5,12 @@ expression: popup
   Select Model and Effort
   Choose a model in the same family as this thread's initial model.
 
-›    gpt-5.5 (disabled)  Legacy coding model. (disabled: Unavailable because
-                         this thread started with `deepseek-flash`.)
+›    gpt-5.5 (disabled)  Previous-generation legacy model, excluded from the
+                         recommended ranking. Not recommended: costly and less
+                         effective in intensive coding experience. Use when
+                         explicitly requested. API prices (USD/1M tokens):
+                         input $5; cached input $0.50; cache write not listed;
+                         output $30. (disabled: Unavailable because this
+                         thread started with `deepseek-flash`.)
 
   Press enter to confirm or esc to go back

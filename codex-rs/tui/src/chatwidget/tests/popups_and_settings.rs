@@ -3624,6 +3624,35 @@ async fn model_picker_hides_show_in_picker_false_models_from_cache() {
     );
 }
 
+#[tokio::test]
+async fn model_picker_capability_prices_wide_snapshot() {
+    assert_model_picker_capability_prices_snapshot(/*width*/ 80).await;
+}
+
+#[tokio::test]
+async fn model_picker_capability_prices_narrow_snapshot() {
+    assert_model_picker_capability_prices_snapshot(/*width*/ 48).await;
+}
+
+async fn assert_model_picker_capability_prices_snapshot(width: u16) {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-6.1-sol")).await;
+    let presets = codex_models_manager::bundled_models_response()
+        .expect("bundled model catalog")
+        .models
+        .into_iter()
+        .filter(|model| {
+            matches!(
+                model.slug.as_str(),
+                "gpt-6.1-sol" | "gpt-6-sol" | "gpt-6-luna"
+            )
+        })
+        .map(ModelPreset::from)
+        .collect();
+    chat.open_model_popup_with_presets(presets);
+    let popup = render_bottom_popup(&chat, width);
+    assert_chatwidget_snapshot!(format!("model_picker_capability_prices_{width}"), popup);
+}
+
 /// Open-weight preset for the model-family lock tests. It is built locally so the tests do not
 /// depend on the bundled catalog shipping a specific open-weight model.
 fn open_weight_model_preset() -> ModelPreset {
