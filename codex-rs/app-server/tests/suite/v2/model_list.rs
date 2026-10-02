@@ -1,10 +1,7 @@
 use std::time::Duration;
 
-use anyhow::Error;
 use anyhow::Result;
-use app_test_support::ChatGptAuthFixture;
 use app_test_support::TestAppServer;
-use app_test_support::write_chatgpt_auth;
 use app_test_support::write_model_catalog;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCError;
@@ -15,17 +12,10 @@ use codex_app_server_protocol::ModelServiceTier;
 use codex_app_server_protocol::ModelUpgradeInfo;
 use codex_app_server_protocol::ReasoningEffortOption;
 use codex_app_server_protocol::RequestId;
-use codex_config::types::AuthCredentialsStoreMode;
-use codex_protocol::openai_models::MODEL_SPECIALTY_CYBER;
-use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
-use codex_protocol::openai_models::ModelsResponse;
-use core_test_support::responses::mount_models_once;
 use pretty_assertions::assert_eq;
-use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
-use wiremock::MockServer;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
@@ -150,133 +140,6 @@ async fn list_models_includes_hidden_models() -> Result<()> {
 
     assert!(items.iter().any(|item| item.hidden));
     assert!(next_cursor.is_none());
-    Ok(())
-}
-
-#[tokio::test]
-async fn list_models_uses_chatgpt_remote_catalog_as_source_of_truth() -> Result<()> {
-    let server = MockServer::start().await;
-    let remote_models = [json!("2030-01-01T00:00:00Z"), serde_json::Value::Null]
-        .into_iter()
-        .enumerate()
-        .map(|(priority, retirement_at)| {
-            serde_json::from_value::<ModelInfo>(json!({
-                "slug": format!("chatgpt-remote-only-{priority}"),
-                "display_name": "ChatGPT Remote Only",
-                "description": "Remote-only model for app-server model/list coverage",
-                "model_specialty": MODEL_SPECIALTY_CYBER,
-                "default_reasoning_level": "max",
-                "supported_reasoning_levels": [
-                    {"effort": "max", "description": "Maximum"},
-                    {"effort": "low", "description": "Low"},
-                    {"effort": "focused", "description": "Focused"}
-                ],
-                "shell_type": "shell_command",
-                "visibility": "list",
-                "minimal_client_version": [0, 1, 0],
-                "supported_in_api": true,
-                "priority": priority,
-                "upgrade": {
-                    "model": "replacement-model",
-                    "migration_markdown": "Use the replacement model.",
-                    "retirement_at": retirement_at,
-                },
-                "support_verbosity": false,
-                "default_verbosity": null,
-                "apply_patch_tool_type": null,
-                "truncation_policy": {"mode": "bytes", "limit": 10_000},
-                "supports_image_detail_original": false,
-                "multi_agent_version": "v2",
-                "context_window": 272_000,
-                "max_context_window": 272_000,
-                "experimental_supported_tools": [],
-            }))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: remote_models.clone(),
-        },
-    )
-    .await;
-
-    let codex_home = TempDir::new()?;
-    let server_uri = server.uri();
-    std::fs::write(
-        codex_home.path().join("config.toml"),
-        format!(
-            r#"
-model = "mock-model"
-approval_policy = "never"
-sandbox_mode = "read-only"
-openai_base_url = "{server_uri}/v1"
-"#
-        ),
-    )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-access-token").plan_type("pro"),
-        AuthCredentialsStoreMode::File,
-    )?;
-
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized()
-        .await?;
-    let request_id = mcp
-        .send_list_models_request(ModelListParams {
-            limit: Some(100),
-            cursor: None,
-            include_hidden: None,
-        })
-        .await?;
-    let response = mcp
-        .read_stream_until_response_message(RequestId::Integer(request_id))
-        .await?;
-    assert_eq!(
-        response.result["data"][0]["upgradeInfo"]["retirementAt"],
-        json!(1_893_456_000)
-    );
-    assert_eq!(
-        response.result["data"][1]["upgradeInfo"]["retirementAt"],
-        serde_json::Value::Null
-    );
-    let ModelListResponse {
-        data: items,
-        next_cursor,
-    } = serde_json::from_value(response.result)?;
-    let mut expected_presets: Vec<ModelPreset> =
-        remote_models.into_iter().map(Into::into).collect();
-    ModelPreset::mark_default_by_picker_visibility(&mut expected_presets);
-    let mut expected_items = expected_presets
-        .iter()
-        .map(model_from_preset)
-        .collect::<Vec<_>>();
-    expected_items[0].supported_reasoning_efforts = vec![
-        ReasoningEffortOption {
-            reasoning_effort: "max".parse().map_err(Error::msg)?,
-            description: "Maximum".to_string(),
-        },
-        ReasoningEffortOption {
-            reasoning_effort: "low".parse().map_err(Error::msg)?,
-            description: "Low".to_string(),
-        },
-        ReasoningEffortOption {
-            reasoning_effort: "focused".parse().map_err(Error::msg)?,
-            description: "Focused".to_string(),
-        },
-    ];
-
-    assert_eq!(items, expected_items);
-    assert!(next_cursor.is_none());
-    assert_eq!(
-        models_mock.requests().len(),
-        1,
-        "expected a single /models request"
-    );
     Ok(())
 }
 

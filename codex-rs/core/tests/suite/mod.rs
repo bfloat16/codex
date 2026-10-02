@@ -89,7 +89,6 @@ mod hooks_executor;
 #[cfg(not(target_os = "windows"))]
 mod hooks_mcp;
 mod image_rollout;
-mod injected_models_cache;
 #[cfg(not(target_os = "windows"))]
 mod interrupt_hooks;
 mod items;
@@ -112,8 +111,6 @@ mod model_overrides;
 mod model_runtime_selectors;
 mod model_switching;
 mod model_visible_layout;
-mod models_cache_ttl;
-mod models_etag_responses;
 mod multi_agent_mode;
 mod multi_agent_resume;
 #[cfg(unix)]
@@ -135,7 +132,6 @@ mod realtime_initial_items;
 mod realtime_sideband_endpoint;
 mod reasoning_effort_override;
 mod remote_env;
-mod remote_models;
 mod request_compression;
 #[cfg(not(target_os = "windows"))]
 mod request_permissions;

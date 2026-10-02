@@ -120,7 +120,6 @@ pub mod in_process;
 mod mcp_refresh;
 mod message_processor;
 mod models;
-mod models_refresh_worker;
 mod notification_media;
 mod otel_reloader;
 mod outgoing_message;

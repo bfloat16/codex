@@ -2705,13 +2705,7 @@ async fn try_run_sampling_request(
                 sess.record_rate_limits_info(snapshot).await;
                 should_emit_token_count = true;
             }
-            ResponseEvent::ModelsEtag(etag) => {
-                // Update internal state with latest models etag
-                sess.services
-                    .models_manager
-                    .refresh_if_new_etag(etag, turn_context.config.http_client_factory())
-                    .await;
-            }
+            ResponseEvent::ModelsEtag(_) => {}
             ResponseEvent::Completed {
                 response_id,
                 token_usage,

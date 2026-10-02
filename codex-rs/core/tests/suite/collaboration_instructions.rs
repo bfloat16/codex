@@ -1,8 +1,6 @@
 use anyhow::Result;
 use codex_core::TurnInputRequest;
-use codex_features::Feature;
 use codex_history::RolloutItem;
-use codex_login::CodexAuth;
 use codex_models_manager::model_info::model_info_from_slug;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -18,11 +16,8 @@ use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_models_once_with_etag;
-use core_test_support::responses::mount_response_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
-use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::local_selections;
@@ -32,7 +27,6 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
 use test_case::test_case;
-use wiremock::MockServer;
 
 fn collab_mode_with_mode_and_instructions(
     mode: ModeKind,
@@ -232,117 +226,6 @@ async fn catalog_collaboration_messages_track_mode_changes() -> Result<()> {
         count_messages_containing(&second_dev_texts, "legacy plan instructions"),
         0
     );
-
-    Ok(())
-}
-
-#[test_case(ModeKind::Default; "default")]
-#[test_case(ModeKind::Plan; "plan")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
-    mode: ModeKind,
-) -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    const ETAG_1: &str = "\"collaboration-models-1\"";
-    const ETAG_2: &str = "\"collaboration-models-2\"";
-    const ETAG_3: &str = "\"collaboration-models-3\"";
-    const MODEL: &str = "catalog-collaboration-refresh-model";
-    const ORIGINAL: &str = "original catalog collaboration instructions";
-    const UPDATED: &str = "updated catalog collaboration instructions";
-    const INACTIVE: &str = "inactive mode instructions";
-
-    let catalog = |instructions: &str| ModelsResponse {
-        models: vec![match mode {
-            ModeKind::Default => {
-                model_with_collaboration_messages(MODEL, Some(instructions), Some(INACTIVE))
-            }
-            ModeKind::Plan => {
-                model_with_collaboration_messages(MODEL, Some(INACTIVE), Some(instructions))
-            }
-        }],
-    };
-    let server = MockServer::start().await;
-    let mut models_mocks =
-        vec![mount_models_once_with_etag(&server, catalog(ORIGINAL), ETAG_1).await];
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_model(MODEL)
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(1);
-            config
-                .features
-                .disable(Feature::Apps)
-                .expect("test config should allow feature update");
-        })
-        .build_with_auto_env(&server)
-        .await?;
-
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            collaboration_mode: Some(collab_mode_for_model(
-                mode,
-                MODEL,
-                Some("legacy fallback instructions"),
-            )),
-            ..Default::default()
-        },
-    )
-    .await?;
-
-    let history = [ORIGINAL, UPDATED, ""];
-    let mut requests = Vec::new();
-    for (turn, etag, refreshed_instructions, expected) in [
-        ("original", ETAG_2, Some(UPDATED), &history[..1]),
-        ("updated", ETAG_2, None, &history[..2]),
-        ("unchanged", ETAG_3, Some(""), &history[..2]),
-        ("cleared", ETAG_3, None, &history[..]),
-        ("still-cleared", ETAG_3, None, &history[..]),
-    ] {
-        if let Some(instructions) = refreshed_instructions {
-            models_mocks
-                .push(mount_models_once_with_etag(&server, catalog(instructions), etag).await);
-        }
-        let response = mount_response_once(
-            &server,
-            sse_response(sse(vec![ev_response_created(turn), ev_completed(turn)]))
-                .insert_header("X-Models-Etag", etag),
-        )
-        .await;
-
-        test.submit_text_turn(turn).await?;
-        let request = response.single_request();
-        let dev_texts = request.message_input_texts("developer");
-        let collaboration_instructions = dev_texts
-            .iter()
-            .flat_map(|text| text.split(COLLABORATION_MODE_OPEN_TAG).skip(1))
-            .map(|text| {
-                text.split_once(COLLABORATION_MODE_CLOSE_TAG)
-                    .expect("collaboration fragment should have a closing tag")
-                    .0
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(collaboration_instructions.as_slice(), expected, "{turn}");
-        requests.push(request);
-    }
-
-    assert_eq!(
-        models_mocks
-            .iter()
-            .map(|mock| mock.requests().len())
-            .collect::<Vec<_>>(),
-        [1, 1, 1]
-    );
-    for pair in requests.windows(2) {
-        let previous_input = pair[0].input();
-        assert_eq!(
-            pair[1].input().get(..previous_input.len()),
-            Some(previous_input.as_slice())
-        );
-        assert_eq!(pair[0].instructions_text(), pair[1].instructions_text());
-    }
 
     Ok(())
 }

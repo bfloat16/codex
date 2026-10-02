@@ -9,7 +9,6 @@ use anyhow::Result;
 use base64::Engine;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::openai_models::ModelsResponse;
 use futures::SinkExt;
 use futures::StreamExt;
 use serde_json::Value;
@@ -667,38 +666,6 @@ impl WebSocketTestServer {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ModelsMock {
-    requests: Arc<Mutex<Vec<wiremock::Request>>>,
-}
-
-impl ModelsMock {
-    fn new() -> Self {
-        Self {
-            requests: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    pub fn requests(&self) -> Vec<wiremock::Request> {
-        self.requests.lock().unwrap().clone()
-    }
-
-    pub fn single_request_path(&self) -> String {
-        let requests = self.requests.lock().unwrap();
-        if requests.len() != 1 {
-            panic!("expected 1 request, got {}", requests.len());
-        }
-        requests.first().unwrap().url.path().to_string()
-    }
-}
-
-impl Match for ModelsMock {
-    fn matches(&self, request: &wiremock::Request) -> bool {
-        self.requests.lock().unwrap().push(request.clone());
-        true
-    }
-}
-
 impl Match for ResponseMock {
     fn matches(&self, request: &wiremock::Request) -> bool {
         self.requests
@@ -1092,14 +1059,6 @@ fn compact_mock() -> (MockBuilder, ResponseMock) {
     (mock, response_mock)
 }
 
-fn models_mock() -> (MockBuilder, ModelsMock) {
-    let models_mock = ModelsMock::new();
-    let mock = Mock::given(method("GET"))
-        .and(path_regex(".*/models$"))
-        .and(models_mock.clone());
-    (mock, models_mock)
-}
-
 pub async fn mount_sse_once_match<M>(server: &MockServer, matcher: M, body: String) -> ResponseMock
 where
     M: wiremock::Match + Send + Sync + 'static,
@@ -1235,66 +1194,11 @@ pub async fn mount_compact_response_once(
     response_mock
 }
 
-pub async fn mount_models_once(server: &MockServer, body: ModelsResponse) -> ModelsMock {
-    let (mock, models_mock) = models_mock();
-    mock.respond_with(
-        ResponseTemplate::new(200)
-            .insert_header("content-type", "application/json")
-            .set_body_json(body.clone()),
-    )
-    .up_to_n_times(1)
-    .mount(server)
-    .await;
-    models_mock
-}
-
-pub async fn mount_models_once_with_delay(
-    server: &MockServer,
-    body: ModelsResponse,
-    delay: Duration,
-) -> ModelsMock {
-    let (mock, models_mock) = models_mock();
-    mock.respond_with(
-        ResponseTemplate::new(200)
-            .insert_header("content-type", "application/json")
-            .set_body_json(body.clone())
-            .set_delay(delay),
-    )
-    .up_to_n_times(1)
-    .mount(server)
-    .await;
-    models_mock
-}
-
-pub async fn mount_models_once_with_etag(
-    server: &MockServer,
-    body: ModelsResponse,
-    etag: &str,
-) -> ModelsMock {
-    let (mock, models_mock) = models_mock();
-    mock.respond_with(
-        ResponseTemplate::new(200)
-            .insert_header("content-type", "application/json")
-            // ModelsClient reads the ETag header, not a JSON field.
-            .insert_header("ETag", etag)
-            .set_body_json(body.clone()),
-    )
-    .up_to_n_times(1)
-    .mount(server)
-    .await;
-    models_mock
-}
-
 pub async fn start_mock_server() -> MockServer {
-    let server = MockServer::builder()
+    MockServer::builder()
         .body_print_limit(BodyPrintLimit::Limited(80_000))
         .start()
-        .await;
-
-    // Provide a default `/models` response so tests remain hermetic when the client queries it.
-    let _ = mount_models_once(&server, ModelsResponse { models: Vec::new() }).await;
-
-    server
+        .await
 }
 
 /// Starts a lightweight WebSocket server for `/v1/responses` tests.

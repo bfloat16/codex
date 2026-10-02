@@ -5,9 +5,7 @@ use codex_core::TurnInputRequest;
 use codex_core::config::Constrained;
 use codex_core::config::TokenBudgetConfig;
 use codex_features::Feature;
-use codex_login::CodexAuth;
 use codex_models_manager::bundled_models_response;
-use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::ServiceTier;
@@ -39,7 +37,6 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_response_sequence;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
@@ -1378,106 +1375,6 @@ async fn turn_settings_rejection_preserves_independent_future_settings() -> Resu
     );
     assert_eq!(request_turn_id(&requests[1]), request.turn_id);
     assert_ne!(request_turn_id(&requests[2]), request.turn_id);
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_preference_activation_keeps_admitted_model_metadata() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    // This test owns both catalog responses. The generic mock-server helper
-    // installs an extra one-shot /models response that would shift the sequence.
-    let server = wiremock::MockServer::start().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-1", "pause-before-models-refresh"),
-            sse_completed("resp-2"),
-            sse_completed("resp-3"),
-        ],
-    )
-    .await;
-    let mut models = step_settings_models();
-    for model in &mut models {
-        model.default_reasoning_summary = ReasoningSummary::Concise;
-    }
-    let initial_catalog = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: models.clone(),
-        },
-    )
-    .await;
-    let test = step_settings_test()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
-            // Use the real refreshable models manager, and retain an unset
-            // preference so the selected model's default is observable.
-            config.model_catalog = None;
-            config.model_reasoning_summary = None;
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let request = start_paused_turn(&test.codex).await?;
-    assert_eq!(initial_catalog.requests().len(), 1);
-
-    for model in &mut models {
-        model.default_reasoning_summary = ReasoningSummary::Detailed;
-    }
-    let refresh = mount_models_once(&server, ModelsResponse { models }).await;
-    test.thread_manager
-        .get_models_manager()
-        .list_models(
-            RefreshStrategy::Online,
-            codex_core::test_support::default_http_client_factory(),
-        )
-        .await;
-    assert_eq!(refresh.requests().len(), 1);
-
-    assert_eq!(
-        submit_turn_settings(
-            &test.codex,
-            &request.turn_id,
-            TurnSettingsUpdate {
-                effort: Some(Some(ReasoningEffort::High)),
-                ..Default::default()
-            }
-        )
-        .await?,
-        TurnSettingsUpdateOutcome::Applied
-    );
-    answer_paused_turn(&test.codex, &request.turn_id).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    test.submit_text_turn("admit the next turn").await?;
-
-    assert_eq!(
-        response_mock
-            .requests()
-            .iter()
-            .map(request_settings)
-            .collect::<Vec<_>>(),
-        vec![
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "low", "summary": "concise" },
-                "service_tier": null,
-            }),
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "high", "summary": "concise" },
-                "service_tier": null,
-            }),
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "low", "summary": "detailed" },
-                "service_tier": null,
-            }),
-        ]
-    );
 
     Ok(())
 }
