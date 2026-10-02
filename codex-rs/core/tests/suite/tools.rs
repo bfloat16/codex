@@ -655,7 +655,7 @@ async fn sandbox_denied_exec_command_returns_original_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
+    let mut builder = test_codex().with_model("gpt-6.1-sol");
     let fixture = builder.build(&server).await?;
 
     let call_id = "sandbox-denied-exec-command";
@@ -744,7 +744,7 @@ async fn exec_command_enforces_glob_deny_read_policy() -> Result<()> {
 
     let server = start_mock_server().await;
     let mut builder = test_codex()
-        .with_model("gpt-5.4")
+        .with_model("gpt-6.1-sol")
         .with_config(move |config| {
             let mut file_system_sandbox_policy = FileSystemSandboxPolicy::default();
             file_system_sandbox_policy
@@ -877,7 +877,7 @@ shell_tool = true
                 .expect("test config should allow feature update");
         }),
         CommandToolAvailability::ModelDisabled => {
-            test_codex().with_model_info_override("gpt-5.4", |model| {
+            test_codex().with_model_info_override("gpt-6.1-sol", |model| {
                 model.shell_type = ConfigShellToolType::Disabled;
             })
         }

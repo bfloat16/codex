@@ -925,7 +925,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::FileCreated {
                 target: TargetPath::OutsideWorkspace("dfa_on_request.txt"),
@@ -942,7 +942,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::FileCreated {
                 target: TargetPath::OutsideWorkspace("dfa_on_request_5_1.txt"),
@@ -959,7 +959,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::NetworkSuccess {
                 body_contains: "danger-network-ok",
@@ -975,7 +975,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::NetworkSuccessNoExitCode {
                 body_contains: "danger-network-ok",
@@ -990,7 +990,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("blocked in untrusted project"),
                 expected_reason: None,
@@ -1008,7 +1008,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("blocked in untrusted project"),
                 expected_reason: None,
@@ -1026,7 +1026,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("blocked by distinctive approval policy"),
                 expected_reason: None,
@@ -1044,7 +1044,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected by user"),
                 expected_reason: None,
@@ -1062,7 +1062,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApprovalWithAmendment {
                 decision: ReviewDecision::denied("rejected by user"),
                 expected_reason: None,
@@ -1090,7 +1090,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApprovalWithAmendment {
                 decision: ReviewDecision::denied("rejected by user"),
                 expected_reason: None,
@@ -1118,7 +1118,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::CommandFailure {
                 output_contains: "you cannot ask for escalated permissions",
@@ -1134,7 +1134,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApprovalWithAmendment {
                 decision: ReviewDecision::denied("rejected by user"),
                 expected_reason: None,
@@ -1156,7 +1156,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected by user"),
                 expected_reason: None,
@@ -1177,7 +1177,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected by user"),
                 expected_reason: None,
@@ -1198,7 +1198,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApprovalWithAmendment {
                 decision: ReviewDecision::denied("rejected by user"),
                 expected_reason: None,
@@ -1218,7 +1218,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1238,7 +1238,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1258,7 +1258,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::FileCreated {
                 target: TargetPath::OutsideWorkspace("dfa_never.txt"),
@@ -1275,7 +1275,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::FileCreatedNoExitCode {
                 target: TargetPath::OutsideWorkspace("dfa_never_5_1.txt"),
@@ -1292,7 +1292,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1312,7 +1312,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1331,7 +1331,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1349,7 +1349,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1407,7 +1407,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1426,7 +1426,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1465,7 +1465,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::PatchApplied {
                 target: TargetPath::Workspace("apply_patch_freeform.txt"),
@@ -1482,7 +1482,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::PatchApplied {
                 target: TargetPath::OutsideWorkspace("apply_patch_freeform_danger.txt"),
@@ -1499,7 +1499,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::PatchApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1519,7 +1519,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::PatchApproval {
                 decision: ReviewDecision::denied("rejected by user"),
                 expected_reason: None,
@@ -1559,7 +1559,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::PatchApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1579,7 +1579,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.4"),
+            model_override: Some("gpt-6.1-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::FileNotCreated {
                 target: TargetPath::OutsideWorkspace("apply_patch_freeform_never.txt"),
@@ -1621,7 +1621,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::CommandSuccess {
                 stdout_contains: "trusted-never",
@@ -1637,7 +1637,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1676,7 +1676,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1696,7 +1696,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
@@ -1739,7 +1739,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![Feature::UnifiedExec],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::Auto,
             expectation: Expectation::CommandSuccess {
                 stdout_contains: "hello unified exec",
@@ -1757,7 +1757,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             features: vec![Feature::UnifiedExec],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::Approved,
                 expected_reason: Some(DEFAULT_UNIFIED_EXEC_JUSTIFICATION),
@@ -1834,7 +1834,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected dynamic shell word"),
                 expected_reason: None,
@@ -1852,7 +1852,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected dynamic shell word"),
                 expected_reason: None,
@@ -1871,7 +1871,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected dynamic shell word"),
                 expected_reason: None,
@@ -1890,7 +1890,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected dynamic shell word"),
                 expected_reason: None,
@@ -1908,7 +1908,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected dynamic shell word"),
                 expected_reason: None,
@@ -1926,7 +1926,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected dynamic shell word"),
                 expected_reason: None,
@@ -1944,7 +1944,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected dynamic shell word"),
                 expected_reason: None,
@@ -1963,7 +1963,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("rejected dynamic shell word"),
                 expected_reason: None,
@@ -1981,7 +1981,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
-            model_override: Some("gpt-5.2"),
+            model_override: Some("gpt-6-sol"),
             outcome: Outcome::ExecApproval {
                 decision: ReviewDecision::denied("blocked in untrusted project"),
                 expected_reason: None,
@@ -2048,7 +2048,7 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
     let sandbox_policy = scenario.sandbox_policy.clone();
     let features = scenario.features.clone();
     let model_override = scenario.model_override;
-    let model = model_override.unwrap_or("gpt-5.4");
+    let model = model_override.unwrap_or("gpt-6.1-sol");
     let policy_src = scenario.action.policy_src();
     let thread_store_id = format!("approval-scenario-{}", scenario.name);
     let model_catalog = bundled_models_response()?;
@@ -2233,7 +2233,7 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
     let sandbox_policy_for_config = sandbox_policy.clone();
 
     let mut builder = test_codex()
-        .with_model("gpt-5.4")
+        .with_model("gpt-6.1-sol")
         .with_config(move |config| {
             config.permissions.approval_policy = Constrained::allow_any(approval_policy);
             config
@@ -2368,7 +2368,7 @@ async fn assert_execpolicy_amendment_context(
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
     let sandbox_policy_for_config = sandbox_policy.clone();
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.model_messages = None;
         })
         .with_config(move |config| {

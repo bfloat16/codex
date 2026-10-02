@@ -146,7 +146,7 @@ async fn mcp_calls_stay_bound_to_each_thread() -> anyhow::Result<()> {
     let first_server = make_server("first-runtime")?;
     let second_server = make_server("second-runtime")?;
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::Never);
             config
@@ -442,7 +442,7 @@ async fn cached_http_mcp_starts_lazily_for_subagents(
         AppsTestServer::mount_with_startup_control(&responses_server).await?;
     let server_url = format!("{}/api/codex/ps/mcp", http_server.chatgpt_base_url);
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::Never);
             config
@@ -570,7 +570,7 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
     let command = remote_aware_stdio_server_bin()?;
     let environment_id = remote_aware_environment_id();
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             config.update_plan_enabled = true;
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::Never);

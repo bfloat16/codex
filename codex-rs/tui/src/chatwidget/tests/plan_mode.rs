@@ -259,7 +259,7 @@ async fn submit_user_message_with_mode_sets_coding_collaboration_mode() {
 
 #[tokio::test]
 async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-6.1-sol")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
@@ -269,7 +269,7 @@ async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
     set_chatgpt_auth(&mut chat);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
-    let preset = get_available_model(&chat, "gpt-5.4");
+    let preset = get_available_model(&chat, "gpt-6.1-sol");
     chat.open_reasoning_popup(preset);
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
@@ -280,13 +280,13 @@ async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
         AppEvent::OpenPlanReasoningScopePrompt {
             model,
             effort: Some(_)
-        } if model == "gpt-5.4"
+        } if model == "gpt-6.1-sol"
     );
 }
 
 #[tokio::test]
 async fn reasoning_selection_in_plan_mode_without_effort_change_does_not_open_scope_prompt_event() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-6.1-sol")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
@@ -297,7 +297,7 @@ async fn reasoning_selection_in_plan_mode_without_effort_change_does_not_open_sc
 
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::Medium));
 
-    let preset = get_available_model(&chat, "gpt-5.4");
+    let preset = get_available_model(&chat, "gpt-6.1-sol");
     chat.open_reasoning_popup(preset);
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
@@ -305,7 +305,7 @@ async fn reasoning_selection_in_plan_mode_without_effort_change_does_not_open_sc
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::UpdateModel(model) if model == "gpt-5.4"
+            AppEvent::UpdateModel(model) if model == "gpt-6.1-sol"
         )),
         "expected model update event; events: {events:?}"
     );
@@ -320,7 +320,7 @@ async fn reasoning_selection_in_plan_mode_without_effort_change_does_not_open_sc
 #[tokio::test]
 async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_global_opens_scope_prompt()
  {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-6.1-sol")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
@@ -334,7 +334,7 @@ async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_glo
     // should open the scope prompt rather than silently rewriting the global default.
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
-    let preset = get_available_model(&chat, "gpt-5.4");
+    let preset = get_available_model(&chat, "gpt-6.1-sol");
     chat.open_reasoning_popup(preset);
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
@@ -344,7 +344,7 @@ async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_glo
         AppEvent::OpenPlanReasoningScopePrompt {
             model,
             effort: Some(ReasoningEffortConfig::Medium)
-        } if model == "gpt-5.4"
+        } if model == "gpt-6.1-sol"
     );
 }
 
@@ -398,7 +398,7 @@ async fn reasoning_shortcut_in_plan_mode_updates_plan_override_without_prompt_or
 #[tokio::test]
 async fn advanced_reasoning_selection_in_plan_mode_uses_expected_scope() {
     for effort in [ReasoningEffortConfig::Ultra, ReasoningEffortConfig::Max] {
-        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-6.1-sol")).await;
         chat.thread_id = Some(ThreadId::new());
         chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
         let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
@@ -406,7 +406,7 @@ async fn advanced_reasoning_selection_in_plan_mode_uses_expected_scope() {
         chat.set_collaboration_mask(plan_mask);
         let _ = drain_insert_history(&mut rx);
 
-        let mut preset = get_available_model(&chat, "gpt-5.4");
+        let mut preset = get_available_model(&chat, "gpt-6.1-sol");
         preset.supported_reasoning_efforts = vec![ReasoningEffortPreset {
             effort: effort.clone(),
             description: "Advanced reasoning".to_string(),
@@ -421,7 +421,7 @@ async fn advanced_reasoning_selection_in_plan_mode_uses_expected_scope() {
                 AppEvent::ApplyAdvancedReasoning {
                     model,
                     effort: ReasoningEffortConfig::Ultra,
-                } if model == "gpt-5.4"
+                } if model == "gpt-6.1-sol"
             )));
             assert!(events.iter().all(|event| !matches!(
                 event,
@@ -435,7 +435,7 @@ async fn advanced_reasoning_selection_in_plan_mode_uses_expected_scope() {
                 AppEvent::OpenPlanReasoningScopePrompt {
                     model,
                     effort: Some(ReasoningEffortConfig::Max),
-                } if model == "gpt-5.4"
+                } if model == "gpt-6.1-sol"
             )));
         }
     }
@@ -443,7 +443,7 @@ async fn advanced_reasoning_selection_in_plan_mode_uses_expected_scope() {
 
 #[tokio::test]
 async fn plan_mode_reasoning_override_is_marked_current_in_reasoning_popup() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-6.1-sol")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     set_chatgpt_auth(&mut chat);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
@@ -453,7 +453,7 @@ async fn plan_mode_reasoning_override_is_marked_current_in_reasoning_popup() {
         .expect("expected plan collaboration mode");
     chat.set_collaboration_mask(plan_mask);
 
-    let preset = get_available_model(&chat, "gpt-5.4");
+    let preset = get_available_model(&chat, "gpt-6.1-sol");
     chat.open_reasoning_popup(preset);
 
     let popup = render_bottom_popup(&chat, /*width*/ 100);
@@ -466,7 +466,7 @@ async fn plan_mode_reasoning_override_is_marked_current_in_reasoning_popup() {
 
 #[tokio::test]
 async fn reasoning_selection_in_plan_mode_model_switch_does_not_open_scope_prompt_event() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-6.1-sol")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
@@ -475,7 +475,7 @@ async fn reasoning_selection_in_plan_mode_model_switch_does_not_open_scope_promp
     let _ = drain_insert_history(&mut rx);
     set_chatgpt_auth(&mut chat);
 
-    let preset = get_available_model(&chat, "gpt-5.2");
+    let preset = get_available_model(&chat, "gpt-6-sol");
     chat.open_reasoning_popup(preset);
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
@@ -483,7 +483,7 @@ async fn reasoning_selection_in_plan_mode_model_switch_does_not_open_scope_promp
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::UpdateModel(model) if model == "gpt-5.2"
+            AppEvent::UpdateModel(model) if model == "gpt-6-sol"
         )),
         "expected model update event; events: {events:?}"
     );

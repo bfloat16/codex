@@ -542,7 +542,7 @@ async fn summarize_context_three_requests_and_instructions(
     // Build config pointing to the mock server and spawn Codex.
     let model_provider = non_openai_model_provider(&server);
     let mut builder = test_codex().with_config(move |config| {
-        config.model = Some("gpt-5.2".to_string());
+        config.model = Some("gpt-6-sol".to_string());
         config.update_plan_enabled = enable_plan;
         if custom_instructions {
             config.base_instructions = Some(CUSTOM_INSTRUCTIONS.to_string());
@@ -2235,8 +2235,8 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
-    let previous_model = "gpt-5.4";
-    let next_model = "gpt-5.2";
+    let previous_model = "gpt-6.1-sol";
+    let next_model = "gpt-6-sol";
 
     let model_catalog = ModelsResponse {
         models: vec![
@@ -2336,8 +2336,8 @@ async fn pre_sampling_compact_runs_when_comp_hash_changes() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
-    let previous_model = "gpt-5.4";
-    let next_model = "gpt-5.2";
+    let previous_model = "gpt-6.1-sol";
+    let next_model = "gpt-6-sol";
 
     let model_catalog = ModelsResponse {
         models: vec![
@@ -2437,7 +2437,7 @@ async fn previous_model_compaction_resolves_selected_settings() -> Result<()> {
     .await;
     let model_provider = non_openai_model_provider(&server);
     let test = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.comp_hash = Some("hash-a".to_string());
             model.default_reasoning_summary = ReasoningSummary::Detailed;
             model.service_tiers = vec![ModelServiceTier {
@@ -2446,12 +2446,12 @@ async fn previous_model_compaction_resolves_selected_settings() -> Result<()> {
                 description: "Priority processing".to_string(),
             }];
         })
-        .with_model_info_override("gpt-5.2", |model| {
+        .with_model_info_override("gpt-6-sol", |model| {
             model.comp_hash = Some("hash-b".to_string());
             model.default_reasoning_summary = ReasoningSummary::Auto;
             model.service_tiers.clear();
         })
-        .with_model("gpt-5.4")
+        .with_model("gpt-6.1-sol")
         .with_config(move |config| {
             config.model_provider = model_provider;
             config.model_reasoning_summary = None;
@@ -2472,7 +2472,7 @@ async fn previous_model_compaction_resolves_selected_settings() -> Result<()> {
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                model: Some("gpt-5.2".to_string()),
+                model: Some("gpt-6-sol".to_string()),
                 ..Default::default()
             }),
         )
@@ -2499,9 +2499,9 @@ async fn previous_model_compaction_resolves_selected_settings() -> Result<()> {
     assert_eq!(
         actual,
         vec![
-            json!(["gpt-5.4", "detailed", "priority"]),
-            json!(["gpt-5.4", "detailed", "priority"]),
-            json!(["gpt-5.2", "auto", null]),
+            json!(["gpt-6.1-sol", "detailed", "priority"]),
+            json!(["gpt-6.1-sol", "detailed", "priority"]),
+            json!(["gpt-6-sol", "auto", null]),
         ]
     );
     Ok(())
@@ -2515,9 +2515,9 @@ async fn pre_sampling_compact_falls_back_from_retired_previous_model_after_renam
     let retired_model = "gpt-5.5";
     let previous_model_family = "gpt-5.5";
     let renamed_model = "gpt-5.6";
-    let mut previous_model_info = model_info_with_optional_comp_hash("gpt-5.4", Some("hash-a"));
+    let mut previous_model_info = model_info_with_optional_comp_hash("gpt-6.1-sol", Some("hash-a"));
     previous_model_info.slug = previous_model_family.to_string();
-    let mut renamed_model_info = model_info_with_optional_comp_hash("gpt-5.4", Some("hash-b"));
+    let mut renamed_model_info = model_info_with_optional_comp_hash("gpt-6.1-sol", Some("hash-b"));
     renamed_model_info.slug = renamed_model.to_string();
 
     let model_catalog = ModelsResponse {
@@ -2654,9 +2654,9 @@ async fn pre_sampling_compact_falls_back_when_previous_model_is_not_found() {
     let retired_model = "gpt-5.5";
     let previous_model_family = "gpt-5.5";
     let renamed_model = "gpt-5.6";
-    let mut previous_model_info = model_info_with_optional_comp_hash("gpt-5.4", Some("hash-a"));
+    let mut previous_model_info = model_info_with_optional_comp_hash("gpt-6.1-sol", Some("hash-a"));
     previous_model_info.slug = previous_model_family.to_string();
-    let mut renamed_model_info = model_info_with_optional_comp_hash("gpt-5.4", Some("hash-b"));
+    let mut renamed_model_info = model_info_with_optional_comp_hash("gpt-6.1-sol", Some("hash-b"));
     renamed_model_info.slug = renamed_model.to_string();
 
     let model_catalog = ModelsResponse {
@@ -2793,11 +2793,11 @@ async fn pre_sampling_compact_falls_back_after_previous_model_invalid_request_on
     let previous_model_family = "gpt-5.6";
     let next_model = "gpt-5.5";
     let mut previous_model_info =
-        model_info_with_context_window("gpt-5.4", /*context_window*/ 273_000);
+        model_info_with_context_window("gpt-6.1-sol", /*context_window*/ 273_000);
     previous_model_info.slug = previous_model_family.to_string();
     previous_model_info.use_responses_lite = true;
     let mut next_model_info =
-        model_info_with_context_window("gpt-5.4", /*context_window*/ 125_000);
+        model_info_with_context_window("gpt-6.1-sol", /*context_window*/ 125_000);
     next_model_info.slug = next_model.to_string();
     next_model_info.use_responses_lite = false;
 
@@ -2915,10 +2915,10 @@ async fn pre_sampling_legacy_remote_compact_falls_back_after_previous_model_inva
     let previous_model_family = "gpt-5.6";
     let next_model = "gpt-5.5";
     let mut previous_model_info =
-        model_info_with_context_window("gpt-5.4", /*context_window*/ 273_000);
+        model_info_with_context_window("gpt-6.1-sol", /*context_window*/ 273_000);
     previous_model_info.slug = previous_model_family.to_string();
     let mut next_model_info =
-        model_info_with_context_window("gpt-5.4", /*context_window*/ 125_000);
+        model_info_with_context_window("gpt-6.1-sol", /*context_window*/ 125_000);
     next_model_info.slug = next_model.to_string();
 
     let model_catalog = ModelsResponse {
@@ -3018,9 +3018,9 @@ async fn pre_sampling_compact_keeps_unknown_previous_model_for_api_key_auth_and_
     let previous_model = "custom/gpt-5.5";
     let previous_model_family = "gpt-5.5";
     let next_model = "gpt-5.6";
-    let mut previous_model_info = model_info_with_optional_comp_hash("gpt-5.4", Some("hash-a"));
+    let mut previous_model_info = model_info_with_optional_comp_hash("gpt-6.1-sol", Some("hash-a"));
     previous_model_info.slug = previous_model_family.to_string();
-    let mut next_model_info = model_info_with_optional_comp_hash("gpt-5.4", Some("hash-b"));
+    let mut next_model_info = model_info_with_optional_comp_hash("gpt-6.1-sol", Some("hash-b"));
     next_model_info.slug = next_model.to_string();
 
     let model_catalog = ModelsResponse {
@@ -3099,9 +3099,9 @@ async fn pre_sampling_compact_skips_when_either_comp_hash_is_missing() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
-    let model_without_hash = "gpt-5.4";
+    let model_without_hash = "gpt-6.1-sol";
     let model_with_hash = "gpt-5.5";
-    let next_model_without_hash = "gpt-5.2";
+    let next_model_without_hash = "gpt-6-sol";
 
     let model_catalog = ModelsResponse {
         models: vec![
@@ -3204,8 +3204,8 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
-    let previous_model = "gpt-5.4";
-    let next_model = "gpt-5.2";
+    let previous_model = "gpt-6.1-sol";
+    let next_model = "gpt-6-sol";
 
     let model_catalog = ModelsResponse {
         models: vec![
@@ -3296,8 +3296,8 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
-    let previous_model = "gpt-5.4";
-    let next_model = "gpt-5.2";
+    let previous_model = "gpt-6.1-sol";
+    let next_model = "gpt-6-sol";
 
     let model_catalog = ModelsResponse {
         models: vec![
@@ -3415,8 +3415,8 @@ async fn pre_sampling_compact_recovers_comp_hash_after_resume() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
-    let previous_model = "gpt-5.4";
-    let next_model = "gpt-5.2";
+    let previous_model = "gpt-6.1-sol";
+    let next_model = "gpt-6-sol";
 
     let model_catalog = ModelsResponse {
         models: vec![
@@ -3544,8 +3544,8 @@ async fn pre_sampling_compact_skips_missing_comp_hash_after_resume() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
-    let previous_model = "gpt-5.4";
-    let next_model = "gpt-5.2";
+    let previous_model = "gpt-6.1-sol";
+    let next_model = "gpt-6-sol";
 
     let model_catalog = ModelsResponse {
         models: vec![
@@ -5034,8 +5034,8 @@ async fn snapshot_request_shape_pre_turn_compaction_strips_incoming_model_switch
     skip_if_no_network!();
 
     let server = start_mock_server().await;
-    let previous_model = "gpt-5.4";
-    let next_model = "gpt-5.2";
+    let previous_model = "gpt-6.1-sol";
+    let next_model = "gpt-6-sol";
 
     let request_log = mount_sse_sequence(
         &server,

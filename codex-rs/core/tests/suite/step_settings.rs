@@ -65,8 +65,8 @@ fn step_settings_models() -> Vec<ModelInfo> {
         .expect("bundled models should parse")
         .models
         .into_iter()
-        .find(|model| model.slug == "gpt-5.4")
-        .expect("bundled gpt-5.4 model");
+        .find(|model| model.slug == "gpt-6.1-sol")
+        .expect("bundled gpt-6.1-sol model");
     [MODEL_A, MODEL_B, MODEL_C]
         .into_iter()
         .map(|slug| {

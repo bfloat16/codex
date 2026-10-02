@@ -57,8 +57,8 @@ fn activation_models() -> Vec<ModelInfo> {
         .expect("bundled models")
         .models
         .into_iter()
-        .find(|model| model.slug == "gpt-5.4")
-        .expect("bundled gpt-5.4");
+        .find(|model| model.slug == "gpt-6.1-sol")
+        .expect("bundled gpt-6.1-sol");
     [MODEL_A, MODEL_B]
         .into_iter()
         .map(|slug| ModelInfo {

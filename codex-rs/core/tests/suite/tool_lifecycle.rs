@@ -516,7 +516,7 @@ async fn tool_start_receives_frozen_host_plugin_root() -> Result<()> {
     let test = test_codex()
         .with_home(codex_home)
         .with_extensions(Arc::new(extensions.build()))
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .build_with_environment(&server, test_env)
         .await?;
     wait_for_mcp_server(&test.codex, "sample").await?;

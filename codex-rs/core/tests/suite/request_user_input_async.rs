@@ -50,7 +50,7 @@ async fn persistent_async_message_guidance_follows_tool_availability(
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.2", move |model| {
+        .with_model_info_override("gpt-6-sol", move |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
             model
                 .experimental_supported_tools
@@ -140,7 +140,7 @@ async fn freeform_async_message_requires_root_and_exact_catalog_opt_in(
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.2", move |model| {
+        .with_model_info_override("gpt-6-sol", move |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
             model.experimental_supported_tools =
                 catalog_tool.map(str::to_string).into_iter().collect();
@@ -213,7 +213,7 @@ async fn freeform_async_message_emits_an_item_without_ending_the_turn() -> Resul
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.2", |model| {
+        .with_model_info_override("gpt-6-sol", |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
             model.experimental_supported_tools.extend([
                 "send_message_to_user_async".to_string(),
@@ -372,7 +372,7 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
         )
         .to_string();
     let test = test_codex()
-        .with_model_info_override("gpt-5.2", move |model| {
+        .with_model_info_override("gpt-6-sol", move |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
             model.experimental_supported_tools.retain(|tool| {
                 tool != "send_user_message_async" && tool != "request_user_input_async"
@@ -518,7 +518,7 @@ async fn invalid_async_questions_do_not_emit_an_item(
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.2", |model| {
+        .with_model_info_override("gpt-6-sol", |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
             model
                 .experimental_supported_tools

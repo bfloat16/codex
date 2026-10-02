@@ -773,7 +773,7 @@ async fn guardian_node_repl_policy_follows_production_approval_path(
                 timeout_instructions: None,
             });
         })
-        .with_model_info_override("gpt-5.4", move |model| {
+        .with_model_info_override("gpt-6.1-sol", move |model| {
             model.node_repl_auto_review_required = node_repl_auto_review_required;
             model.auto_review_model_override = Some("gpt-5.6-luna".to_string());
             model
@@ -1682,7 +1682,7 @@ async fn cyber_model_guardian_denial_interrupts_turn_immediately() -> Result<()>
     let sandbox_policy_for_config = sandbox_policy.clone();
 
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
         })
         .with_config(move |config| {

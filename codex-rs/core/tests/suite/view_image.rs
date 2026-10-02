@@ -225,7 +225,7 @@ async fn assert_user_turn_local_image_resizes_to(
     let builder = match image_budget_policy {
         ImageBudgetPolicy::DetailBased | ImageBudgetPolicy::Unified => test_codex(),
         ImageBudgetPolicy::UnifiedResponsesLiteWithoutOriginalSupport => test_codex()
-            .with_model_info_override("gpt-5.4", |model_info| {
+            .with_model_info_override("gpt-6.1-sol", |model_info| {
                 model_info.supports_image_detail_original = false;
                 model_info.use_responses_lite = true;
             }),
@@ -843,7 +843,7 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
+    let mut builder = test_codex().with_model("gpt-6.1-sol");
     let test = builder.build_with_auto_env(&server).await?;
     let TestCodex {
         codex,
@@ -1012,7 +1012,7 @@ async fn view_image_tool_errors_clearly_for_unsupported_detail_values() -> anyho
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
+    let mut builder = test_codex().with_model("gpt-6.1-sol");
     let test = builder.build_with_auto_env(&server).await?;
     let TestCodex {
         codex,
@@ -1090,7 +1090,7 @@ async fn view_image_tool_treats_null_detail_as_omitted() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
+    let mut builder = test_codex().with_model("gpt-6.1-sol");
     let test = builder.build_with_auto_env(&server).await?;
     let TestCodex {
         codex,
@@ -1194,7 +1194,9 @@ async fn assert_view_image_tool_resizes_without_original_support(
 ) -> anyhow::Result<()> {
     let server = start_mock_server().await;
     let mut builder = test_codex()
-        .with_model("gpt-5.2")
+        .with_model_info_override("gpt-6-sol", |model_info| {
+            model_info.supports_image_detail_original = false;
+        })
         .with_config(move |config| {
             if image_budget_policy == ImageBudgetPolicy::Unified {
                 let _ = config.features.enable(Feature::UnifiedImageBudget);
@@ -1293,7 +1295,7 @@ async fn view_image_tool_does_not_force_original_resolution_with_capability_only
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
+    let mut builder = test_codex().with_model("gpt-6.1-sol");
     let test = builder.build_with_auto_env(&server).await?;
     let TestCodex {
         codex,

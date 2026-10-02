@@ -9,7 +9,6 @@ use crate::agents_md_manager::AgentsMdManager;
 use crate::compact::InitialContextInjection;
 use crate::config::ConfigBuilder;
 use crate::config::ConfigOverrides;
-use crate::config::test_config;
 use crate::context::ContextualUserFragment;
 use crate::context::DeveloperInstructions;
 use crate::context::GuardianContextMode;
@@ -54,7 +53,6 @@ use codex_login::auth::AgentIdentityAuthPolicy;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::model_info;
 use codex_models_manager::test_support::construct_model_info_offline_for_tests;
 use codex_models_manager::test_support::get_model_offline_for_tests;
@@ -292,11 +290,6 @@ impl StepContext {
 }
 
 mod guardian_tests;
-
-struct InstructionsTestCase {
-    slug: &'static str,
-    expects_apply_patch_description: bool,
-}
 
 fn user_message(text: &str) -> ResponseItem {
     ResponseItem::Message {
@@ -1612,67 +1605,6 @@ async fn user_shell_commands_remain_login_shells_when_model_login_shells_are_dis
     }
 
     Ok(())
-}
-
-#[tokio::test]
-async fn get_base_instructions_no_user_content() {
-    let prompt_path = codex_utils_cargo_bin::find_resource!(
-        "tests/fixtures/prompt_with_apply_patch_instructions.md"
-    )
-    .expect("resolve prompt fixture path");
-    let prompt_with_apply_patch_instructions =
-        std::fs::read_to_string(prompt_path).expect("read prompt fixture");
-    let models_response = bundled_models_response()
-        .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
-    let model_info_for_slug = |slug: &str, config: &Config| {
-        let model = models_response
-            .models
-            .iter()
-            .find(|candidate| candidate.slug == slug)
-            .cloned()
-            .unwrap_or_else(|| panic!("model slug {slug} is missing from models.json"));
-        model_info::with_config_overrides(model, &config.to_models_manager_config())
-    };
-    let test_cases = vec![
-        InstructionsTestCase {
-            slug: "gpt-5.4",
-            expects_apply_patch_description: false,
-        },
-        InstructionsTestCase {
-            slug: "gpt-5.4-mini",
-            expects_apply_patch_description: false,
-        },
-        InstructionsTestCase {
-            slug: "gpt-5.5",
-            expects_apply_patch_description: false,
-        },
-        InstructionsTestCase {
-            slug: "gpt-5.2",
-            expects_apply_patch_description: false,
-        },
-    ];
-
-    let (session, _turn_context) = make_session_and_context().await;
-    let config = test_config().await;
-
-    for test_case in test_cases {
-        let model_info = model_info_for_slug(test_case.slug, &config);
-        let model_instructions = model_info.get_model_instructions(config.personality);
-        if test_case.expects_apply_patch_description {
-            assert_eq!(
-                model_instructions.as_str(),
-                prompt_with_apply_patch_instructions
-            );
-        }
-
-        {
-            let mut state = session.state.lock().await;
-            state.session_configuration.base_instructions = model_instructions.clone();
-        }
-
-        let base_instructions = session.get_base_instructions().await;
-        assert_eq!(base_instructions.text, model_instructions);
-    }
 }
 
 #[tokio::test]

@@ -139,7 +139,7 @@ async fn ultra_reasoning_uses_highest_non_ultra_and_proactive_mode() -> Result<(
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_model_info_override("gpt-6.1-sol", add_ultra_reasoning)
         .with_config(configure_ultra)
         .build(&server)
         .await?;
@@ -184,7 +184,7 @@ async fn mode_hints_override_reasoning_effort(source: ModeHintSource) -> Result<
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             add_ultra_reasoning(model_info);
             set_multi_agent_mode(
                 model_info,
@@ -248,7 +248,7 @@ async fn catalog_proactive_mode_is_ultra_only(
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.4", move |model_info| {
+        .with_model_info_override("gpt-6.1-sol", move |model_info| {
             add_ultra_reasoning(model_info);
             set_multi_agent_mode(
                 model_info,
@@ -304,7 +304,7 @@ async fn model_switch_refreshes_catalog_role_and_mode(
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.2", |model_info| {
+        .with_model_info_override("gpt-6-sol", |model_info| {
             add_ultra_reasoning(model_info);
             set_multi_agent_mode(
                 model_info,
@@ -314,7 +314,7 @@ async fn model_switch_refreshes_catalog_role_and_mode(
                 Some(SECOND_MODEL_ROOT_ROLE_TEXT),
             );
         })
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             add_ultra_reasoning(model_info);
             set_multi_agent_mode(
                 model_info,
@@ -331,7 +331,7 @@ async fn model_switch_refreshes_catalog_role_and_mode(
     core_test_support::submit_thread_settings(
         &test.codex,
         ThreadSettingsOverrides {
-            model: Some("gpt-5.2".to_string()),
+            model: Some("gpt-6-sol".to_string()),
             ..Default::default()
         },
     )
@@ -397,7 +397,7 @@ async fn empty_configured_mode_hint_emits_no_mode_message(effort: ReasoningEffor
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             add_ultra_reasoning(model_info);
             set_multi_agent_mode(
                 model_info,
@@ -497,7 +497,7 @@ async fn live_mode_change_appends_mode_without_reappending_usage_hint() -> Resul
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_model_info_override("gpt-6.1-sol", add_ultra_reasoning)
         .with_config(|config| {
             configure_ultra(config);
             config.multi_agent_v2.root_agent_usage_hint_text =
@@ -578,7 +578,7 @@ async fn leaving_ultra_after_cold_resume_emits_explicit_mode() -> Result<()> {
     )
     .await;
     let initial = test_codex()
-        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_model_info_override("gpt-6.1-sol", add_ultra_reasoning)
         .with_config(configure_ultra)
         .build(&server)
         .await?;
@@ -586,7 +586,7 @@ async fn leaving_ultra_after_cold_resume_emits_explicit_mode() -> Result<()> {
     submit_turn(&initial.codex, "before resume", /*effort*/ None).await?;
 
     let mut resume_builder = test_codex()
-        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_model_info_override("gpt-6.1-sol", add_ultra_reasoning)
         .with_config(configure_ultra);
     let resumed = resume_builder.restart(&server, &initial).await?;
     drop(initial);
@@ -629,7 +629,7 @@ async fn ultra_on_multi_agent_v1_uses_highest_non_ultra_without_mode_instruction
     )
     .await;
     let test = test_codex()
-        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_model_info_override("gpt-6.1-sol", add_ultra_reasoning)
         .with_config(|config| {
             config.model_reasoning_effort = Some(ReasoningEffort::Ultra);
         })

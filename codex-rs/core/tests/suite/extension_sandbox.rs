@@ -77,7 +77,7 @@ async fn extension_tool_receives_turn_environment_sandbox() -> Result<()> {
     let mut builder = test_codex()
         .with_auth(auth)
         .with_extensions(extensions)
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
             model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
         })
@@ -180,7 +180,7 @@ async fn extension_tool_uses_granted_turn_permissions_without_host_local_persist
     let mut builder = test_codex()
         .with_auth(auth)
         .with_extensions(extensions)
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
             model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
         })
@@ -383,7 +383,7 @@ async fn extension_tool_rebinds_granted_permissions_on_each_turn(
     let mut builder = test_codex()
         .with_auth(auth)
         .with_extensions(extensions)
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
             model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
         })

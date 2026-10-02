@@ -1908,7 +1908,7 @@ async fn executor_skill_tool_reads_references_under_current_permissions(
     );
     let mut builder = test_codex()
         .with_extensions(Arc::new(extensions.build()))
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.truncation_policy = TruncationPolicyConfig::bytes(/*limit*/ 8192);
         })
         .with_config(configure_catalog_test);

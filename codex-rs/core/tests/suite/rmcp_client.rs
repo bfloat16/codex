@@ -540,7 +540,7 @@ async fn mcp_namespace_instructions_are_preserved_without_hiding_tools() -> anyh
     .await;
     let command = remote_aware_stdio_server_bin()?;
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             insert_mcp_server(
                 config,
@@ -630,7 +630,7 @@ async fn text_only_mcp_content_uses_content_items() -> anyhow::Result<()> {
 
     let command = remote_aware_stdio_server_bin()?;
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             insert_mcp_server(
                 config,
@@ -724,7 +724,7 @@ async fn environment_mcp_policy_filters_runtime_config_and_model_tools(
     }
     let fixture = test_codex()
         .with_home(codex_home)
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             if !from_plugin {
                 for server_name in ["allowed", "blocked"] {
@@ -1185,7 +1185,7 @@ async fn modern_mcp_pagination_preserves_valid_tools_and_rejects_oversized_curso
     .await;
     let command = remote_aware_stdio_server_bin()?;
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             config
                 .features
@@ -1681,7 +1681,7 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
     let model = models
         .models
         .iter_mut()
-        .find(|model| model.slug == "gpt-5.4")
+        .find(|model| model.slug == "gpt-6.1-sol")
         .expect("bundled model should exist");
     model.node_repl_auto_review_required = node_repl_auto_review_required;
     model.node_repl_disabled = node_repl_disabled;
@@ -1738,7 +1738,7 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
             config.model_catalog = Some(model_catalog);
         })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_model("gpt-5.4")
+        .with_model("gpt-6.1-sol")
         .with_config(move |config| {
             insert_mcp_server(
                 config,
@@ -2369,7 +2369,7 @@ async fn stdio_image_responses_round_trip() -> anyhow::Result<()> {
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
 
     let fixture = test_codex()
-        .with_model("gpt-5.2")
+        .with_model("gpt-6-sol")
         .with_config(move |config| {
             insert_mcp_server(
                 config,
@@ -2621,7 +2621,7 @@ async fn stdio_image_responses_preserve_original_detail_metadata() -> anyhow::Re
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
 
     let fixture = test_codex()
-        .with_model("gpt-5.4")
+        .with_model("gpt-6.1-sol")
         .with_config(move |config| {
             insert_mcp_server(
                 config,
@@ -3741,7 +3741,7 @@ async fn streamable_http_with_oauth_round_trip_impl() -> anyhow::Result<()> {
     // Phase 4: configure Codex with the OAuth-backed Streamable HTTP MCP
     // server and build the fixture in the active local or remote-aware mode.
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_home(temp_home.clone())
         .with_config(move |config| {
             config

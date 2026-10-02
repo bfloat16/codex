@@ -891,7 +891,7 @@ async fn code_mode_excludes_mcp_servers_using_their_configured_identity() -> Res
             let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
             let environment_id = remote_aware_environment_id();
             let mut builder = test_codex()
-                .with_model_info_override("gpt-5.4", move |model| {
+                .with_model_info_override("gpt-6.1-sol", move |model| {
                     model.supports_search_tool = supports_search_tool;
                 })
                 .with_config(move |config| {
@@ -1124,7 +1124,7 @@ async fn mcp_code_mode_exclusion_does_not_change_direct_mode_tool_exposure() -> 
             let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
             let environment_id = remote_aware_environment_id();
             let mut builder = test_codex()
-                .with_model_info_override("gpt-5.4", move |model| {
+                .with_model_info_override("gpt-6.1-sol", move |model| {
                     model.supports_search_tool = supports_search_tool;
                 })
                 .with_config(move |config| {
@@ -1384,10 +1384,10 @@ if (!tool) {
             let model = model_catalog
                 .models
                 .iter_mut()
-                .find(|model| model.slug == "gpt-5.4")
-                .expect("gpt-5.4 exists in bundled models.json");
+                .find(|model| model.slug == "gpt-6.1-sol")
+                .expect("gpt-6.1-sol exists in bundled models.json");
             config.chatgpt_base_url = apps_base_url;
-            config.model = Some("gpt-5.4".to_string());
+            config.model = Some("gpt-6.1-sol".to_string());
             model.supports_search_tool = true;
             config.model_catalog = Some(model_catalog);
         });
@@ -1909,7 +1909,7 @@ text(JSON.stringify([results[0].output.includes("code-alpha-ready"), results[1].
 
 // This model uses token-based tool-output truncation, giving the downstream
 // history assertions a stable `…N tokens truncated…` marker.
-const TOKEN_POLICY_TEST_MODEL: &str = "gpt-5.4";
+const TOKEN_POLICY_TEST_MODEL: &str = "gpt-6.1-sol";
 
 // A nested `exec_command` limit applies to `result.output` inside JavaScript.
 // The outer code-mode and history budgets apply after the script calls `text`.
@@ -3985,7 +3985,7 @@ text("after");
 
     let server = responses::start_mock_server().await;
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.input_modalities.push(InputModality::Audio);
         })
         .with_config(|config| {
@@ -4088,7 +4088,7 @@ async fn code_mode_resizes_explicit_original_image() -> Result<()> {
         &server,
         "use exec to return a large original-detail image",
         &code,
-        "gpt-5.4",
+        "gpt-6.1-sol",
         |_| {},
     )
     .await?;
@@ -4147,7 +4147,7 @@ image({{
         &server,
         "emit images with legacy detail arguments and MCP metadata",
         &code,
-        "gpt-5.4",
+        "gpt-6.1-sol",
         |config| {
             let _ = config.features.enable(Feature::UnifiedImageBudget);
         },
@@ -4196,7 +4196,7 @@ async fn code_mode_unified_image_budget_preserves_legacy_contract_for_unsupporte
         &server,
         "emit an image on a legacy model",
         r#"image("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==");"#,
-        "gpt-5.2",
+        "gpt-6-sol",
         |config| {
             let _ = config.features.enable(Feature::UnifiedImageBudget);
         },
@@ -4228,7 +4228,7 @@ async fn code_mode_view_image_rejects_invalid_file_without_exposing_contents() -
 
     let server = responses::start_mock_server().await;
     let builder = test_codex()
-        .with_model("gpt-5.4")
+        .with_model("gpt-6.1-sol")
         .with_config(|config| {
             let _ = config.features.enable(Feature::CodeMode);
         })
@@ -4277,7 +4277,7 @@ async fn code_mode_can_use_view_image_result_with_image_helper(
 
     let server = responses::start_mock_server().await;
     let mut builder = test_codex()
-        .with_model("gpt-5.4")
+        .with_model("gpt-6.1-sol")
         .with_config(move |config| {
             let _ = config.features.enable(Feature::CodeMode);
             if unified_image_budget {
@@ -4413,7 +4413,7 @@ image(imageItem);
         &server,
         "use exec to call the rmcp image scenario tool and emit its image output",
         code,
-        "gpt-5.4",
+        "gpt-6.1-sol",
     )
     .await?;
 
@@ -6113,7 +6113,7 @@ async fn code_mode_omits_configured_mcp_server_tools() -> Result<()> {
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
     let environment_id = remote_aware_environment_id();
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.supports_search_tool = false;
         })
         .with_config(move |config| {
@@ -6206,7 +6206,7 @@ async fn code_mode_only_keeps_mcp_tools_direct_when_nested_exposure_is_omitted()
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
     let environment_id = remote_aware_environment_id();
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.supports_search_tool = true;
         })
         .with_config(move |config| {
@@ -6300,7 +6300,7 @@ async fn code_mode_only_can_call_mcp_tools_hidden_from_direct_and_deferred_expos
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
     let environment_id = remote_aware_environment_id();
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.supports_search_tool = true;
         })
         .with_config(move |config| {

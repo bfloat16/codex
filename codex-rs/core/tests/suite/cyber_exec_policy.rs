@@ -132,7 +132,7 @@ async fn saved_prefix_only_bypasses_guardian_for_general_models(
         }
     };
     let mut builder = builder
-        .with_model_info_override("gpt-5.4", move |model| {
+        .with_model_info_override("gpt-6.1-sol", move |model| {
             if model_specialty == ModelSpecialty::Cyber {
                 model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
             }
@@ -157,7 +157,7 @@ async fn saved_prefix_only_bypasses_guardian_for_general_models(
     response_bodies.push(sse_completed("parent-saved-prefix-complete"));
     let responses = mount_sse_sequence(&server, response_bodies).await;
 
-    submit_model_turn(&test, "gpt-5.4", "run the saved-prefix command").await?;
+    submit_model_turn(&test, "gpt-6.1-sol", "run the saved-prefix command").await?;
 
     let requests = responses.requests();
     let guardian_request_count = requests
@@ -194,7 +194,7 @@ async fn cyber_model_user_approval_never_offers_a_reusable_prefix() -> Result<()
 
     let server = start_mock_server().await;
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
         })
         .with_config(move |config| {
@@ -273,10 +273,10 @@ async fn switching_models_suppresses_and_restores_saved_prefix_approvals() -> Re
 
     let server = start_mock_server().await;
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
         })
-        .with_model("gpt-5.2")
+        .with_model("gpt-6-sol")
         .with_config(configure_saved_prefix_and_guardian);
     let test = builder.build_with_auto_env(&server).await?;
 
@@ -294,9 +294,9 @@ async fn switching_models_suppresses_and_restores_saved_prefix_approvals() -> Re
     )
     .await;
 
-    submit_model_turn(&test, "gpt-5.2", "run the first general-model command").await?;
-    submit_model_turn(&test, "gpt-5.4", "run the cyber-model command").await?;
-    submit_model_turn(&test, "gpt-5.2", "run the final general-model command").await?;
+    submit_model_turn(&test, "gpt-6-sol", "run the first general-model command").await?;
+    submit_model_turn(&test, "gpt-6.1-sol", "run the cyber-model command").await?;
+    submit_model_turn(&test, "gpt-6-sol", "run the final general-model command").await?;
 
     let requests = responses.requests();
     let guardian_requests = requests
@@ -310,7 +310,7 @@ async fn switching_models_suppresses_and_restores_saved_prefix_approvals() -> Re
 
     let cyber_request = requests
         .iter()
-        .find(|request| request.body_json()["model"] == "gpt-5.4")
+        .find(|request| request.body_json()["model"] == "gpt-6.1-sol")
         .expect("cyber-model request");
     let cyber_developer_messages = cyber_request.message_input_texts("developer");
     let cyber_permissions = cyber_developer_messages
@@ -323,7 +323,7 @@ async fn switching_models_suppresses_and_restores_saved_prefix_approvals() -> Re
     let final_parent_request = requests
         .iter()
         .rev()
-        .find(|request| request.body_json()["model"] == "gpt-5.2")
+        .find(|request| request.body_json()["model"] == "gpt-6-sol")
         .expect("final general-model request");
     assert!(
         final_parent_request

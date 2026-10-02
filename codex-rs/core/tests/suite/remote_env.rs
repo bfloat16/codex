@@ -951,7 +951,7 @@ async fn deferred_executor_promotes_primary_environment_when_startup_completes()
     .await;
     let mut builder = test_codex()
         .with_exec_server_url(format!("ws://{}", listener.local_addr()?))
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             config
                 .mcp_servers

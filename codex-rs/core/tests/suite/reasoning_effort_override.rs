@@ -16,7 +16,7 @@ use test_case::test_case;
 
 fn override_builder() -> TestCodexBuilder {
     test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
+        .with_model_info_override("gpt-6.1-sol", |model| {
             model.use_responses_lite = true;
         })
         .with_config(|config| {
@@ -215,7 +215,7 @@ async fn reasoning_effort_override_normalizes_ultra_before_comparing_updates(
     .await;
     let model_effort = resolved_effort.clone();
     let test = override_builder()
-        .with_model_info_override("gpt-5.4", move |model| {
+        .with_model_info_override("gpt-6.1-sol", move |model| {
             model.multi_agent_reasoning_effort = Some(model_effort.clone());
             model.supported_reasoning_levels = vec![ReasoningEffortPreset {
                 effort: model_effort,
@@ -290,7 +290,7 @@ async fn reasoning_effort_override_unavailable_uses_request_effort(
             config.model_provider.name = "unsupported provider".into();
         }),
         OverrideUnavailable::ResponsesLiteDisabled => override_builder()
-            .with_model_info_override("gpt-5.4", |model| model.use_responses_lite = false),
+            .with_model_info_override("gpt-6.1-sol", |model| model.use_responses_lite = false),
     };
     let test = builder.build_with_auto_env(&server).await?;
     test.submit_text_turn("first").await?;

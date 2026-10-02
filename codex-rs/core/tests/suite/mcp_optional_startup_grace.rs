@@ -68,7 +68,7 @@ async fn optional_mcp_startup_grace_controls_initial_turn_tool_catalog(
     .await;
 
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             config.mcp_optional_startup_grace = startup_grace;
             let mut servers = config.mcp_servers.get().clone();
@@ -196,7 +196,7 @@ async fn running_thread_uses_refreshed_optional_mcp_startup_grace(
     .await;
 
     let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+        .with_model_info_override("gpt-6.1-sol", |model| model.supports_search_tool = false)
         .with_config(move |config| {
             config.mcp_optional_startup_grace = Duration::from_millis(50);
             let mut servers = config.mcp_servers.get().clone();

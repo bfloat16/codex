@@ -104,7 +104,7 @@ async fn responses_lite_uses_input_items_for_instructions_and_tools() -> Result<
 
     let builder = || {
         test_codex()
-            .with_model_info_override("gpt-5.4", |model_info| {
+            .with_model_info_override("gpt-6.1-sol", |model_info| {
                 model_info.use_responses_lite = true;
                 model_info.tool_mode = Some(ToolMode::CodeMode);
             })
@@ -205,7 +205,7 @@ async fn responses_lite_includes_tool_namespaces_info_when_enabled() -> Result<(
     .await;
 
     let mut builder = apps_enabled_builder(apps_server.chatgpt_base_url)
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
             model_info.tool_mode = Some(ToolMode::CodeMode);
             model_info.supports_search_tool = false;
@@ -269,7 +269,7 @@ async fn responses_lite_prepares_images() -> Result<()> {
     .await;
     let image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
     let remote_image_url = "https://example.com/image.png";
-    let mut builder = test_codex().with_model_info_override("gpt-5.4", |model_info| {
+    let mut builder = test_codex().with_model_info_override("gpt-6.1-sol", |model_info| {
         model_info.use_responses_lite = true;
         configure_image_capable_model(model_info);
     });
@@ -339,7 +339,7 @@ async fn responses_lite_uses_standalone_web_search_and_image_generation() -> Res
     let mut builder = test_codex()
         .with_auth(auth)
         .with_extensions(extensions)
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
             configure_image_capable_model(model_info);
         })
@@ -383,7 +383,7 @@ async fn responses_lite_exposes_standalone_tools_for_actor_authorized_provider()
     let mut builder = test_codex()
         .with_auth(auth)
         .with_extensions(extensions)
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
             configure_image_capable_model(model_info);
         })
@@ -462,7 +462,7 @@ async fn responses_lite_does_not_expose_standalone_web_search_for_bedrock_provid
     let mut builder = test_codex()
         .with_auth(auth)
         .with_extensions(extensions)
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
         })
         .with_config(|config| {
@@ -513,7 +513,7 @@ async fn assert_responses_lite_custom_provider_web_search(
     let mut builder = test_codex()
         .with_auth(auth)
         .with_extensions(extensions)
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
         })
         .with_config(move |config| {
@@ -559,7 +559,7 @@ async fn responses_lite_compact_request_uses_lite_transport_contract() -> Result
         responses::mount_compact_json_once(&server, serde_json::json!({ "output": [] })).await;
 
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
         })
         .with_config(|config| {
@@ -612,7 +612,7 @@ async fn responses_lite_omits_hosted_tools_without_standalone_extensions() -> Re
 
     let mut builder = test_codex()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_model_info_override("gpt-5.4", |model_info| {
+        .with_model_info_override("gpt-6.1-sol", |model_info| {
             model_info.use_responses_lite = true;
             configure_image_capable_model(model_info);
         })
@@ -649,7 +649,7 @@ async fn non_lite_uses_standalone_image_generation_by_default() -> Result<()> {
     let mut builder = test_codex()
         .with_auth(auth)
         .with_extensions(extensions)
-        .with_model_info_override("gpt-5.4", configure_image_capable_model)
+        .with_model_info_override("gpt-6.1-sol", configure_image_capable_model)
         .with_config(configure_responses_tools);
     let test = builder.build(&server).await?;
 

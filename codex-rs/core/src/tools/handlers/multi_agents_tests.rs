@@ -405,7 +405,7 @@ async fn multi_agent_v2_spawn_fork_turns_all_applies_agent_type_override() {
 async fn spawn_agent_service_tier_uses_root_preference_when_root_model_cannot_support_it() {
     let (_session, turn) = make_session_and_context().await;
     let mut config = (*turn.config).clone();
-    config.model = Some("gpt-5.4-mini".to_string());
+    config.model = Some("gpt-6-luna".to_string());
     config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
     let manager = thread_manager();
     let root = manager
@@ -414,7 +414,7 @@ async fn spawn_agent_service_tier_uses_root_preference_when_root_model_cannot_su
         .expect("root thread should start");
     assert_eq!(root.thread.config_snapshot().await.service_tier, None);
 
-    config.model = Some("gpt-5.4".to_string());
+    config.model = Some("gpt-6.1-sol".to_string());
     apply_spawn_agent_service_tier(root.thread.session.as_ref(), &mut config)
         .await
         .expect("root preference should be resolved against the child model");
@@ -435,7 +435,7 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
     {
         let (mut session, turn) = make_session_and_context().await;
         let mut turn = turn
-            .with_model("gpt-5.4".to_string(), &session.services.models_manager)
+            .with_model("gpt-6.1-sol".to_string(), &session.services.models_manager)
             .await;
         let mut config = (*turn.config).clone();
         config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
@@ -476,7 +476,7 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
     {
         let (mut session, turn) = make_session_and_context().await;
         let mut turn = turn
-            .with_model("gpt-5.4".to_string(), &session.services.models_manager)
+            .with_model("gpt-6.1-sol".to_string(), &session.services.models_manager)
             .await;
         let mut config = (*turn.config).clone();
         config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
@@ -496,7 +496,7 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
                 "spawn_agent",
                 function_payload(json!({
                     "message": "inspect this repo",
-                    "model": "gpt-5.4-mini"
+                    "model": "gpt-6-luna"
                 })),
             ))
             .await
@@ -526,7 +526,7 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
             .join("service-tier-role.toml");
         tokio::fs::write(
             &role_config_path,
-            r#"model = "gpt-5.4"
+            r#"model = "gpt-6.1-sol"
 service_tier = "priority"
 "#,
         )
@@ -587,7 +587,7 @@ async fn spawn_agent_role_service_tier_cannot_override_root_preference() {
 
     let (mut session, turn) = make_session_and_context().await;
     let mut turn = turn
-        .with_model("gpt-5.4".to_string(), &session.services.models_manager)
+        .with_model("gpt-6.1-sol".to_string(), &session.services.models_manager)
         .await;
     tokio::fs::create_dir_all(&turn.config.codex_home)
         .await
@@ -595,7 +595,7 @@ async fn spawn_agent_role_service_tier_cannot_override_root_preference() {
     let role_config_path = turn.config.codex_home.as_path().join("tiered-role.toml");
     tokio::fs::write(
         &role_config_path,
-        r#"model = "gpt-5.4"
+        r#"model = "gpt-6.1-sol"
 service_tier = "turbo"
 "#,
     )
@@ -659,7 +659,7 @@ async fn spawn_agent_full_history_fork_inherits_root_service_tier() {
 
     let (mut session, turn) = make_session_and_context().await;
     let mut turn = turn
-        .with_model("gpt-5.4".to_string(), &session.services.models_manager)
+        .with_model("gpt-6.1-sol".to_string(), &session.services.models_manager)
         .await;
     let mut config = (*turn.config).clone();
     config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
@@ -709,7 +709,7 @@ async fn multi_agent_v2_full_history_fork_inherits_root_service_tier() {
 
     let (mut session, turn) = make_session_and_context().await;
     let mut turn = turn
-        .with_model("gpt-5.4".to_string(), &session.services.models_manager)
+        .with_model("gpt-6.1-sol".to_string(), &session.services.models_manager)
         .await;
     let mut config = (*turn.config).clone();
     config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
