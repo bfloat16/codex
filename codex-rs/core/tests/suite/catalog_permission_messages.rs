@@ -2,7 +2,6 @@ use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_core::config::Constrained;
 use codex_login::CodexAuth;
-use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::model_info::model_info_from_slug;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ModelMessages;
@@ -14,7 +13,6 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
@@ -24,7 +22,7 @@ use pretty_assertions::assert_eq;
 use wiremock::MockServer;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn catalog_permission_message_loaded_from_remote_models_is_sent() -> Result<()> {
+async fn catalog_permission_message_loaded_from_local_models_is_sent() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = MockServer::start().await;
@@ -48,19 +46,18 @@ async fn catalog_permission_message_loaded_from_remote_models_is_sent() -> Resul
         confirmation_policies: None,
         guardian_v2: None,
     });
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![model],
+    };
     let response_mock = mount_sse_once(
         &server,
         sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
     )
     .await;
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::Never);
@@ -70,13 +67,6 @@ async fn catalog_permission_message_loaded_from_remote_models_is_sent() -> Resul
                 .expect("read-only permission profile should be allowed");
         });
     let test = builder.build_with_auto_env(&server).await?;
-    test.thread_manager
-        .get_models_manager()
-        .list_models(
-            RefreshStrategy::OnlineIfUncached,
-            codex_core::test_support::default_http_client_factory(),
-        )
-        .await;
 
     core_test_support::submit_thread_settings(
         &test.codex,
@@ -97,7 +87,6 @@ async fn catalog_permission_message_loaded_from_remote_models_is_sent() -> Resul
     })
     .await;
 
-    assert_eq!(models_mock.single_request_path(), "/v1/models");
     let permissions = response_mock
         .single_request()
         .message_input_texts("developer")

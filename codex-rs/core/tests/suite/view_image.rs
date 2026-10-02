@@ -42,7 +42,6 @@ use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
@@ -935,9 +934,11 @@ async fn view_image_unified_budget_hides_detail_but_accepts_legacy_hints() -> an
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4").with_config(|config| {
-        let _ = config.features.enable(Feature::UnifiedImageBudget);
-    });
+    let mut builder = test_codex()
+        .with_model("gpt-6.1-sol")
+        .with_config(|config| {
+            let _ = config.features.enable(Feature::UnifiedImageBudget);
+        });
     let test = builder.build_with_auto_env(&server).await?;
     let rel_path = "assets/unified-example.png";
     write_workspace_png(
@@ -1657,15 +1658,14 @@ async fn view_image_tool_returns_unsupported_message_for_text_only_model() -> an
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),
     };
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![text_only_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![text_only_model],
+    };
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some(model_slug.to_string());

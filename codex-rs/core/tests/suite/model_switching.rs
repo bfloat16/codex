@@ -47,7 +47,6 @@ use core_test_support::responses::ev_completed_with_tokens;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_image_generation_call;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
@@ -1069,13 +1068,9 @@ async fn model_change_from_multimodal_to_text_strips_prior_media_content() -> Re
         "text only",
         vec![InputModality::Text],
     );
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![multimodal_model, text_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![multimodal_model, text_model],
+    };
 
     let responses = mount_sse_sequence(
         &server,
@@ -1084,18 +1079,14 @@ async fn model_change_from_multimodal_to_text_strips_prior_media_content() -> Re
     .await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             config.model = Some(multimodal_model_slug.to_string());
         });
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
-    let _ = models_manager
-        .list_models(
-            RefreshStrategy::OnlineIfUncached,
-            codex_core::test_support::default_http_client_factory(),
-        )
-        .await;
     let image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
         .to_string();
 
@@ -1188,13 +1179,9 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
         "supports image input",
         default_input_modalities(),
     );
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![image_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![image_model],
+    };
 
     let responses = mount_sse_sequence(
         &server,
@@ -1210,18 +1197,14 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
     .await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             config.model = Some(image_model_slug.to_string());
         });
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
-    let _ = models_manager
-        .list_models(
-            RefreshStrategy::OnlineIfUncached,
-            codex_core::test_support::default_http_client_factory(),
-        )
-        .await;
 
     test.codex
         .start_or_steer_turn(read_only_user_turn(
@@ -1285,13 +1268,9 @@ async fn model_change_from_generated_image_to_text_preserves_prior_generated_ima
         "text only",
         vec![InputModality::Text],
     );
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![image_model, text_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![image_model, text_model],
+    };
 
     let responses = mount_sse_sequence(
         &server,
@@ -1307,18 +1286,14 @@ async fn model_change_from_generated_image_to_text_preserves_prior_generated_ima
     .await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             config.model = Some(image_model_slug.to_string());
         });
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
-    let _ = models_manager
-        .list_models(
-            RefreshStrategy::OnlineIfUncached,
-            codex_core::test_support::default_http_client_factory(),
-        )
-        .await;
 
     test.codex
         .start_or_steer_turn(read_only_user_turn(
@@ -1384,13 +1359,9 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
         "supports image input",
         default_input_modalities(),
     );
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![image_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![image_model],
+    };
 
     let responses = mount_sse_sequence(
         &server,
@@ -1409,19 +1380,15 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
     let mut extensions = ExtensionRegistryBuilder::new();
     extensions.thread_lifecycle_contributor(rollback_ready.clone());
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_extensions(Arc::new(extensions.build()))
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             config.model = Some(image_model_slug.to_string());
         });
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
-    let _ = models_manager
-        .list_models(
-            RefreshStrategy::OnlineIfUncached,
-            codex_core::test_support::default_http_client_factory(),
-        )
-        .await;
 
     test.codex
         .start_or_steer_turn(read_only_user_turn(
@@ -1550,13 +1517,9 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
     smaller_model.description = Some("smaller context window model".to_string());
     smaller_model.context_window = Some(smaller_context_window);
 
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![base_model, smaller_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![base_model, smaller_model],
+    };
 
     mount_sse_sequence(
         &server,
@@ -1574,6 +1537,9 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
     .await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some(large_model_slug.to_string());
@@ -1583,7 +1549,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
     let models_manager = test.thread_manager.get_models_manager();
     let available_models = models_manager
         .list_models(
-            RefreshStrategy::Online,
+            RefreshStrategy::Offline,
             codex_core::test_support::default_http_client_factory(),
         )
         .await;

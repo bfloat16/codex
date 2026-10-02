@@ -7,8 +7,6 @@ use codex_core::config::Config;
 use codex_features::Feature;
 use codex_history::RolloutItem;
 use codex_login::CodexAuth;
-use codex_models_manager::manager::RefreshStrategy;
-use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::ModelInfo;
@@ -23,7 +21,6 @@ use codex_protocol::protocol::MULTI_AGENT_MODE_OPEN_TAG;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::namespace_child_tool;
@@ -31,10 +28,7 @@ use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::test_codex::test_codex;
 use serde_json::Value;
-use std::time::Duration;
-use std::time::Instant;
 use test_case::test_case;
-use tokio::time::sleep;
 
 const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
@@ -127,74 +121,51 @@ fn test_model_info(
     }
 }
 
-async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let available_models = manager
-            .list_models(
-                RefreshStrategy::Online,
-                codex_core::test_support::default_http_client_factory(),
-            )
-            .await;
-        if available_models.iter().any(|model| model.model == slug) {
-            return;
-        }
-        if Instant::now() >= deadline {
-            panic!("timed out waiting for remote model {slug} to appear");
-        }
-        sleep(Duration::from_millis(25)).await;
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() -> Result<()> {
     let server = start_mock_server().await;
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                test_model_info(
-                    "visible-model",
-                    "Visible Model",
-                    "Fast and capable",
-                    ModelVisibility::List,
-                    ReasoningEffort::Medium,
-                    vec![
-                        ReasoningEffortPreset {
-                            effort: ReasoningEffort::Low,
-                            description: "Quick scan".to_string(),
-                        },
-                        ReasoningEffortPreset {
-                            effort: ReasoningEffort::Medium,
-                            description: "Balanced".to_string(),
-                        },
-                        ReasoningEffortPreset {
-                            effort: ReasoningEffort::High,
-                            description: "Deep dive".to_string(),
-                        },
-                    ],
-                    vec![ModelServiceTier {
-                        id: "priority".to_string(),
-                        name: "Fast".to_string(),
-                        description: "1.5x speed, increased usage".to_string(),
-                    }],
-                ),
-                test_model_info(
-                    "hidden-model",
-                    "Hidden Model",
-                    "Should not be shown",
-                    ModelVisibility::Hide,
-                    ReasoningEffort::Low,
-                    vec![ReasoningEffortPreset {
+    let model_catalog = ModelsResponse {
+        models: vec![
+            test_model_info(
+                "visible-model",
+                "Visible Model",
+                "Fast and capable",
+                ModelVisibility::List,
+                ReasoningEffort::Medium,
+                vec![
+                    ReasoningEffortPreset {
                         effort: ReasoningEffort::Low,
-                        description: "Not visible".to_string(),
-                    }],
-                    Vec::new(),
-                ),
-            ],
-        },
-    )
-    .await;
+                        description: "Quick scan".to_string(),
+                    },
+                    ReasoningEffortPreset {
+                        effort: ReasoningEffort::Medium,
+                        description: "Balanced".to_string(),
+                    },
+                    ReasoningEffortPreset {
+                        effort: ReasoningEffort::High,
+                        description: "Deep dive".to_string(),
+                    },
+                ],
+                vec![ModelServiceTier {
+                    id: "priority".to_string(),
+                    name: "Fast".to_string(),
+                    description: "1.5x speed, increased usage".to_string(),
+                }],
+            ),
+            test_model_info(
+                "hidden-model",
+                "Hidden Model",
+                "Should not be shown",
+                ModelVisibility::Hide,
+                ReasoningEffort::Low,
+                vec![ReasoningEffortPreset {
+                    effort: ReasoningEffort::Low,
+                    description: "Not visible".to_string(),
+                }],
+                Vec::new(),
+            ),
+        ],
+    };
     let resp_mock = mount_sse_once(
         &server,
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
@@ -202,6 +173,9 @@ async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() ->
     .await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model("visible-model")
         .with_config(|config| {
@@ -212,7 +186,6 @@ async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() ->
             config.multi_agent_v2.hide_spawn_agent_metadata = false;
         });
     let test = builder.build(&server).await?;
-    wait_for_model_available(&test.thread_manager.get_models_manager(), "visible-model").await;
 
     test.submit_turn("hello").await?;
 

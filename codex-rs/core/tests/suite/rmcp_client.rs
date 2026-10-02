@@ -38,7 +38,6 @@ use codex_login::CodexAuth;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_mcp::MCP_SANDBOX_STATE_META_CAPABILITY;
 use codex_mcp::SandboxState;
-use codex_models_manager::manager::RefreshStrategy;
 use codex_utils_path_uri::LegacyAppPathString;
 
 use codex_history::RolloutItem;
@@ -86,7 +85,6 @@ use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::assert_regex_match;
 use core_test_support::is_remote_test_environment;
 use core_test_support::responses;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -1695,7 +1693,7 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
         browser_use: browser_policy.map(str::to_owned),
         computer_use: computer_policy.map(str::to_owned),
     });
-    let models_mock = mount_models_once(&server, models).await;
+    let model_catalog = models;
 
     let mut response_events = vec![
         responses::ev_response_created("resp-1"),
@@ -1736,6 +1734,9 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
 
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
     let fixture = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model("gpt-5.4")
         .with_config(move |config| {
@@ -1835,15 +1836,6 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
     } else {
         Vec::new()
     };
-    fixture
-        .thread_manager
-        .get_models_manager()
-        .list_models(
-            RefreshStrategy::Online,
-            codex_core::test_support::default_http_client_factory(),
-        )
-        .await;
-    assert_eq!(models_mock.requests().len(), 1);
 
     fixture
         .submit_turn_with_permission_profile(
@@ -2695,62 +2687,58 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
     let namespace = format!("mcp__{server_name}");
     let text_only_model_slug = "rmcp-text-only-model";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![ModelInfo {
-                slug: text_only_model_slug.to_string(),
-                display_name: "RMCP Text Only".to_string(),
-                description: Some("Test model without image input support".to_string()),
-                default_reasoning_level: None,
-                supported_reasoning_levels: vec![ReasoningEffortPreset {
-                    effort: codex_protocol::openai_models::ReasoningEffort::Medium,
-                    description: "Medium".to_string(),
-                }],
-                shell_type: ConfigShellToolType::UnifiedExec,
-                visibility: ModelVisibility::List,
-                supported_in_api: true,
-                priority: 1,
-                additional_speed_tiers: Vec::new(),
-                service_tiers: Vec::new(),
-                default_service_tier: None,
-                upgrade: None,
-                model_messages: None,
-                include_skills_usage_instructions: false,
-                include_plugin_usage_instructions: false,
-                include_apps_usage_instructions: false,
-                supports_reasoning_summary_parameter: true,
-                default_reasoning_summary: ReasoningSummary::Auto,
-                support_verbosity: false,
-                default_verbosity: None,
-                availability_nux: None,
-                apply_patch_tool_type: None,
-                web_search_tool_type: Default::default(),
-                truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
-                supports_image_detail_original: false,
-                context_window: Some(272_000),
-                max_context_window: None,
-                auto_compact_token_limit: None,
-                comp_hash: None,
-                effective_context_window_percent: 95,
-                experimental_supported_tools: Vec::new(),
-                input_modalities: vec![InputModality::Text],
-                used_fallback_model_metadata: false,
-                supports_search_tool: false,
-                supports_experimental_context: false,
-                use_responses_lite: false,
-                guardian: None,
-                node_repl_auto_review_required: false,
-                node_repl_disabled: false,
-                auto_review_model_override: None,
-                model_specialty: None,
-                tool_mode: None,
-                multi_agent_version: None,
-                multi_agent_reasoning_effort: None,
+    let model_catalog = ModelsResponse {
+        models: vec![ModelInfo {
+            slug: text_only_model_slug.to_string(),
+            display_name: "RMCP Text Only".to_string(),
+            description: Some("Test model without image input support".to_string()),
+            default_reasoning_level: None,
+            supported_reasoning_levels: vec![ReasoningEffortPreset {
+                effort: codex_protocol::openai_models::ReasoningEffort::Medium,
+                description: "Medium".to_string(),
             }],
-        },
-    )
-    .await;
+            shell_type: ConfigShellToolType::UnifiedExec,
+            visibility: ModelVisibility::List,
+            supported_in_api: true,
+            priority: 1,
+            additional_speed_tiers: Vec::new(),
+            service_tiers: Vec::new(),
+            default_service_tier: None,
+            upgrade: None,
+            model_messages: None,
+            include_skills_usage_instructions: false,
+            include_plugin_usage_instructions: false,
+            include_apps_usage_instructions: false,
+            supports_reasoning_summary_parameter: true,
+            default_reasoning_summary: ReasoningSummary::Auto,
+            support_verbosity: false,
+            default_verbosity: None,
+            availability_nux: None,
+            apply_patch_tool_type: None,
+            web_search_tool_type: Default::default(),
+            truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
+            supports_image_detail_original: false,
+            context_window: Some(272_000),
+            max_context_window: None,
+            auto_compact_token_limit: None,
+            comp_hash: None,
+            effective_context_window_percent: 95,
+            experimental_supported_tools: Vec::new(),
+            input_modalities: vec![InputModality::Text],
+            used_fallback_model_metadata: false,
+            supports_search_tool: false,
+            supports_experimental_context: false,
+            use_responses_lite: false,
+            guardian: None,
+            node_repl_auto_review_required: false,
+            node_repl_disabled: false,
+            auto_review_model_override: None,
+            model_specialty: None,
+            tool_mode: None,
+            multi_agent_version: None,
+            multi_agent_reasoning_effort: None,
+        }],
+    };
 
     // First stream: model decides to call the image tool.
     mount_sse_once(
@@ -2775,6 +2763,9 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
 
     let fixture = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             insert_mcp_server(
@@ -2797,16 +2788,6 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
         .build_with_auto_env(&server)
         .await?;
     wait_for_mcp_server(&fixture.codex, server_name).await?;
-
-    fixture
-        .thread_manager
-        .get_models_manager()
-        .list_models(
-            RefreshStrategy::Online,
-            codex_core::test_support::default_http_client_factory(),
-        )
-        .await;
-    assert_eq!(models_mock.requests().len(), 1);
 
     fixture
         .codex

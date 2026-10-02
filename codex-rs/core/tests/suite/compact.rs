@@ -41,7 +41,6 @@ use core_test_support::context_snapshot::ContextSnapshotRenderMode;
 use core_test_support::hooks::trust_discovered_hooks;
 use core_test_support::responses;
 use core_test_support::responses::ev_reasoning_item;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::strip_response_item_ids_from_json;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::local_selections;
@@ -2239,16 +2238,12 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
     let previous_model = "gpt-5.4";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_context_window(previous_model, /*context_window*/ 273_000),
-                model_info_with_context_window(next_model, /*context_window*/ 125_000),
-            ],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_context_window(previous_model, /*context_window*/ 273_000),
+            model_info_with_context_window(next_model, /*context_window*/ 125_000),
+        ],
+    };
 
     let request_log = mount_sse_sequence(
         &server,
@@ -2271,6 +2266,9 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -2304,7 +2302,6 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
     assert_compaction_uses_turn_lifecycle_id(&test.codex).await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests.len(),
         3,
@@ -2342,16 +2339,12 @@ async fn pre_sampling_compact_runs_when_comp_hash_changes() {
     let previous_model = "gpt-5.4";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_optional_comp_hash(previous_model, Some("hash-a")),
-                model_info_with_optional_comp_hash(next_model, Some("hash-b")),
-            ],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_optional_comp_hash(previous_model, Some("hash-a")),
+            model_info_with_optional_comp_hash(next_model, Some("hash-b")),
+        ],
+    };
 
     let request_log = mount_sse_sequence(
         &server,
@@ -2374,6 +2367,9 @@ async fn pre_sampling_compact_runs_when_comp_hash_changes() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -2406,7 +2402,6 @@ async fn pre_sampling_compact_runs_when_comp_hash_changes() {
     assert_compaction_uses_turn_lifecycle_id(&test.codex).await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests.len(),
         3,
@@ -2525,13 +2520,9 @@ async fn pre_sampling_compact_falls_back_from_retired_previous_model_after_renam
     let mut renamed_model_info = model_info_with_optional_comp_hash("gpt-5.4", Some("hash-b"));
     renamed_model_info.slug = renamed_model.to_string();
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![previous_model_info, renamed_model_info],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![previous_model_info, renamed_model_info],
+    };
 
     let request_log = mount_response_sequence(
         &server,
@@ -2563,6 +2554,9 @@ async fn pre_sampling_compact_falls_back_from_retired_previous_model_after_renam
 
     let model_provider = openai_model_provider(&server);
     let mut initial_builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(retired_model)
         .with_config(move |config| {
@@ -2629,7 +2623,6 @@ async fn pre_sampling_compact_falls_back_from_retired_previous_model_after_renam
     assert_compaction_uses_turn_lifecycle_id(&resumed.codex).await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests.len(),
         4,
@@ -2666,13 +2659,9 @@ async fn pre_sampling_compact_falls_back_when_previous_model_is_not_found() {
     let mut renamed_model_info = model_info_with_optional_comp_hash("gpt-5.4", Some("hash-b"));
     renamed_model_info.slug = renamed_model.to_string();
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![previous_model_info, renamed_model_info],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![previous_model_info, renamed_model_info],
+    };
 
     let request_log = mount_response_sequence(
         &server,
@@ -2702,6 +2691,9 @@ async fn pre_sampling_compact_falls_back_when_previous_model_is_not_found() {
 
     let model_provider = openai_model_provider(&server);
     let mut initial_builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(retired_model)
         .with_config(move |config| {
@@ -2769,7 +2761,6 @@ async fn pre_sampling_compact_falls_back_when_previous_model_is_not_found() {
     assert_compaction_uses_turn_lifecycle_id(&resumed.codex).await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests.len(),
         4,
@@ -2810,13 +2801,9 @@ async fn pre_sampling_compact_falls_back_after_previous_model_invalid_request_on
     next_model_info.slug = next_model.to_string();
     next_model_info.use_responses_lite = false;
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![previous_model_info, next_model_info],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![previous_model_info, next_model_info],
+    };
 
     let request_log = mount_response_sequence(
         &server,
@@ -2846,6 +2833,9 @@ async fn pre_sampling_compact_falls_back_after_previous_model_invalid_request_on
 
     let model_provider = openai_model_provider(&server);
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(retired_model)
         .with_config(move |config| {
@@ -2880,7 +2870,6 @@ async fn pre_sampling_compact_falls_back_after_previous_model_invalid_request_on
     assert_compaction_uses_turn_lifecycle_id(&test.codex).await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests.len(),
         4,
@@ -2932,13 +2921,9 @@ async fn pre_sampling_legacy_remote_compact_falls_back_after_previous_model_inva
         model_info_with_context_window("gpt-5.4", /*context_window*/ 125_000);
     next_model_info.slug = next_model.to_string();
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![previous_model_info, next_model_info],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![previous_model_info, next_model_info],
+    };
     let request_log = mount_sse_sequence(
         &server,
         vec![
@@ -2971,6 +2956,9 @@ async fn pre_sampling_legacy_remote_compact_falls_back_after_previous_model_inva
 
     let model_provider = openai_model_provider(&server);
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(retired_model)
         .with_config(move |config| {
@@ -3005,7 +2993,6 @@ async fn pre_sampling_legacy_remote_compact_falls_back_after_previous_model_inva
 
     let requests = request_log.requests();
     let compact_requests = compact_request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(requests.len(), 2);
     assert_eq!(compact_requests.len(), 2);
     assert_eq!(
@@ -3116,20 +3103,13 @@ async fn pre_sampling_compact_skips_when_either_comp_hash_is_missing() {
     let model_with_hash = "gpt-5.5";
     let next_model_without_hash = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_optional_comp_hash(model_without_hash, /*comp_hash*/ None),
-                model_info_with_optional_comp_hash(model_with_hash, Some("hash-a")),
-                model_info_with_optional_comp_hash(
-                    next_model_without_hash,
-                    /*comp_hash*/ None,
-                ),
-            ],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_optional_comp_hash(model_without_hash, /*comp_hash*/ None),
+            model_info_with_optional_comp_hash(model_with_hash, Some("hash-a")),
+            model_info_with_optional_comp_hash(next_model_without_hash, /*comp_hash*/ None),
+        ],
+    };
 
     let request_log = mount_sse_sequence(
         &server,
@@ -3152,6 +3132,9 @@ async fn pre_sampling_compact_skips_when_either_comp_hash_is_missing() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(model_without_hash)
         .with_config(move |config| {
@@ -3200,7 +3183,6 @@ async fn pre_sampling_compact_skips_when_either_comp_hash_is_missing() {
     .await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests
             .iter()
@@ -3225,16 +3207,12 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
     let previous_model = "gpt-5.4";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_context_window(previous_model, /*context_window*/ 273_000),
-                model_info_with_context_window(next_model, /*context_window*/ 125_000),
-            ],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_context_window(previous_model, /*context_window*/ 273_000),
+            model_info_with_context_window(next_model, /*context_window*/ 125_000),
+        ],
+    };
 
     let request_log = mount_sse_sequence(
         &server,
@@ -3257,6 +3235,9 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -3293,7 +3274,6 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
     assert_compaction_uses_turn_lifecycle_id(&test.codex).await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests.len(),
         3,
@@ -3319,16 +3299,12 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
     let previous_model = "gpt-5.4";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_context_window(previous_model, /*context_window*/ 273_000),
-                model_info_with_context_window(next_model, /*context_window*/ 125_000),
-            ],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_context_window(previous_model, /*context_window*/ 273_000),
+            model_info_with_context_window(next_model, /*context_window*/ 125_000),
+        ],
+    };
 
     let request_log = mount_sse_sequence(
         &server,
@@ -3351,6 +3327,9 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut initial_builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -3417,7 +3396,6 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
     assert_compaction_uses_turn_lifecycle_id(&resumed.codex).await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests.len(),
         3,
@@ -3440,16 +3418,12 @@ async fn pre_sampling_compact_recovers_comp_hash_after_resume() {
     let previous_model = "gpt-5.4";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_optional_comp_hash(previous_model, Some("hash-a")),
-                model_info_with_optional_comp_hash(next_model, Some("hash-b")),
-            ],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_optional_comp_hash(previous_model, Some("hash-a")),
+            model_info_with_optional_comp_hash(next_model, Some("hash-b")),
+        ],
+    };
 
     let request_log = mount_sse_sequence(
         &server,
@@ -3472,6 +3446,9 @@ async fn pre_sampling_compact_recovers_comp_hash_after_resume() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut initial_builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -3548,7 +3525,6 @@ async fn pre_sampling_compact_recovers_comp_hash_after_resume() {
     assert_compaction_uses_turn_lifecycle_id(&resumed.codex).await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests.len(),
         3,
@@ -3571,16 +3547,12 @@ async fn pre_sampling_compact_skips_missing_comp_hash_after_resume() {
     let previous_model = "gpt-5.4";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_optional_comp_hash(previous_model, /*comp_hash*/ None),
-                model_info_with_optional_comp_hash(next_model, Some("hash-b")),
-            ],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_optional_comp_hash(previous_model, /*comp_hash*/ None),
+            model_info_with_optional_comp_hash(next_model, Some("hash-b")),
+        ],
+    };
 
     let request_log = mount_sse_sequence(
         &server,
@@ -3599,6 +3571,9 @@ async fn pre_sampling_compact_skips_missing_comp_hash_after_resume() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut initial_builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -3676,7 +3651,6 @@ async fn pre_sampling_compact_skips_missing_comp_hash_after_resume() {
     .await;
 
     let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
     assert_eq!(
         requests
             .iter()

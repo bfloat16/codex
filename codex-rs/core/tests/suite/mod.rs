@@ -95,6 +95,8 @@ mod interrupt_hooks;
 mod items;
 mod json_result;
 mod live_cli;
+#[path = "local_model_catalog_tests.rs"]
+mod local_model_catalog;
 mod mcp_auth_elicitation;
 mod mcp_auth_refresh;
 mod mcp_optional_startup_grace;

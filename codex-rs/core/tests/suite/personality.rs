@@ -2,8 +2,6 @@ use codex_config::types::Personality;
 use codex_core::TurnInputRequest;
 use codex_features::Feature;
 use codex_models_manager::bundled_models_response;
-use codex_models_manager::manager::RefreshStrategy;
-use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::model_info::BASE_INSTRUCTIONS;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -24,7 +22,6 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse_completed;
@@ -36,9 +33,6 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
-use tokio::time::Duration;
-use tokio::time::Instant;
-use tokio::time::sleep;
 use wiremock::BodyPrintLimit;
 use wiremock::MockServer;
 
@@ -501,15 +495,14 @@ async fn disabled_personality_sends_remote_default_instructions() -> anyhow::Res
             personality_pragmatic: Some("pragmatic remote personality".to_string()),
         });
     }
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![remote_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![remote_model],
+    };
     let response = mount_sse_once(&server, sse_completed("resp-1")).await;
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             config
@@ -684,17 +677,16 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
         multi_agent_reasoning_effort: None,
     };
 
-    let _models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![remote_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![remote_model],
+    };
 
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config
@@ -705,8 +697,6 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
             config.personality = Some(Personality::Friendly);
         });
     let test = builder.build(&server).await?;
-
-    wait_for_model_available(&test.thread_manager.get_models_manager(), remote_slug).await;
 
     test.codex
         .start_or_steer_turn(read_only_text_turn_with_personality(
@@ -816,13 +806,9 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
         multi_agent_reasoning_effort: None,
     };
 
-    let _models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![remote_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![remote_model],
+    };
 
     let resp_mock = mount_sse_sequence(
         &server,
@@ -831,6 +817,9 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
     .await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config
@@ -840,8 +829,6 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
             config.model = Some("gpt-5.4".to_string());
         });
     let test = builder.build(&server).await?;
-
-    wait_for_model_available(&test.thread_manager.get_models_manager(), remote_slug).await;
 
     test.codex
         .start_or_steer_turn(read_only_text_turn(
@@ -895,23 +882,4 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
     );
 
     Ok(())
-}
-
-async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let models = manager
-            .list_models(
-                RefreshStrategy::OnlineIfUncached,
-                codex_core::test_support::default_http_client_factory(),
-            )
-            .await;
-        if models.iter().any(|model| model.model == slug) {
-            return;
-        }
-        if Instant::now() >= deadline {
-            panic!("timed out waiting for the remote model {slug} to appear");
-        }
-        sleep(Duration::from_millis(25)).await;
-    }
 }

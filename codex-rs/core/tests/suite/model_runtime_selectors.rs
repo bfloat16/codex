@@ -20,7 +20,6 @@ use core_test_support::responses;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
@@ -30,9 +29,6 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
-use tokio::time::Duration;
-use tokio::time::Instant;
-use tokio::time::sleep;
 
 const CHILD_MODEL: &str = "test-multi-agent-child";
 const ROOT_MODEL: &str = "test-multi-agent-root";
@@ -70,26 +66,16 @@ fn tool_names(body: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) -> ModelPreset {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        if let Some(model) = manager
-            .list_models(
-                RefreshStrategy::Online,
-                codex_core::test_support::default_http_client_factory(),
-            )
-            .await
-            .iter()
-            .find(|model| model.model == slug)
-            .cloned()
-        {
-            return model;
-        }
-        if Instant::now() >= deadline {
-            panic!("timed out waiting for the remote model {slug} to appear");
-        }
-        sleep(Duration::from_millis(25)).await;
-    }
+async fn catalog_model(manager: &SharedModelsManager, slug: &str) -> ModelPreset {
+    manager
+        .list_models(
+            RefreshStrategy::Offline,
+            codex_core::test_support::default_http_client_factory(),
+        )
+        .await
+        .into_iter()
+        .find(|model| model.model == slug)
+        .expect("configured model should be available")
 }
 
 async fn response_for_remote_model(
@@ -98,13 +84,9 @@ async fn response_for_remote_model(
 ) -> Result<RemoteModelResponse> {
     let server = responses::start_mock_server().await;
     let model_slug = remote_model.slug.clone();
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![remote_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![remote_model],
+    };
     let response_mock = mount_sse_once(
         &server,
         sse(vec![
@@ -116,13 +98,15 @@ async fn response_for_remote_model(
     .await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(configure);
     let test = builder.build(&server).await?;
     let models_manager = test.thread_manager.get_models_manager();
-    let available_model = wait_for_model_available(&models_manager, &model_slug).await;
+    let available_model = catalog_model(&models_manager, &model_slug).await;
     assert_eq!(available_model.model, model_slug);
-    assert_eq!(models_mock.requests().len(), 1);
 
     submit_thread_settings(
         &test.codex,
@@ -273,13 +257,9 @@ async fn unsupported_code_mode_warning_is_emitted_each_turn() -> Result<()> {
 
     let server = responses::start_mock_server().await;
     let model_slug = "test-tool-mode-warning-each-turn";
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![remote_model(model_slug)],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![remote_model(model_slug)],
+    };
     let response_mock = mount_sse_sequence(
         &server,
         vec![
@@ -297,6 +277,9 @@ async fn unsupported_code_mode_warning_is_emitted_each_turn() -> Result<()> {
     )
     .await;
     let test = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config
@@ -307,9 +290,8 @@ async fn unsupported_code_mode_warning_is_emitted_each_turn() -> Result<()> {
         .build(&server)
         .await?;
     let models_manager = test.thread_manager.get_models_manager();
-    let available_model = wait_for_model_available(&models_manager, model_slug).await;
+    let available_model = catalog_model(&models_manager, model_slug).await;
     assert_eq!(available_model.model, model_slug);
-    assert_eq!(models_mock.requests().len(), 1);
 
     submit_thread_settings(
         &test.codex,
@@ -417,13 +399,9 @@ async fn remote_multi_agent_selector_uses_model_selected_before_first_turn() -> 
     initial_model.multi_agent_version = Some(MultiAgentVersion::V1);
     let mut selected_model = remote_model(CHILD_MODEL);
     selected_model.multi_agent_version = Some(MultiAgentVersion::V2);
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![initial_model, selected_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![initial_model, selected_model],
+    };
     let response_mock = mount_sse_once(
         &server,
         sse(vec![
@@ -435,18 +413,15 @@ async fn remote_multi_agent_selector_uses_model_selected_before_first_turn() -> 
     .await;
 
     let mut builder = test_codex()
+        .with_config(move |config| {
+            config.model_catalog = Some(model_catalog);
+        })
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some(ROOT_MODEL.to_string());
         });
     let test = builder.build(&server).await?;
-    assert_eq!(
-        (
-            models_mock.requests().len(),
-            test.codex.multi_agent_version(),
-        ),
-        (1, None)
-    );
+    assert_eq!(test.codex.multi_agent_version(), None);
 
     submit_thread_settings(
         &test.codex,
@@ -471,7 +446,6 @@ async fn remote_multi_agent_selector_uses_model_selected_before_first_turn() -> 
 
     assert_eq!(
         (
-            models_mock.requests().len(),
             test.codex.multi_agent_version(),
             tool_names(
                 &response_mock
@@ -481,7 +455,7 @@ async fn remote_multi_agent_selector_uses_model_selected_before_first_turn() -> 
             )
             .contains(&MULTI_AGENT_V2_NAMESPACE.to_string()),
         ),
-        (1, Some(MultiAgentVersion::V2), true)
+        (Some(MultiAgentVersion::V2), true)
     );
 
     Ok(())
