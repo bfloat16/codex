@@ -1951,7 +1951,7 @@ impl TestAppServerBuilder {
             environment,
             program,
             mut env_overrides,
-            args,
+            mut args,
             exec_server_delay,
         } = self;
         let (codex_home, owned_codex_home) = match codex_home {
@@ -1964,6 +1964,16 @@ impl TestAppServerBuilder {
                 )
             }
         };
+        let catalog_path = codex_home.join("models.json");
+        if catalog_path.is_file() {
+            args.extend([
+                "-c".to_string(),
+                format!(
+                    "model_catalog_json={}",
+                    serde_json::to_string(&catalog_path.to_string_lossy())?
+                ),
+            ]);
+        }
         let attribution_settings_server = if codex_home.join("auth.json").is_file() {
             let config_path = codex_home.join("config.toml");
             let config = std::fs::read_to_string(&config_path)?;

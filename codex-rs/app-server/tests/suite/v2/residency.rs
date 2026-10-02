@@ -1,7 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use app_test_support::TestAppServer;
-use app_test_support::write_models_cache;
+use app_test_support::write_model_catalog;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
@@ -60,7 +60,7 @@ supports_websockets = {supports_websockets}
 "#
     );
     std::fs::write(codex_home.join("config.toml"), config)?;
-    write_models_cache(codex_home)?;
+    write_model_catalog(codex_home)?;
     Ok(())
 }
 

@@ -5,7 +5,7 @@ use app_test_support::TestAppServer;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
 use app_test_support::to_response;
-use app_test_support::write_models_cache_with_models;
+use app_test_support::write_model_catalog_with_models;
 use codex_app_server_protocol::DynamicToolCallOutputContentItem;
 use codex_app_server_protocol::DynamicToolCallParams;
 use codex_app_server_protocol::DynamicToolCallResponse;
@@ -601,7 +601,7 @@ async fn start_function_dynamic_tool_call(call_id: &str) -> Result<PendingDynami
     let mut model_info =
         codex_core::test_support::construct_model_info_offline("mock-model", &config);
     model_info.input_modalities.push(InputModality::Audio);
-    write_models_cache_with_models(codex_home.path(), vec![model_info])?;
+    write_model_catalog_with_models(codex_home.path(), vec![model_info])?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())

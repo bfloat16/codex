@@ -5,7 +5,7 @@ use anyhow::Result;
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::TestAppServer;
 use app_test_support::write_chatgpt_auth;
-use app_test_support::write_models_cache;
+use app_test_support::write_model_catalog;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::Model;
@@ -60,10 +60,7 @@ fn model_from_preset(preset: &ModelPreset) -> Model {
             .collect(),
         default_reasoning_effort: preset.default_reasoning_effort.clone(),
         input_modalities: preset.input_modalities.clone(),
-        // `write_models_cache()` round-trips through a simplified ModelInfo fixture that does not
-        // preserve personality placeholders in base instructions, so app-server list results from
-        // cache report `supports_personality = false`.
-        // todo(sayan): fix, maybe make roundtrip use ModelInfo only
+        // The local fixture replaces personality placeholders with plain base instructions.
         supports_personality: false,
         multi_agent_version: preset.multi_agent_version.map(Into::into),
         additional_speed_tiers: preset.additional_speed_tiers.clone(),
@@ -101,7 +98,7 @@ fn expected_visible_models() -> Vec<Model> {
 #[tokio::test]
 async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
     let codex_home = TempDir::new()?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .without_auto_env()
@@ -131,7 +128,7 @@ async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
 #[tokio::test]
 async fn list_models_includes_hidden_models() -> Result<()> {
     let codex_home = TempDir::new()?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .without_auto_env()
@@ -286,7 +283,7 @@ openai_base_url = "{server_uri}/v1"
 #[tokio::test]
 async fn list_models_pagination_works() -> Result<()> {
     let codex_home = TempDir::new()?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .without_auto_env()
@@ -332,7 +329,7 @@ async fn list_models_pagination_works() -> Result<()> {
 #[tokio::test]
 async fn list_models_rejects_invalid_cursor() -> Result<()> {
     let codex_home = TempDir::new()?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .without_auto_env()

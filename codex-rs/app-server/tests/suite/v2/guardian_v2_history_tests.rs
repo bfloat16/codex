@@ -8,7 +8,7 @@ use app_test_support::ChatGptAuthFixture;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::write_chatgpt_auth;
-use app_test_support::write_models_cache_with_models;
+use app_test_support::write_model_catalog_with_models;
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
@@ -314,7 +314,7 @@ async fn guardians_retain_evidence_after_compaction_and_discard_it_after_rollbac
         info
     })
     .collect();
-    write_models_cache_with_models(codex_home.path(), models)?;
+    write_model_catalog_with_models(codex_home.path(), models)?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("access-chatgpt").plan_type("pro"),

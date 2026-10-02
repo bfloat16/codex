@@ -5,7 +5,7 @@ use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_repeating_assistant;
 use app_test_support::create_mock_responses_server_sequence;
 use app_test_support::create_request_user_input_sse_response;
-use app_test_support::write_models_cache_with_models;
+use app_test_support::write_model_catalog_with_models;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
@@ -240,7 +240,7 @@ async fn thread_revert_does_not_emit_resume_model_warning() -> Result<()> {
         codex_core::test_support::construct_model_info_offline("current-model", &config);
     let previous_model =
         codex_core::test_support::construct_model_info_offline("previous-model", &config);
-    write_models_cache_with_models(codex_home.path(), vec![current_model, previous_model])?;
+    write_model_catalog_with_models(codex_home.path(), vec![current_model, previous_model])?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build()
@@ -313,7 +313,7 @@ async fn thread_revert_preserves_model_selected_multi_agent_version(restart: boo
     let config = load_default_config_for_test(&codex_home).await;
     let mut model = codex_core::test_support::construct_model_info_offline("mock-model", &config);
     model.multi_agent_version = Some(MultiAgentVersion::V2);
-    write_models_cache_with_models(codex_home.path(), vec![model])?;
+    write_model_catalog_with_models(codex_home.path(), vec![model])?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build()

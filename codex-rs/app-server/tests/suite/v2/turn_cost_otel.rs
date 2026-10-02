@@ -4,7 +4,7 @@
 use anyhow::Result;
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::write_chatgpt_auth;
-use app_test_support::write_models_cache;
+use app_test_support::write_model_catalog;
 use codex_app_server::in_process;
 use codex_app_server::in_process::InProcessServerEvent;
 use codex_app_server::in_process::InProcessStartArgs;
@@ -113,7 +113,7 @@ metrics_exporter = {{ otlp-http = {{ endpoint = "{}/metrics", protocol = "json" 
             .chatgpt_user_id("user-a"),
         AuthCredentialsStoreMode::File,
     )?;
-    write_models_cache(home.path())?;
+    write_model_catalog(home.path())?;
     let loader_overrides = LoaderOverrides::without_managed_config_for_tests();
     let config = Arc::new(
         ConfigBuilder::default()

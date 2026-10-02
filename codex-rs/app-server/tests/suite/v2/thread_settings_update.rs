@@ -4,7 +4,7 @@ use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
-use app_test_support::write_models_cache;
+use app_test_support::write_model_catalog;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SandboxPolicy;
@@ -47,7 +47,7 @@ async fn thread_settings_update_emits_notification_and_updates_future_turns() ->
     .await;
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
     let (model_id, service_tier_id) = service_tier_model_and_tier_id()?;
 
     let mut mcp = TestAppServer::builder()
@@ -383,7 +383,7 @@ async fn thread_settings_update_null_service_tier_uses_default() -> Result<()> {
     .await;
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
     let (model_id, service_tier_id) = service_tier_model_and_tier_id()?;
 
     let mut mcp = TestAppServer::builder()

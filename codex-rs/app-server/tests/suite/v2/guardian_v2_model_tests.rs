@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
-use app_test_support::write_models_cache_with_models;
+use app_test_support::write_model_catalog_with_models;
 use axum::Router;
 use axum::routing::get;
 use codex_app_server_protocol::ApprovalsReviewer;
@@ -77,7 +77,7 @@ async fn computer_use_scoring_follows_model_review_requirement(
     let mut reviewed_model =
         codex_core::test_support::construct_model_info_offline(REVIEWED_MODEL, &config);
     reviewed_model.node_repl_auto_review_required = true;
-    write_models_cache_with_models(codex_home.path(), vec![ordinary_model, reviewed_model])?;
+    write_model_catalog_with_models(codex_home.path(), vec![ordinary_model, reviewed_model])?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build_initialized_with_timeout(TIMEOUT)

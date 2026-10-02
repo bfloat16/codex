@@ -8,7 +8,7 @@ use app_test_support::create_exec_command_sse_response;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_sequence;
 use app_test_support::encode_id_token;
-use app_test_support::write_models_cache;
+use app_test_support::write_model_catalog;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::InitializeCapabilities;
@@ -97,7 +97,7 @@ supports_websockets = false
 "#
         ))
         .write(codex_home.path())?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .with_env_overrides(&[("OPENAI_API_KEY", None)])

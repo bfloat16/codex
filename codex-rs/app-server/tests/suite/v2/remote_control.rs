@@ -1341,44 +1341,36 @@ async fn read_enroll_request(listener: &TcpListener) -> Result<(String, BufReade
 }
 
 async fn read_http_request(listener: &TcpListener) -> Result<HttpRequest> {
+    let (stream, _) = listener.accept().await?;
+    let mut reader = BufReader::new(stream);
+
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line).await?;
+    let mut content_length = 0;
     loop {
-        let (stream, _) = listener.accept().await?;
-        let mut reader = BufReader::new(stream);
-
-        let mut request_line = String::new();
-        reader.read_line(&mut request_line).await?;
-        let mut content_length = 0;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).await?;
-            if line == "\r\n" {
-                break;
-            }
-            if let Some(value) = line
-                .trim_end()
-                .strip_prefix("content-length:")
-                .or_else(|| line.trim_end().strip_prefix("Content-Length:"))
-            {
-                content_length = value.trim().parse::<usize>()?;
-            }
+        let mut line = String::new();
+        reader.read_line(&mut line).await?;
+        if line == "\r\n" {
+            break;
         }
-        let mut body = vec![0; content_length];
-        if content_length > 0 {
-            reader.read_exact(&mut body).await?;
+        if let Some(value) = line
+            .trim_end()
+            .strip_prefix("content-length:")
+            .or_else(|| line.trim_end().strip_prefix("Content-Length:"))
+        {
+            content_length = value.trim().parse::<usize>()?;
         }
-
-        let request_line = request_line.trim_end().to_string();
-        if request_line.starts_with("GET ") && request_line.contains("/v1/models?") {
-            respond_with_json(reader.into_inner(), serde_json::json!({ "models": [] })).await?;
-            continue;
-        }
-
-        return Ok(HttpRequest {
-            request_line,
-            body: String::from_utf8(body)?,
-            reader,
-        });
     }
+    let mut body = vec![0; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body).await?;
+    }
+
+    Ok(HttpRequest {
+        request_line: request_line.trim_end().to_string(),
+        body: String::from_utf8(body)?,
+        reader,
+    })
 }
 
 async fn respond_with_json(stream: TcpStream, body: serde_json::Value) -> Result<()> {

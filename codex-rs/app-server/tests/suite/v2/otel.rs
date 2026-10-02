@@ -5,7 +5,7 @@ use app_test_support::ChatGptIdTokenClaims;
 use app_test_support::TestAppServer;
 use app_test_support::encode_id_token;
 use app_test_support::write_chatgpt_auth;
-use app_test_support::write_models_cache;
+use app_test_support::write_model_catalog;
 use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_config::types::AuthCredentialsStoreMode;
@@ -48,7 +48,7 @@ async fn account_switch_reloads_telemetry_collectors_and_preserves_trace_context
             .email(INITIAL_EMAIL),
         AuthCredentialsStoreMode::File,
     )?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
 
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())

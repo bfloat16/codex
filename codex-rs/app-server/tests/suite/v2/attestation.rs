@@ -4,7 +4,7 @@ use app_test_support::ChatGptAuthFixture;
 use app_test_support::TestAppServer;
 use app_test_support::to_response;
 use app_test_support::write_chatgpt_auth;
-use app_test_support::write_models_cache;
+use app_test_support::write_model_catalog;
 use codex_app_server_protocol::AttestationGenerateResponse;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::InitializeCapabilities;
@@ -56,7 +56,7 @@ async fn attestation_generate_round_trip_adds_header_to_responses_websocket_hand
     .await;
 
     let codex_home = TempDir::new()?;
-    write_models_cache(codex_home.path())?;
+    write_model_catalog(codex_home.path())?;
     create_chatgpt_websocket_config(
         codex_home.path(),
         &websocket_server.uri().replacen("ws://", "http://", 1),
