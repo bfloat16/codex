@@ -1062,6 +1062,42 @@ impl App {
         if self.abandoned_side_threads.contains(&thread_id) {
             return Ok(());
         }
+        if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
+            if matches!(notification, ServerNotification::ThreadReverted(_)) {
+                channel.pending_revert_notifications = channel
+                    .pending_revert_notifications
+                    .saturating_sub(/*rhs*/ 1);
+            } else if channel.pending_revert_notifications != 0
+                && matches!(
+                    notification,
+                    ServerNotification::TurnStarted(_)
+                        | ServerNotification::TurnCompleted(_)
+                        | ServerNotification::ModelRequestProgress(_)
+                        | ServerNotification::ItemStarted(_)
+                        | ServerNotification::ItemCompleted(_)
+                        | ServerNotification::AgentMessageDelta(_)
+                        | ServerNotification::PlanDelta(_)
+                        | ServerNotification::ReasoningSummaryTextDelta(_)
+                        | ServerNotification::ReasoningTextDelta(_)
+                        | ServerNotification::ReasoningSummaryPartAdded(_)
+                        | ServerNotification::TerminalInteraction(_)
+                        | ServerNotification::CommandExecutionOutputDelta(_)
+                        | ServerNotification::FileChangeOutputDelta(_)
+                        | ServerNotification::TurnDiffUpdated(_)
+                        | ServerNotification::TurnPlanUpdated(_)
+                        | ServerNotification::HookStarted(_)
+                        | ServerNotification::HookCompleted(_)
+                        | ServerNotification::Error(_)
+                        | ServerNotification::ModelSafetyBufferingUpdated(_)
+                        | ServerNotification::ItemGuardianApprovalReviewStarted(_)
+                        | ServerNotification::ItemGuardianApprovalReviewCompleted(_)
+                )
+            {
+                // The RPC response can precede delivery of old-runtime notifications to the
+                // app loop. The ordered thread/reverted event ends that obsolete event prefix.
+                return Ok(());
+            }
+        }
         if self.current_displayed_thread_id() == Some(thread_id)
             && let ServerNotification::TurnCompleted(notification) = &notification
         {
@@ -1304,6 +1340,13 @@ impl App {
         thread_id: ThreadId,
         request: ServerRequest,
     ) -> Result<()> {
+        if self
+            .thread_event_channels
+            .get(&thread_id)
+            .is_some_and(|channel| channel.pending_revert_notifications != 0)
+        {
+            return Ok(());
+        }
         let inactive_interactive_request = if self.active_thread_id != Some(thread_id) {
             self.interactive_request_for_thread_request(thread_id, &request)
                 .await?

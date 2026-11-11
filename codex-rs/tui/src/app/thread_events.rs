@@ -406,6 +406,9 @@ pub(super) struct ThreadEventChannel {
     pub(super) sender: mpsc::Sender<ThreadBufferedEvent>,
     pub(super) receiver: Option<mpsc::Receiver<ThreadBufferedEvent>>,
     pub(super) store: Arc<Mutex<ThreadEventStore>>,
+    /// Successful paginated rewinds whose ordered `thread/reverted` notification is still
+    /// queued in the app-server client. Turn events preceding those boundaries are obsolete.
+    pub(super) pending_revert_notifications: u32,
     attachment: ThreadEventAttachment,
 }
 
@@ -416,6 +419,7 @@ impl ThreadEventChannel {
             sender,
             receiver: Some(receiver),
             store: Arc::new(Mutex::new(ThreadEventStore::new(capacity))),
+            pending_revert_notifications: 0,
             attachment: ThreadEventAttachment::Live,
         }
     }
@@ -445,6 +449,7 @@ impl ThreadEventChannel {
             store: Arc::new(Mutex::new(ThreadEventStore::new_with_session(
                 capacity, session, turns,
             ))),
+            pending_revert_notifications: 0,
             attachment: ThreadEventAttachment::Live,
         }
     }

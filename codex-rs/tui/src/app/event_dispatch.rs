@@ -97,6 +97,7 @@ impl App {
                             }
                             self.scrollback_has_older_history =
                                 app_server.has_older_history(thread_id);
+                            self.discard_reverted_thread_events(thread_id, history_mode);
                             // An automatic Esc restore removes this turn only. A rewind picker
                             // opened in the meantime must not override its transcript boundary.
                             self.backtrack.pending_rollback = None;

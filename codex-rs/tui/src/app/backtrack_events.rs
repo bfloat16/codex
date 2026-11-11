@@ -25,6 +25,42 @@ pub(super) struct BacktrackRestoreRequest {
 }
 
 impl App {
+    pub(super) fn discard_reverted_thread_events(
+        &mut self,
+        thread_id: ThreadId,
+        history_mode: ThreadHistoryMode,
+    ) {
+        let Some(channel) = self.thread_event_channels.get_mut(&thread_id) else {
+            return;
+        };
+        if history_mode == ThreadHistoryMode::Paginated {
+            channel.pending_revert_notifications = channel
+                .pending_revert_notifications
+                .saturating_add(/*rhs*/ 1);
+        }
+        // The replay buffer and the UI receiver are separate queues. Replace the receiver as
+        // well, so buffered notifications and pending sends from the old runtime cannot render
+        // removed history or change the new turn's lifecycle after a successful rewind.
+        let (sender, receiver) = tokio::sync::mpsc::channel(super::THREAD_EVENT_CHANNEL_CAPACITY);
+        channel.sender = sender;
+        let previous = if self.active_thread_id == Some(thread_id) {
+            self.active_thread_rx.replace(receiver)
+        } else {
+            channel.receiver.replace(receiver)
+        };
+        if let Some(mut previous) = previous {
+            while let Ok(event) = previous.try_recv() {
+                match event {
+                    ThreadBufferedEvent::HistoryEntryResponse(_)
+                    | ThreadBufferedEvent::FeedbackSubmission(_) => {
+                        let _ = channel.sender.try_send(event);
+                    }
+                    ThreadBufferedEvent::Notification(_) | ThreadBufferedEvent::Request(_) => {}
+                }
+            }
+        }
+    }
+
     pub(super) async fn handle_backtrack_rollback_request(
         &mut self,
         tui: &mut tui::Tui,
@@ -258,6 +294,7 @@ impl App {
                         }
                     }
                     self.scrollback_has_older_history = app_server.has_older_history(thread_id);
+                    self.discard_reverted_thread_events(thread_id, history_mode);
                     if let Err(err) = app_server
                         .thread_file_change_discard(thread_id, target.before_turn_id.clone())
                         .await

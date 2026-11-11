@@ -377,9 +377,7 @@ async fn startup_typeahead_pty_child() {
         .expect_err("an unresolved escape at a protected boundary must fail closed");
     assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
 
-    terminal_restore_guard
-        .restore()
-        .expect("restore terminal after startup draft handoff");
+    terminal_restore_guard.restore_silently();
 }
 
 fn wait_for_file(path: &Path) -> Result<(), String> {

@@ -44,6 +44,8 @@ mod rate_limits;
 mod recap_generation;
 #[path = "tests/rewind_checkpoint_tests.rs"]
 mod rewind_checkpoint_tests;
+#[path = "tests/rewind_event_tests.rs"]
+mod rewind_event_tests;
 mod safety_buffering;
 #[path = "tests/session_lifecycle_requests.rs"]
 mod session_lifecycle_requests;
